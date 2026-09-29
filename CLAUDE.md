@@ -24,7 +24,10 @@ Raspberry Pi Debug Probe.
 
 ## Conventions
 
-- No `unsafe` outside `keelsign-ffi`. Every other crate has `#![forbid(unsafe_code)]`.
+- No `unsafe` outside `keelsign-ffi`, with one exception: `benches/stack-paint`
+  (measurement-only, never a dependency of a shipped crate; `deny(unsafe_code)` with one
+  `#[allow(unsafe_code)]` module, Arm targets only). Every other crate has
+  `#![forbid(unsafe_code)]`.
 - No panic paths in `no_std` code. `no_std` crates deny `clippy::panic`,
   `clippy::unwrap_used`, `clippy::expect_used`, `clippy::indexing_slicing`.
 - `cargo clippy --all-targets -- -D warnings` is clean; `cargo fmt --check` is clean.

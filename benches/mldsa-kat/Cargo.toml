@@ -1,0 +1,20 @@
+[package]
+name = "mldsa-kat"
+description = "ML-DSA-44/65 known-answer fixtures, case runner and cycle measurement for the SHA-34 benchmarks (not published)."
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# DWT cycle-counter helpers (`measure`), for the on-target benchmarks.
+cortex-m = ["dep:cortex-m"]
+
+[dependencies]
+# Pinned to a release that includes the fixes for CVE-2026-24850 (GHSA-5x2r-hc65-25f9,
+# fixed in 0.1.0-rc.4) and GHSA-h37v-hp6w-2pp8 (fixed in 0.1.0-rc.5); see CLAUDE.md.
+ml-dsa = { version = "=0.1.1", default-features = false }
+cortex-m = { version = "=0.7.9", optional = true }
+
+[lints]
+workspace = true
