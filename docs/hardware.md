@@ -3,7 +3,7 @@
 Development and test boards for keelsign (ticket SHA-31). Ordering is a human-only
 step; this page is the procedure and the record.
 
-## Bill of materials {#bom}
+## Bill of materials
 
 | Qty | Item | Role | Target | Suggested vendors |
 |---|---|---|---|---|
@@ -16,9 +16,9 @@ SKUs / manufacturer part numbers: verify at checkout against the vendor listing 
 board names above are the manufacturer product names). Add USB cables (USB-C and
 micro-USB) if not already on hand.
 
-## Ordering procedure {#ordering}
+## Ordering procedure
 
-1. Order every line of the [bill of materials](#bom), checking the SKU at checkout.
+1. Order every line of the [bill of materials](#bill-of-materials), checking the SKU at checkout.
 2. When each order ships, fill in the table below with vendor, order number and
    tracking number.
 3. Paste the completed table as a comment on Linear ticket SHA-31. The acceptance

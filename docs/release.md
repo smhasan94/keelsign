@@ -3,27 +3,27 @@
 Human-only steps for ticket SHA-31: creating the GitHub repository and reserving the
 crate names on crates.io. Agents never run these.
 
-## GitHub repository {#github-repo}
+## GitHub repository
 
-Create `smhasan94/keelsign`, push, open the PR and watch CI:
+The empty repository `smhasan94/keelsign` already exists and is the `origin` remote.
+Push, open the PR and watch CI:
 
 ```sh
 gh auth switch -u smhasan94            # or: gh auth login
-gh repo create smhasan94/keelsign --public --description "Post-quantum firmware signing kit (ML-DSA / LMS-HSS, MCUboot-compatible)"
 git push -u origin main
 git push -u origin hasansharukh/sha-31-e11-order-hardware-reserve-crate-names-create-repo-ci
 gh pr create --title "SHA-31: E1.1 — Order hardware, reserve crate names, create repo + CI"
 gh run watch
 ```
 
-If `gh repo create` did not add the `origin` remote, add it first:
-`git remote add origin https://github.com/smhasan94/keelsign.git`.
+If the repository is ever recreated from scratch:
+`gh repo create smhasan94/keelsign --public --description "Post-quantum firmware signing kit (ML-DSA / LMS-HSS, MCUboot-compatible)"`.
 
 CI (`.github/workflows/ci.yml`) must be green on the PR: fmt, clippy, tests, the
 network repo checks (`cargo test -p repo-checks -- --ignored`) and
 `cargo publish --dry-run` for both crates.
 
-## crates.io placeholders {#crates-io-placeholders}
+## crates.io placeholders
 
 Publish the `0.0.1` name-reservation placeholders of `keelsign-verify` and `keelsign`.
 Do this after the PR is merged, from a clean `main`.
