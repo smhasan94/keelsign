@@ -168,8 +168,11 @@ for example `probe-rs info --probe <VID:PID>`.
 4. On Linux, install the [udev rules](#probe-permissions).
 5. Host checks: `cargo test --workspace --locked`.
 6. Local tool checks: `cargo test -p repo-checks --locked -- --ignored` (checks the targets,
-   probe-rs 0.32.0, flip-link on `PATH`, and cross-builds both examples; it also runs a
-   publish dry run, which needs network access to crates.io).
+   probe-rs 0.32.0, flip-link on `PATH`, cross-builds both examples and both bench
+   projects, and runs the flash-size script; it also runs a publish dry run and the ML-DSA
+   fixture regeneration check, which need network access). The ignored
+   `three_run_logs_consistent_within_5_percent` fails with "no logs yet" until the board
+   logs are saved ([benchmarks.md](benchmarks.md#three-run-consistency)).
 7. Connect the nRF52840-DK, run `probe-rs list`, then
    `cd examples/nrf52840-hello && cargo run`; confirm `hello from keelsign` and
    the ticks, and LED1 blinking.
@@ -205,22 +208,42 @@ for example `probe-rs info --probe <VID:PID>`.
 
 ## On-target tests (embedded-test)
 
-On-target tests will use [`embedded-test`](https://crates.io/crates/embedded-test)
-`0.7.2` with its `embassy-010` feature (for embassy-executor 0.10), run through the same
-`probe-rs run` runner. Nothing in the repository uses it yet; the first on-target tests
-arrive in SHA-34, which adds the test binaries and their linker setup.
+On-target tests use [`embedded-test`](https://crates.io/crates/embedded-test) `0.7.2`
+(`default-features = false`, features `semihosting`, `panic-handler`, `defmt`), run
+through the same `probe-rs run` runner, which detects an embedded-test binary and runs
+each test case after a reset. The tests are synchronous: no embassy executor, so no
+`embassy-010` feature, and embedded-test's panic handler replaces `panic-probe`.
+
+The first on-target tests are the SHA-34 ML-DSA KATs and benchmarks in
+`benches/nrf52840-mldsa` and `benches/rp2350-mldsa` (standalone projects like the
+examples). Their `build.rs` passes the linker scripts with `cargo:rustc-link-arg=` (not
+`-bins`) and adds `-Tembedded-test.x`, so the test binary keeps its test-case section.
+Run them from the project directory with:
+
+```sh
+cd benches/nrf52840-mldsa   # or benches/rp2350-mldsa
+cargo test --release
+```
+
+The exact commands, the measurement method and the results are in
+[benchmarks.md](benchmarks.md).
 
 ## CI
 
 `.github/workflows/ci.yml` has two jobs:
 
-- `ci`: host fmt, clippy and tests for the root workspace, the packaging repo-checks
-  (`--test packaging -- --ignored`) and the publish dry runs.
+- `ci`: host fmt, clippy and tests for the root workspace (including the host ML-DSA
+  KATs in `benches/mldsa-kat`), the packaging repo-checks (`--test packaging -- --ignored`)
+  and the publish dry runs.
 - `cross-build`: for each example (`nrf52840-hello` on `thumbv7em-none-eabihf`,
   `rp2350-hello` on `thumbv8m.main-none-eabihf`) it installs the target and flip-link and
   runs `cargo fmt --check`, `cargo clippy --locked --target <triple> -- -D warnings` and
-  `cargo build --release --locked --target <triple>` in the example directory.
+  `cargo build --release --locked --target <triple>` in the example directory. For each
+  bench project (`benches/nrf52840-mldsa`, `benches/rp2350-mldsa`) it runs
+  `cargo fmt --check`, `cargo clippy --locked --target <triple> --all-targets -- -D warnings`,
+  `cargo test --no-run --release --locked --target <triple>` (builds the on-target test
+  binary without running it) and `cargo build --release --locked --target <triple> --bins`.
 
 CI never flashes a board. The ignored repo-checks tests (`toolchain::*`,
-`examples::*_cross_builds`) are for local machines; CI covers the cross-builds in the
-`cross-build` job instead.
+`examples::*_cross_builds`, `benches::*_cross_builds`, `benches::flash_sizes_script_runs`)
+are for local machines; CI covers the cross-builds in the `cross-build` job instead.
