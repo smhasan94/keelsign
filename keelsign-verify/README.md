@@ -1,7 +1,10 @@
 # keelsign-verify
 
-**Status: placeholder / name reservation.** This `0.0.1` release has no
-functionality. Do not depend on it.
+**Status: pre-release, API unstable.** Not yet usable to verify images. The current
+code holds the trusted-key set (lookup by key ID) and the post-quantum signature
+dispatch to a pluggable backend, with typed errors. The keelsign TLV IDs are
+provisional. The ML-DSA and LMS/HSS backends, TLV-area parsing and image hashing come
+in later releases. The `ml-dsa` feature is off by default.
 
 `keelsign-verify` will be the `no_std`, heap-free on-device verifier of the keelsign
 post-quantum firmware signing kit: it parses the MCUboot header and TLV area, hashes

@@ -27,8 +27,14 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      - name: cargo clippy (keelsign-verify/ml-dsa)
+        run: cargo clippy --workspace --all-targets --locked --features keelsign-verify/ml-dsa -- -D warnings
+
       - name: cargo test
         run: cargo test --workspace --locked
+
+      - name: cargo test (keelsign-verify, ml-dsa)
+        run: cargo test -p keelsign-verify --locked --features ml-dsa
 
       # Only the packaging tests: the other ignored repo-checks tests need the thumb
       # targets, probe-rs and flip-link; the cross-build job covers the example builds.
@@ -40,6 +46,39 @@ jobs:
 
       - name: publish dry-run keelsign
         run: cargo publish --dry-run --locked -p keelsign
+
+  # keelsign-verify (no_std, no heap) for both Cortex-M targets, with the `ml-dsa`
+  # feature off and on.
+  verify-cross:
+    name: keelsign-verify ${{ matrix.target }} (features "${{ matrix.features }}")
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: thumbv7em-none-eabihf
+            features: ""
+          - target: thumbv7em-none-eabihf
+            features: ml-dsa
+          - target: thumbv8m.main-none-eabihf
+            features: ""
+          - target: thumbv8m.main-none-eabihf
+            features: ml-dsa
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo clippy
+        run: cargo clippy -p keelsign-verify --lib --locked --target ${{ matrix.target }} --features "${{ matrix.features }}" -- -D warnings
+
+      - name: cargo build
+        run: cargo build -p keelsign-verify --release --locked --target ${{ matrix.target }} --features "${{ matrix.features }}"
 
   cross-build:
     name: cross-build ${{ matrix.project }} (${{ matrix.target }})
