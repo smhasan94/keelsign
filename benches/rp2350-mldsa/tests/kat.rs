@@ -25,6 +25,8 @@ const CPU_HZ: u32 = 150_000_000;
 /// Bytes left unpainted below the stack pointer inside `stack_paint::paint`, covering
 /// that function's own frame.
 const PAINT_MARGIN: u32 = 256;
+/// Cases in each on-target fixture (`scripts/gen_mldsa_vectors.py`, docs/benchmarks.md).
+const TARGET_CASES: u32 = 10;
 
 /// State handed from `#[init]` to the tests.
 pub struct Board {
@@ -67,6 +69,9 @@ fn kat(param_set: ParamSet, fixture: &[u8]) -> Result<(), &'static str> {
         summary.passed,
         summary.total
     );
+    if summary.total != TARGET_CASES {
+        return Err("fixture does not hold the expected number of cases");
+    }
     if summary.all_passed() {
         Ok(())
     } else {

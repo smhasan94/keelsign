@@ -44,6 +44,13 @@ pub mod arm {
 
     /// Paints [`PATTERN`] over the stack from `_stack_end` up to `margin` bytes below the
     /// current main stack pointer. `margin` must cover this function's own frame.
+    ///
+    /// Preconditions (not checked):
+    /// - the caller runs in thread mode on the main stack (MSP);
+    /// - the memory layout is flip-link's, with `_stack_end` = `ORIGIN(RAM)` and the stack
+    ///   growing down towards it;
+    /// - nothing else owns RAM below the stack pointer (no heap or other data there);
+    /// - no interrupt handler depends on memory below the stack pointer.
     pub fn paint(margin: u32) {
         let top = cortex_m::register::msp::read().saturating_sub(margin) as usize;
         let mut addr = stack_bottom();
@@ -58,6 +65,13 @@ pub mod arm {
 
     /// Scans up from `_stack_end` for the first word that no longer holds [`PATTERN`] and
     /// returns its distance below `sp0` (the stack pointer read before [`paint`]).
+    ///
+    /// Preconditions (not checked):
+    /// - the caller runs in thread mode on the main stack (MSP);
+    /// - the memory layout is flip-link's, with `_stack_end` = `ORIGIN(RAM)` and the stack
+    ///   growing down towards it;
+    /// - nothing else owns RAM below the stack pointer (no heap or other data there);
+    /// - no interrupt handler depends on memory below the stack pointer.
     pub fn high_water(sp0: u32) -> Watermark {
         let bottom = stack_bottom();
         let sp0 = sp0 as usize;

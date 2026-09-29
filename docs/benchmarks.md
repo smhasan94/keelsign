@@ -43,8 +43,9 @@ built `no_std` without alloc (`default-features = false`).
   `size_baseline`, per board, for the `release` profile (opt-level 3, fat LTO,
   codegen-units 1, debug 2; the primary column) and the `size` profile (release with
   opt-level `"s"`). All three bins run the HAL init, log one defmt line and black-box a
-  reference to both target fixtures, so the fixture bytes cancel out; the ML-DSA bins
-  add one black-boxed verify of the first valid fixture case. Measured with
+  reference to both target fixtures, then parse a fixture and find its first valid case
+  (the baseline only logs that case's `tc_id`), so the fixture bytes and the parser cancel
+  out; the ML-DSA bins add one black-boxed verify of that case. Measured with
   `scripts/elf_sizes.py` (pure Python; no llvm-tools needed).
 - **Peak RAM** = measured peak stack + static RAM delta (`.data + .bss + .uninit` of the
   ML-DSA bin minus the baseline; 0 B in every build below, since `ml-dsa` keeps all its
@@ -65,6 +66,8 @@ built `no_std` without alloc (`default-features = false`).
   ```
 
 ## Reproduce
+
+Every command block below starts from the repository root.
 
 Commands for the nRF52840-DK; for the Pico 2 W use `benches/rp2350-mldsa`, board name
 `rp2350` and target `thumbv8m.main-none-eabihf`. The on-target tests refuse to build
@@ -105,7 +108,7 @@ This runs `mldsa44_bench` and `mldsa65_bench`, which log one line per case:
 BENCH board=nrf52840 set=ML-DSA-44 src=wycheproof tc=147 msg_len=11 expect_valid=true ok=true cycles=… us=… peak_stack=… saturated=false
 ```
 
-Summarise a log into results rows:
+Summarise a log into results rows (from the repository root, like every block here):
 
 ```sh
 python3 scripts/bench_summarize.py docs/bench-logs/nrf52840-run1.txt
@@ -124,7 +127,8 @@ cargo test -p repo-checks --locked --test benchmarks_doc -- --ignored three_run_
 ```
 
 It passes when every case's `cycles` and `peak_stack` vary by at most 5 % (max / min − 1)
-across the three runs.
+across the three runs. The 5 % rule is applied to cycles as well as to peak stack, which
+is stricter than the ticket's wording (peak stack only).
 
 ### Flash footprint
 
@@ -140,7 +144,8 @@ No board needed. The `Δ flash` column is the figure in [Results](#results).
 
 ### Static stack frame estimate
 
-Provisional, not the decision (see below). Nightly only, not run in CI:
+Exact compiled frame sizes (the second condition of the decision rule); nightly only,
+not run in CI:
 
 ```sh
 cd benches/nrf52840-mldsa
@@ -155,27 +160,28 @@ python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/relea
 
 ## Results
 
-Cycles and stack need the boards; flash is measured from the cross-built ELFs (stable
-Rust 1.91.1). Static frame: see the next sections.
+Cycles and measured stack need the boards; flash is measured from the cross-built ELFs
+(stable Rust 1.91.1). Static frame: the compiled `verify_case` frame, see
+[Static stack frame estimate](#static-stack-frame-estimate-provisional).
 
-| Board | Set | Verify cycles (headline) | Verify time | Peak stack (measured) | Static frame (provisional) | Flash Δ release | Flash Δ size | Peak RAM |
+| Board | Set | Verify cycles (headline) | Verify time | Peak stack (measured) | Static frame (compiled) | Flash Δ release | Flash Δ size | Peak RAM |
 |---|---|---|---|---|---|---|---|---|
-| nrf52840 | ML-DSA-44 | pending (hardware) | pending (hardware) | pending (hardware) | 93,448 B | 34,164 B | 11,412 B | pending (hardware) |
-| nrf52840 | ML-DSA-65 | pending (hardware) | pending (hardware) | pending (hardware) | 153,072 B | 37,904 B | 11,356 B | pending (hardware) |
-| rp2350 | ML-DSA-44 | pending (hardware) | pending (hardware) | pending (hardware) | 93,448 B | 34,128 B | 11,360 B | pending (hardware) |
-| rp2350 | ML-DSA-65 | pending (hardware) | pending (hardware) | pending (hardware) | 153,072 B | 37,864 B | 11,304 B | pending (hardware) |
+| nrf52840 | ML-DSA-44 | pending (hardware) | pending (hardware) | pending (hardware) | 93,448 B | 33,756 B | 10,992 B | pending (hardware) |
+| nrf52840 | ML-DSA-65 | pending (hardware) | pending (hardware) | pending (hardware) | 153,072 B | 37,496 B | 10,936 B | pending (hardware) |
+| rp2350 | ML-DSA-44 | pending (hardware) | pending (hardware) | pending (hardware) | 93,448 B | 33,760 B | 10,988 B | pending (hardware) |
+| rp2350 | ML-DSA-65 | pending (hardware) | pending (hardware) | pending (hardware) | 153,072 B | 37,496 B | 10,932 B | pending (hardware) |
 
 Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
 
 | Board / profile | `size_baseline` flash | `size_mldsa44` flash | `size_mldsa65` flash | Δ ML-DSA-44 | Δ ML-DSA-65 |
 |---|---|---|---|---|---|
-| nrf52840 / release | 138,320 | 172,484 | 176,224 | 34,164 | 37,904 |
-| nrf52840 / size | 137,728 | 149,140 | 149,084 | 11,412 | 11,356 |
-| rp2350 / release | 139,508 | 173,636 | 177,372 | 34,128 | 37,864 |
-| rp2350 / size | 138,424 | 149,784 | 149,728 | 11,360 | 11,304 |
+| nrf52840 / release | 138,728 | 172,484 | 176,224 | 33,756 | 37,496 |
+| nrf52840 / size | 138,148 | 149,140 | 149,084 | 10,992 | 10,936 |
+| rp2350 / release | 139,876 | 173,636 | 177,372 | 33,760 | 37,496 |
+| rp2350 / size | 138,796 | 149,784 | 149,728 | 10,988 | 10,932 |
 
-The baselines include the two embedded target fixtures (135,414 B of `.rodata`), which
-cancel out of the deltas.
+The baselines include the two embedded target fixtures (135,414 B of fixture data in
+total, placed in `.rodata`) and the fixture parser, which cancel out of the deltas.
 
 ## Three-run consistency
 
@@ -184,8 +190,10 @@ Pending (hardware): three saved runs per board in `docs/bench-logs/`, checked wi
 
 ## Static stack frame estimate (provisional)
 
-**Provisional, not the decision.** Per-function frame sizes from nightly
-`-Z emit-stack-sizes` (release profile: opt-level 3, fat LTO), read by
+These are exact compiled frame sizes, the second condition of the
+[decision rule](#decision); "provisional" in the heading only means that the on-board
+watermark, the rule's first condition, is still pending. Per-function frame sizes from
+nightly `-Z emit-stack-sizes` (release profile: opt-level 3, fat LTO), read by
 `scripts/stack_frames.py`. These are own-frame sizes without a call graph: the
 `verify_case` figure is the frame LLVM reserves for verify with everything it inlined
 (key decode, matrix A, signature decode, the verify arithmetic); the callees it still
@@ -199,8 +207,8 @@ calls add at most a few KB each on top.
 | rp2350 | ML-DSA-65 | 153,072 B | 4,168 B | 522,960 B |
 
 Both sets fit in the stack available on both boards, so the on-target runs can measure
-them. The static ML-DSA-44 frame is already about 2.9 times the 32 KB budget in the
-decision rule; the measured watermark decides.
+them. The ML-DSA-44 frame is about 2.9 times the 32 KB limit in the decision rule, which
+settles the decision as NO-GO whatever the measured watermark turns out to be.
 
 ## pqm4 comparison
 
@@ -229,12 +237,24 @@ watermark (Peak stack, measured, on both boards) and the static reserved frame a
 ≤ 32 KB (32,768 B). Otherwise it is NO-GO, and a NO-GO links SHA-170 (re-plan
 LMS-first).
 
-Decision: PENDING (needs hardware)
+Decision: NO-GO — [SHA-170](https://linear.app/shakooky/issue/SHA-170) re-plans keelsign LMS-first; the path back to ML-DSA is [SHA-169](https://linear.app/shakooky/issue/SHA-169) (low-stack ML-DSA verify).
+
+Why now, before the board runs: the rule needs both conditions, and the second one
+already fails. The compiled `verify_case<MlDsa44>` frame is 93,448 B, about 2.9 times the
+32,768 B limit. That is the exact stack the function reserves in the documented nightly
+build (see [Static stack frame estimate](#static-stack-frame-estimate-provisional)), not
+an estimate that a board measurement could revise, so no measured watermark can change
+the outcome. The frame was taken with the documented nightly compiler; the stable build's
+frame may differ slightly, but not by anything close to that 2.9× margin.
+
+The board runs still fill in the cycles and the measured peak stack in
+[Results](#results) for the record (the `pending (hardware)` cells).
 
 ## Follow-ups
 
 Filed in Linear (project keelsign):
 
-- **SHA-169**: low-stack ML-DSA verify (an upstream issue against RustCrypto `ml-dsa`, or
+- **[SHA-169](https://linear.app/shakooky/issue/SHA-169)**: low-stack ML-DSA verify (an upstream issue against RustCrypto `ml-dsa`, or
   an alternative implementation).
-- **SHA-170**: re-plan keelsign LMS-first if the decision is NO-GO.
+- **[SHA-170](https://linear.app/shakooky/issue/SHA-170)**: re-plan keelsign LMS-first
+  (the decision above is NO-GO).

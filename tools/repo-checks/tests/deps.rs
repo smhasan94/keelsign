@@ -141,19 +141,45 @@ fn manifests(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// True when the manifest has `workspace = true` in its `[lints]` table.
+fn lints_inherit_workspace(manifest: &str) -> bool {
+    let mut section = "";
+    for line in manifest.lines().map(str::trim) {
+        if line.starts_with('[') {
+            section = line;
+        } else if section == "[lints]" && line.replace(' ', "") == "workspace=true" {
+            return true;
+        }
+    }
+    false
+}
+
 #[test]
 fn stack_paint_is_only_unsafe_exception_and_not_shipped() {
+    assert!(lints_inherit_workspace(
+        "[package]\n[lints]\nworkspace = true\n"
+    ));
+    assert!(!lints_inherit_workspace("[workspace]\nworkspace = true\n"));
+    assert!(!lints_inherit_workspace("[package]\nname = \"x\"\n"));
+
     let root = workspace_root();
     let mut all = Vec::new();
     manifests(&root, &mut all);
     assert!(!all.is_empty());
 
-    // Only stack-paint relaxes `unsafe_code` from "forbid".
+    // Every manifest sets `unsafe_code` (or inherits the workspace lints), and only
+    // stack-paint relaxes it from "forbid".
     for manifest in &all {
         let rel = manifest.strip_prefix(&root).expect("inside the repo");
         let text = fs::read_to_string(manifest).expect("read manifest");
+        let is_stack_paint = rel == Path::new("benches/stack-paint/Cargo.toml");
+        assert!(
+            (lints_inherit_workspace(&text) && !is_stack_paint)
+                || text.lines().any(|l| l.starts_with("unsafe_code")),
+            "{}: set `[lints] workspace = true` or an explicit `unsafe_code = \"forbid\"`",
+            rel.display()
+        );
         for line in text.lines().filter(|l| l.starts_with("unsafe_code")) {
-            let is_stack_paint = rel == Path::new("benches/stack-paint/Cargo.toml");
             if is_stack_paint {
                 assert_eq!(line, "unsafe_code = \"deny\"", "stack-paint: {line}");
             } else {
