@@ -54,7 +54,7 @@ mod tests {
             assert_eq!(Algorithm::from_tlv_type(tlv), Some(alg), "{tlv:#06x}");
             assert_eq!(alg.tlv_type(), tlv, "{alg:?}");
         }
-        for alg in Algorithm::ALL {
+        for &alg in Algorithm::ALL {
             assert_eq!(Algorithm::from_tlv_type(alg.tlv_type()), Some(alg));
         }
         // Every other TLV type, the key-ID TLV included, maps to no algorithm.

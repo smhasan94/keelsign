@@ -20,7 +20,8 @@ pub enum Algorithm {
 
 impl Algorithm {
     /// Every algorithm, in TLV-ID order.
-    pub const ALL: [Algorithm; 3] = [Algorithm::MlDsa44, Algorithm::MlDsa65, Algorithm::LmsHss];
+    pub const ALL: &'static [Algorithm] =
+        &[Algorithm::MlDsa44, Algorithm::MlDsa65, Algorithm::LmsHss];
 
     /// The algorithm whose signature TLV has type `tlv_type`, if any.
     pub const fn from_tlv_type(tlv_type: u16) -> Option<Self> {

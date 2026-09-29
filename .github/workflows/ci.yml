@@ -73,6 +73,8 @@ jobs:
           components: clippy
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}-features-${{ matrix.features || 'none' }}
 
       - name: cargo clippy
         run: cargo clippy -p keelsign-verify --lib --locked --target ${{ matrix.target }} --features "${{ matrix.features }}" -- -D warnings

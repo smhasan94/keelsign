@@ -12,9 +12,15 @@ use crate::trusted_keys::{TrustedKey, TrustedKeys};
 pub trait Backend {
     /// Verify `signature` over `message` under `public_key`.
     ///
-    /// Return `Ok(())` if it verifies, [`Error::SignatureInvalid`] if it does not and
+    /// `message` is expected to be the image digest, per SHA-37's signing-mode decision
+    /// (PROVISIONAL); signing the whole image instead would need a streaming interface.
+    /// `signature` is the raw signature TLV value, passed through unchanged (it may be
+    /// empty; rejecting it is the backend's job).
+    ///
+    /// Return `Ok(())` if it verifies, [`Error::SignatureInvalid`] if it does not,
     /// [`Error::UnsupportedParameterSet`] if the key or signature uses a parameter set
-    /// the backend cannot handle.
+    /// the backend cannot handle, and [`Error::UnsupportedAlgorithm`]`(algorithm)` if
+    /// the backend does not implement `algorithm`.
     fn verify(
         &self,
         algorithm: Algorithm,
@@ -52,6 +58,9 @@ where
 {
     let mut key_id = None;
     let mut signature = None;
+    // Only the key-ID and PQ signature TLVs are recognised; other keelsign-range IDs
+    // are currently ignored. Any new keelsign TLV with verification meaning (e.g. one
+    // assigned by SHA-37) must be added to this scan.
     for (tlv_type, value) in tlvs {
         if tlv_type == TLV_KEELSIGN_KEY_ID {
             if key_id.replace(value).is_some() {
@@ -75,11 +84,13 @@ where
 /// Verify the post-quantum signature in `tlvs` over `message` with `backend`, and return
 /// the trusted key that verified it.
 ///
-/// In order, it requires:
-/// 1. exactly one post-quantum signature TLV ([`Error::MissingPqSignature`],
-///    [`Error::MultiplePqSignatures`]);
-/// 2. exactly one key-ID TLV of the right length ([`Error::MissingKeyId`],
-///    [`Error::MultipleKeyIds`], [`Error::InvalidKeyId`]);
+/// It first scans `tlvs` (see [`select_pq_signature`]), failing as soon as it sees a
+/// second key-ID TLV ([`Error::MultipleKeyIds`]) or a second post-quantum signature TLV
+/// ([`Error::MultiplePqSignatures`]), whichever comes first in TLV order. After the
+/// scan it requires, in order:
+/// 1. a post-quantum signature TLV ([`Error::MissingPqSignature`]);
+/// 2. a key-ID TLV ([`Error::MissingKeyId`]) of the right length
+///    ([`Error::InvalidKeyId`]);
 /// 3. a trusted key with that ID ([`Error::KeyNotTrusted`]);
 /// 4. the key's algorithm matching the signature TLV's ([`Error::KeyAlgorithmMismatch`]);
 /// 5. the algorithm being compiled in ([`Error::UnsupportedAlgorithm`]);
@@ -386,7 +397,7 @@ mod tests {
 
     #[test]
     fn dispatch_table_routes_every_tlv_id() {
-        for algorithm in Algorithm::ALL {
+        for &algorithm in Algorithm::ALL {
             let pk = pk_for(algorithm);
             let keys = TrustedKeys::<1>::new(&[key(algorithm, pk)]).unwrap();
             let backend = RecordingBackend::accepting();
@@ -528,6 +539,24 @@ mod tests {
                 assert_ne!(a, b, "`{name_a}` and `{name_b}` share a variant");
             }
         }
+    }
+
+    #[test]
+    fn empty_signature_reaches_backend_unchanged() {
+        // The dispatcher does not judge the signature bytes; rejecting an empty
+        // signature is the backend's job.
+        let backend = RecordingBackend::accepting();
+        let tlvs = [id_tlv(&LMS_PK_A), (TLV_LMS_HSS_SIG, Vec::new())];
+        assert_eq!(
+            run(&backend, &lms_keys(), &tlvs),
+            Ok(key(Algorithm::LmsHss, &LMS_PK_A))
+        );
+        let calls = backend.calls();
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].signature.is_empty());
+        assert_eq!(calls[0].algorithm, Algorithm::LmsHss);
+        assert_eq!(calls[0].public_key, LMS_PK_A);
+        assert_eq!(calls[0].message, MSG);
     }
 
     /// Supporting evidence for SHA-171 TP3 only; the end-to-end rotation test with real

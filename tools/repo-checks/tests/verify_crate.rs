@@ -30,21 +30,32 @@ fn ci_job(ci: &str, name: &str) -> String {
         .collect()
 }
 
-/// The Rust sources of keelsign-verify as (relative path, text).
+/// The Rust sources of keelsign-verify, subdirectories included, as (path relative to
+/// `keelsign-verify/src`, text).
 fn sources() -> Vec<(String, String)> {
-    let dir = workspace_root().join("keelsign-verify/src");
-    let mut out = Vec::new();
-    for entry in fs::read_dir(&dir).expect("read src").filter_map(Result::ok) {
-        let path = entry.path();
-        if path.extension().is_some_and(|e| e == "rs") {
+    fn walk(dir: &Path, rel: &str, out: &mut Vec<(String, String)>) {
+        let entries = fs::read_dir(dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display()));
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
             let name = path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .expect("UTF-8 file name")
                 .to_owned();
-            out.push((name, fs::read_to_string(&path).expect("read source")));
+            let rel = if rel.is_empty() {
+                name
+            } else {
+                format!("{rel}/{name}")
+            };
+            if path.is_dir() {
+                walk(&path, &rel, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push((rel, fs::read_to_string(&path).expect("read source")));
+            }
         }
     }
+    let mut out = Vec::new();
+    walk(&workspace_root().join("keelsign-verify/src"), "", &mut out);
     assert!(!out.is_empty(), "keelsign-verify/src has no sources");
     out
 }

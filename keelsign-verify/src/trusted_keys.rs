@@ -47,8 +47,12 @@ impl<'a, const N: usize> TrustedKeys<'a, N> {
     /// Build a key set from `keys`, computing each key ID.
     ///
     /// Fails with [`KeySetError::Capacity`] if there are more than `N` keys,
-    /// [`KeySetError::InvalidPublicKeyLength`] if a key's length is wrong for its
-    /// algorithm, and [`KeySetError::DuplicateKeyId`] if two keys have the same ID.
+    /// [`KeySetError::InvalidPublicKeyLength`] if a key is empty or its length is wrong
+    /// for its algorithm, and [`KeySetError::DuplicateKeyId`] if two keys have the same
+    /// ID.
+    ///
+    /// Only ML-DSA keys have an exact length; an LMS/HSS key only has to be non-empty
+    /// here (its minimum length is checked by the LMS backend, SHA-65).
     pub fn new(keys: &[TrustedKey<'a>]) -> Result<Self, KeySetError> {
         if keys.len() > N {
             return Err(KeySetError::Capacity);
@@ -56,6 +60,9 @@ impl<'a, const N: usize> TrustedKeys<'a, N> {
         let mut entries: [Option<(KeyId, TrustedKey<'a>)>; N] = [None; N];
         let mut len = 0;
         for key in keys {
+            if key.public_key.is_empty() {
+                return Err(KeySetError::InvalidPublicKeyLength(key.algorithm));
+            }
             if let Some(expected) = key.algorithm.public_key_len()
                 && key.public_key.len() != expected
             {
@@ -209,6 +216,24 @@ mod tests {
             TrustedKeys::<2>::new(&[key(Algorithm::MlDsa44, &MLDSA65_PK)]).unwrap_err(),
             KeySetError::InvalidPublicKeyLength(Algorithm::MlDsa44)
         );
+    }
+
+    #[test]
+    fn empty_public_key_is_rejected_for_every_algorithm() {
+        for &alg in Algorithm::ALL {
+            assert_eq!(
+                TrustedKeys::<2>::new(&[key(alg, &[])]).unwrap_err(),
+                KeySetError::InvalidPublicKeyLength(alg),
+                "{alg:?}"
+            );
+            // Also when it follows a valid key.
+            assert_eq!(
+                TrustedKeys::<2>::new(&[key(Algorithm::LmsHss, &LMS_PK_A), key(alg, &[])])
+                    .unwrap_err(),
+                KeySetError::InvalidPublicKeyLength(alg),
+                "{alg:?}"
+            );
+        }
     }
 
     #[test]
