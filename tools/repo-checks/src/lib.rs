@@ -9,6 +9,34 @@ use std::process::Command;
 /// Crates that are published to crates.io as name-reservation placeholders.
 pub const PLACEHOLDER_CRATES: [&str; 2] = ["keelsign", "keelsign-verify"];
 
+/// A standalone embedded example project under `examples/`.
+pub struct Example {
+    /// Directory name under `examples/`, and the package name.
+    pub name: &'static str,
+    /// Rust target triple the example is built for.
+    pub target: &'static str,
+    /// probe-rs chip name passed to `probe-rs run --chip`.
+    pub chip: &'static str,
+    /// The HAL crate feature that selects the board's chip.
+    pub hal_feature: &'static str,
+}
+
+/// The embedded examples, one per development board.
+pub const EXAMPLES: [Example; 2] = [
+    Example {
+        name: "nrf52840-hello",
+        target: "thumbv7em-none-eabihf",
+        chip: "nRF52840_xxAA",
+        hal_feature: "nrf52840",
+    },
+    Example {
+        name: "rp2350-hello",
+        target: "thumbv8m.main-none-eabihf",
+        chip: "RP235x",
+        hal_feature: "rp235xa",
+    },
+];
+
 /// Absolute path of the workspace root (two levels above this crate).
 pub fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

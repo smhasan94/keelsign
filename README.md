@@ -16,6 +16,10 @@ functionality.
 | `keelsign-embassy` (planned) | `no_std` | Adapter for embassy-boot |
 | `keelsign-ffi` (planned) | staticlib | C ABI + cbindgen header for MCUboot's `MCUBOOT_USE_CUSTOM_CRYPTO` hook (`libkeelsign`) |
 
+## Development
+
+Toolchain, probe setup and flashing the example boards: see [docs/setup.md](docs/setup.md).
+
 ## Licence
 
 Licensed under either of
