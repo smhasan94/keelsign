@@ -1,6 +1,10 @@
 //! Copies `memory.x` to `OUT_DIR`, puts it on the linker search path and passes the
 //! cortex-m-rt and defmt linker scripts (the upstream embassy example pattern).
 
+// Host-side build script, not no_std firmware: failing the build with a message is the
+// right response to a missing OUT_DIR or an unwritable memory.x.
+#![allow(clippy::expect_used)]
+
 use std::env;
 use std::fs;
 use std::path::PathBuf;

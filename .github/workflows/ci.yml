@@ -30,6 +30,8 @@ jobs:
       - name: cargo test
         run: cargo test --workspace --locked
 
+      # Only the packaging tests: the other ignored repo-checks tests need the thumb
+      # targets, probe-rs and flip-link; the cross-build job covers the example builds.
       - name: repo checks (network)
         run: cargo test -p repo-checks --locked --test packaging -- --ignored
 

@@ -86,6 +86,22 @@ fn example_projects_exist() {
 }
 
 #[test]
+fn examples_deny_panic_lints() {
+    for example in &EXAMPLES {
+        let cargo_toml = read_example(example, "Cargo.toml");
+        let lints = toml_table(&cargo_toml, "[lints.clippy]")
+            .unwrap_or_else(|| panic!("{}: Cargo.toml needs a [lints.clippy] table", example.name));
+        for lint in ["panic", "unwrap_used", "expect_used", "indexing_slicing"] {
+            assert!(
+                lints.contains(&format!("{lint} = \"deny\"")),
+                "{}: [lints.clippy] must deny `{lint}` (no panic paths in no_std code)",
+                example.name
+            );
+        }
+    }
+}
+
+#[test]
 fn runner_config_pins_chip_and_target() {
     for example in &EXAMPLES {
         let config = read_example(example, ".cargo/config.toml");

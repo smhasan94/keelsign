@@ -22,5 +22,12 @@ cortex-m-rt = "=0.7.7"
 [lints.rust]
 unsafe_code = "forbid"
 
+# No panic paths in no_std code (CLAUDE.md).
+[lints.clippy]
+panic = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+
 [profile.release]
 debug = 2

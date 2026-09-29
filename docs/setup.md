@@ -129,11 +129,12 @@ cargo run
 `cargo run` builds the debug profile; `cargo run --release` flashes the smaller optimised
 build (both keep debug info for defmt locations).
 
-Expected output (timestamps and paths will differ):
+Expected output (sizes, timestamps and paths will differ; a debug build flashes roughly
+55 KiB, a release build less):
 
 ```text
-      Erasing ✔ 100% [####################]  16.00 KiB @ ...
-  Programming ✔ 100% [####################]  16.00 KiB @ ...
+      Erasing ✔ 100% [####################]  56.00 KiB @ ...
+  Programming ✔ 100% [####################]  56.00 KiB @ ...
      Finished in ...
 0.000000 [INFO ] hello from keelsign (nRF52840-DK) (nrf52840_hello src/main.rs:...)
 1.000000 [INFO ] tick 1 (nrf52840_hello src/main.rs:...)
@@ -149,13 +150,14 @@ example does not blink it. Stop with Ctrl-C.
 With the probe(s) connected:
 
 ```sh
-probe-rs list                         # lists the J-Link and/or the Debug Probe (CMSIS-DAP)
-probe-rs info --chip nRF52840_xxAA    # with the nRF52840-DK connected
-probe-rs info --chip RP235x           # with the Debug Probe wired to the Pico 2 W
+probe-rs list    # lists the J-Link and/or the Debug Probe (CMSIS-DAP)
+probe-rs info    # connects to the probe and auto-detects the chip on it
 ```
 
-If both probes are connected, `probe-rs run` asks which to use; pass `--probe <VID:PID>`
-(from `probe-rs list`) to choose one without the prompt.
+`probe-rs info` detects the chip itself (probe-rs 0.32.0 ignores `--chip` here, with a
+warning). If both probes are connected, `probe-rs info` and `probe-rs run` ask which to
+use; pass `--probe <VID:PID>` (from `probe-rs list`) to choose one without the prompt,
+for example `probe-rs info --probe <VID:PID>`.
 
 ## Fresh-clone walkthrough
 
@@ -166,7 +168,8 @@ If both probes are connected, `probe-rs run` asks which to use; pass `--probe <V
 4. On Linux, install the [udev rules](#probe-permissions).
 5. Host checks: `cargo test --workspace --locked`.
 6. Local tool checks: `cargo test -p repo-checks --locked -- --ignored` (checks the targets,
-   probe-rs 0.32.0, flip-link on `PATH`, and cross-builds both examples).
+   probe-rs 0.32.0, flip-link on `PATH`, and cross-builds both examples; it also runs a
+   publish dry run, which needs network access to crates.io).
 7. Connect the nRF52840-DK, run `probe-rs list`, then
    `cd examples/nrf52840-hello && cargo run`; confirm `hello from keelsign` and
    the ticks, and LED1 blinking.
@@ -211,11 +214,12 @@ arrive in SHA-34, which adds the test binaries and their linker setup.
 
 `.github/workflows/ci.yml` has two jobs:
 
-- `ci`: host fmt, clippy, tests and publish dry runs for the root workspace.
+- `ci`: host fmt, clippy and tests for the root workspace, the packaging repo-checks
+  (`--test packaging -- --ignored`) and the publish dry runs.
 - `cross-build`: for each example (`nrf52840-hello` on `thumbv7em-none-eabihf`,
   `rp2350-hello` on `thumbv8m.main-none-eabihf`) it installs the target and flip-link and
-  runs `cargo fmt --check`, `cargo clippy --locked -- -D warnings` and
-  `cargo build --release --locked` in the example directory.
+  runs `cargo fmt --check`, `cargo clippy --locked --target <triple> -- -D warnings` and
+  `cargo build --release --locked --target <triple>` in the example directory.
 
 CI never flashes a board. The ignored repo-checks tests (`toolchain::*`,
 `examples::*_cross_builds`) are for local machines; CI covers the cross-builds in the
