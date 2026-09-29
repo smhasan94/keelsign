@@ -19,9 +19,9 @@
 #[cfg(feature = "cortex-m")]
 pub mod measure;
 
-use ml_dsa::{
-    EncodedSignature, EncodedVerifyingKey, MlDsa44, MlDsa65, MlDsaParams, Signature, VerifyingKey,
-};
+pub use ml_dsa::{MlDsa44, MlDsa65, MlDsaParams};
+
+use ml_dsa::{EncodedSignature, EncodedVerifyingKey, Signature, VerifyingKey};
 
 /// Fixture magic bytes.
 pub const MAGIC: [u8; 4] = *b"KSMD";

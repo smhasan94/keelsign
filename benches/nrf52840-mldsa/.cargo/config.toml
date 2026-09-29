@@ -1,0 +1,12 @@
+[target.thumbv7em-none-eabihf]
+# `cargo test --release` flashes the nRF52840-DK through its on-board J-Link, runs each
+# embedded-test case (probe-rs detects the test binary) and streams defmt over RTT.
+runner = "probe-rs run --chip nRF52840_xxAA"
+# flip-link puts the stack below .bss/.data so a stack overflow faults instead of corrupting memory.
+rustflags = ["-C", "linker=flip-link"]
+
+[build]
+target = "thumbv7em-none-eabihf"
+
+[env]
+DEFMT_LOG = "info"
