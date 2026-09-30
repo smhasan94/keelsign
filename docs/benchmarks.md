@@ -289,7 +289,7 @@ re-measured for the in-house verifier from `size_lms` below:
 | SHA-256/192 | wrong typecodes (upstream issue #100) | no; no HSS either | yes |
 | ACVP M24 vectors | panics (`unwrap`, `signing.rs:174`) | n/a | pass (16 of 16) |
 | Extra dependencies | a second sha2/digest, sha3, tinyvec, zeroize | getrandom, rand_core, … | none |
-| Flash Δ, release / size | +15,116 / +8,056 B (raw verify) | — | +6,740 / +5,136 B (whole `verify_pq` path) |
+| Flash Δ, release / size | +15,116 / +8,056 B (raw verify) | — | +7,224 / +5,348 B (whole `verify_pq` path) |
 | Static frame | 17,544 B | — | 1,488 B call chain |
 | Lines to audit | 5,064 | 2,553 | ≈ 410 (`lms.rs` code, without comments and tests) |
 | Licence | Apache-2.0 only | MIT OR Apache-2.0 | MIT OR Apache-2.0 |
@@ -373,10 +373,10 @@ columns are the same for both sets.
 
 | Board | Set | Verify cycles (headline) | Verify time | Peak stack (measured) | Static frame (compiled) | Flash Δ release | Flash Δ size | LMS signature (H10) | HSS signature (H10+H10, L=2) |
 |---|---|---|---|---|---|---|---|---|---|
-| nrf52840 | LMS SHA-256 M32/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 6,740 B | 5,136 B | 1,452 B | 2,964 B |
-| nrf52840 | LMS SHA-256/192 M24/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 6,740 B | 5,136 B | 900 B | 1,852 B |
-| rp2350 | LMS SHA-256 M32/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 6,756 B | 5,144 B | 1,452 B | 2,964 B |
-| rp2350 | LMS SHA-256/192 M24/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 6,756 B | 5,144 B | 900 B | 1,852 B |
+| nrf52840 | LMS SHA-256 M32/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 7,224 B | 5,348 B | 1,452 B | 2,964 B |
+| nrf52840 | LMS SHA-256/192 M24/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 7,224 B | 5,348 B | 900 B | 1,852 B |
+| rp2350 | LMS SHA-256 M32/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 7,228 B | 5,340 B | 1,452 B | 2,964 B |
+| rp2350 | LMS SHA-256/192 M24/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 7,228 B | 5,340 B | 900 B | 1,852 B |
 
 An LMS signature is `4 + (4 + n * (p + 1)) + 4 + m * h` bytes (RFC 8554 §5.4) with
 p = 34 (N32/W8) or 26 (N24/W8); an HSS signature with L levels is
@@ -389,12 +389,17 @@ Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
 
 | Board / profile | `size_lms_baseline` flash | `size_lms` flash | Δ LMS/HSS |
 |---|---|---|---|
-| nrf52840 / release | 47,232 | 53,972 | 6,740 |
-| nrf52840 / size | 47,220 | 52,356 | 5,136 |
-| rp2350 / release | 48,368 | 55,124 | 6,756 |
-| rp2350 / size | 47,868 | 53,012 | 5,144 |
+| nrf52840 / release | 47,272 | 54,496 | 7,224 |
+| nrf52840 / size | 47,260 | 52,608 | 5,348 |
+| rp2350 / release | 48,412 | 55,640 | 7,228 |
+| rp2350 / size | 47,908 | 53,248 | 5,340 |
 
-Both baselines include the 35,645-byte LMS target fixture in `.rodata`.
+Both baselines include the 35,659-byte LMS target fixture (KSLM v2) in `.rodata`.
+Re-measured for SHA-240. At `2152d0c`, just before SHA-240, the same commands gave
+Δ 7,180 / 5,328 B (nrf52840 release / size) and 7,192 / 5,332 B (rp2350); the older
+6,740 / 5,136 and 6,756 / 5,144 B figures had drifted since SHA-65. SHA-240 itself adds
+the policy field read in `DefaultBackend::verify` and the third expectation byte (+14 B
+of fixture per baseline).
 
 The stack limit (AC4) is 32,768 B measured on both boards; the compiled call chain is
 1,488 B, so the limit holds with a wide margin unless the board measurement shows

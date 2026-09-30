@@ -20,7 +20,7 @@ fn main() -> ! {
     info!("size_lms_baseline fixture={=usize}", fixture.len());
     let case = Fixture::parse(fixture)
         .ok()
-        .and_then(|f| f.cases().flatten().find(|c| c.expect_cnsa == Expect::Ok));
+        .and_then(|f| f.cases().flatten().find(|c| c.expect_default == Expect::Ok));
     let keys = case.and_then(|c| trusted_lms_key(black_box(c.pk)).ok());
     let keys = black_box(keys);
     info!(
