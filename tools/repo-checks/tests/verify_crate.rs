@@ -153,6 +153,11 @@ fn keelsign_verify_is_no_std_no_alloc_forbid_unsafe() {
         deps.contains("sha2 = { version = \"=0.11.0\", default-features = false }"),
         "sha2 pinned to =0.11.0 without default features"
     );
+    // SHA-42: the NOR flash reader's trait crate, the version the embassy HALs use.
+    assert!(
+        deps.contains("embedded-storage = { version = \"=0.3.2\", default-features = false }"),
+        "embedded-storage pinned to =0.3.2 without default features"
+    );
 }
 
 #[test]

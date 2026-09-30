@@ -17,6 +17,9 @@ ml-dsa = []
 [dependencies]
 # Key IDs are truncated SHA-256 digests of the public key. Defaults off: no `alloc`.
 sha2 = { version = "=0.11.0", default-features = false }
+# `ReadNorFlash`, the flash side of `reader::NorFlashReader` (SHA-42). no_std, no
+# dependencies with default features off; the version embassy-nrf and embassy-rp use.
+embedded-storage = { version = "=0.3.2", default-features = false }
 
 [dev-dependencies]
 # Property tests of the image parser (SHA-35). Host tests only; without `fork`/`timeout`.
