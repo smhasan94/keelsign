@@ -1,9 +1,10 @@
 //! `no_std`, heap-free on-device verifier for keelsign-signed MCUboot images.
 //!
-//! **Pre-release: the API is unstable** and the TLV IDs in [`tlv`] are provisional
-//! (SHA-37). This version holds the trusted-key set, the post-quantum signature dispatch
-//! and the LMS/HSS verifier; TLV-area parsing, image hashing, the ML-DSA backend and the
-//! hybrid Ed25519 policy land in later releases.
+//! **Pre-release: the API is unstable.** The image format (TLV IDs, signing mode, key
+//! ID, hybrid layout) is specified in [docs/image-format.md](https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md) and its constants
+//! are in [`tlv`]. This version holds the trusted-key set, the post-quantum signature
+//! dispatch and the LMS/HSS verifier; TLV-area parsing, image hashing, the ML-DSA backend
+//! and the hybrid Ed25519 policy land in later releases.
 //!
 //! - [`TrustedKeys`] holds up to `N` borrowed public keys and finds one by key ID
 //!   ([`key_id_of`]).

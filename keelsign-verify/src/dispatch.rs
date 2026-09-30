@@ -12,8 +12,11 @@ use crate::trusted_keys::{TrustedKey, TrustedKeys};
 pub trait Backend {
     /// Verify `signature` over `message` under `public_key`.
     ///
-    /// `message` is expected to be the image digest, per SHA-37's signing-mode decision
-    /// (PROVISIONAL); signing the whole image instead would need a streaming interface.
+    /// `message` is the 32-byte image digest `M`: SHA-256 over the image header, body and
+    /// protected TLV area, the value of MCUboot's `IMAGE_TLV_SHA256`
+    /// ([docs/image-format.md, Signing mode](https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md#signing-mode)). ML-DSA
+    /// backends sign it as pure ML-DSA with
+    /// [`MLDSA_CONTEXT`](crate::tlv::MLDSA_CONTEXT), never HashML-DSA.
     /// `signature` is the raw signature TLV value, passed through unchanged (it may be
     /// empty; rejecting it is the backend's job).
     ///
@@ -58,9 +61,10 @@ where
 {
     let mut key_id = None;
     let mut signature = None;
-    // Only the key-ID and PQ signature TLVs are recognised; other keelsign-range IDs
-    // are currently ignored. Any new keelsign TLV with verification meaning (e.g. one
-    // assigned by SHA-37) must be added to this scan.
+    // Only the key-ID and PQ signature TLVs are recognised. Every other TLV type is
+    // ignored, including the reserved IDs of `KEELSIGN_TLV_RANGE` (0x4BA4..=0x4BAF):
+    // docs/image-format.md requires verifiers to ignore unknown TLVs. A future keelsign
+    // TLV with verification meaning must be added to this scan.
     for (tlv_type, value) in tlvs {
         if tlv_type == TLV_KEELSIGN_KEY_ID {
             if key_id.replace(value).is_some() {
@@ -373,17 +377,21 @@ mod tests {
     #[test]
     fn non_keelsign_tlvs_are_ignored() {
         let backend = RecordingBackend::accepting();
-        // MCUboot KEYHASH, SHA256, ED25519, an unused keelsign-range ID and a vendor ID
-        // around the keelsign TLVs, with junk values.
+        // MCUboot KEYHASH, SHA256, ED25519, a reserved keelsign ID (0x4BA4), Nordic's
+        // vendor IDs 0x00A0 (installer image) and 0x00A1 (PERIPHCONF), which keelsign
+        // used before SHA-37, and 0xFFFF around the keelsign TLVs, with junk values.
         let tlvs = [
             (0x0001, [1u8; 32].to_vec()),
+            (0x00A0, [5u8; 16].to_vec()),
             (0x0010, [2u8; 32].to_vec()),
             id_tlv(&LMS_PK_A),
             (0x0024, [3u8; 64].to_vec()),
             sig_tlv(TLV_LMS_HSS_SIG),
-            (0x00A4, [4u8; 7].to_vec()),
+            (0x4BA4, [4u8; 7].to_vec()),
+            (0x00A1, [6u8; 2420].to_vec()),
             (0xFFFF, Vec::new()),
         ];
+        assert!(crate::tlv::KEELSIGN_TLV_RANGE.contains(&0x4BA4));
         assert_eq!(
             run(&backend, &lms_keys(), &tlvs),
             Ok(key(Algorithm::LmsHss, &LMS_PK_A))

@@ -21,9 +21,15 @@ pub struct TrustedKey<'a> {
 }
 
 /// The key ID of a raw encoded public key: SHA-256 of the bytes, truncated to
-/// [`KEY_ID_LEN`].
+/// [`KEY_ID_LEN`] (16) bytes.
 ///
-/// PROVISIONAL (SHA-37): the derivation is fixed by the image-format spec.
+/// The bytes hashed are exactly the public key as held in the trusted set: the FIPS 204
+/// encoding for ML-DSA, and the HSS public key `u32 L || LMS public key` (RFC 8554 §6.1)
+/// for LMS/HSS. The signer puts this ID in the
+/// [`TLV_KEELSIGN_KEY_ID`](crate::tlv::TLV_KEELSIGN_KEY_ID) TLV. Specified in
+/// [docs/image-format.md, Key ID](https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md#key-id). The Ed25519 half of a hybrid image
+/// is identified separately, by MCUboot's `IMAGE_TLV_KEYHASH` (SHA-256 of the DER
+/// SubjectPublicKeyInfo, all 32 bytes).
 pub fn key_id_of(public_key: &[u8]) -> KeyId {
     let digest = Sha256::digest(public_key);
     let mut id = [0u8; KEY_ID_LEN];
