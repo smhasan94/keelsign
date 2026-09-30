@@ -2,13 +2,16 @@
 
 **Status: pre-release, API unstable.** Not yet usable to verify images. The current
 code holds the MCUboot image header and TLV-area parser (`image`, panic-free on any
-input), the trusted-key set (lookup by key ID), the post-quantum signature dispatch
-with typed errors, and the built-in LMS/HSS verifier (RFC 8554, SP 800-208; SHA-256
-and SHA-256/192 with W8, up to two HSS levels) behind `verify_pq`. The image format
+input), the image reader (`ImageReader`, for `&[u8]` and any `embedded-storage` NOR
+flash through `NorFlashReader`) and the chunked image digest (`image_digest`, peak RAM
+bounded by the caller's chunk buffer, 256 bytes by default), the trusted-key set (lookup
+by key ID), the post-quantum signature dispatch with typed errors, and the built-in
+LMS/HSS verifier (RFC 8554, SP 800-208; SHA-256 and SHA-256/192 with W8, up to two HSS
+levels) behind `verify_pq`. The image format
 (keelsign TLV IDs `0x4BA0`–`0x4BA3`, the signing mode, key IDs and the hybrid Ed25519
 layout) is specified in
 [docs/image-format.md](https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md).
-The ML-DSA backend and image hashing come in later releases. The
+The ML-DSA backend comes in a later release. The
 `ml-dsa` feature is off by default.
 
 `keelsign-verify` will be the `no_std`, heap-free on-device verifier of the keelsign

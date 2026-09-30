@@ -614,3 +614,91 @@ fn bench_summarize_headline_for_lms_logs() {
         "{stdout}"
     );
 }
+
+/// SHA-42 AC2: the image-digest section records the RAM bound (chunk + SHA-256 state +
+/// frame, default 256 B), the static frames, the flash delta against its baseline, and
+/// the on-target procedure with its results pending hardware.
+#[test]
+fn image_digest_section_records_ram_bound() {
+    let doc = doc();
+    let digest = section(&doc, "## Image digest (SHA-42)");
+    let method = section(&doc, "### Digest method");
+    for term in [
+        "`chunk.len()` + the SHA-256 state",
+        "108 B",
+        "DEFAULT_CHUNK_LEN` = 256 B",
+        "BOOT_TMPBUF_SZ",
+        "bootutil_priv.h:86",
+        "Nothing scales with the image",
+        "-Z emit-stack-sizes",
+        "sha2::sha256::compress256",
+        "size_digest_baseline",
+        "mcuboot-ed25519-200k.bin",
+        "link_section",
+        "SHA-55",
+        "DIGEST board=… bytes=204800 chunk=256 cycles=… us=… peak_stack=… saturated=false",
+        "4,096 B",
+    ] {
+        assert!(
+            method.contains(term),
+            "### Digest method must mention `{term}`"
+        );
+    }
+    assert!(digest.contains("NorFlashReader") && digest.contains("READ_SIZE == 1"));
+
+    let results = section(&doc, "### Digest results");
+    let rows = table_rows(results);
+    for bench in &BENCHES {
+        let board = bench.name.split('-').next().unwrap();
+        let row = rows
+            .iter()
+            .find(|r| r[0] == board)
+            .unwrap_or_else(|| panic!("### Digest results has no row for {board}"));
+        assert_eq!(row.len(), 8, "{board}: {row:?}");
+        for cell in &row[1..4] {
+            assert_eq!(cell, "pending (hardware)", "{board}: {row:?}");
+        }
+        let frame = parse_bytes(&row[4]).expect("static frame in bytes");
+        let bound = parse_bytes(&row[5]).expect("RAM bound in bytes");
+        assert_eq!(
+            bound,
+            256 + frame,
+            "{board}: RAM bound = 256 B chunk + frame"
+        );
+        assert!(bound <= 4096, "{board}: within the on-target stack limit");
+        for cell in &row[6..8] {
+            assert!(
+                parse_bytes(cell).is_some_and(|d| d > 0),
+                "{board}: flash delta `{cell}`"
+            );
+        }
+        // The flash detail rows add up.
+        for profile in ["release", "size"] {
+            let label = format!("{board} / {profile}");
+            let detail = rows
+                .iter()
+                .find(|r| r[0] == label)
+                .unwrap_or_else(|| panic!("no flash detail row `{label}`"));
+            let n: Vec<u64> = detail[1..4]
+                .iter()
+                .map(|c| c.replace(',', "").parse().unwrap())
+                .collect();
+            assert_eq!(n[1] - n[0], n[2], "{label}: {detail:?}");
+            let column = if profile == "release" { 6 } else { 7 };
+            assert_eq!(parse_bytes(&row[column]), Some(n[2]), "{label}");
+        }
+    }
+
+    let reproduce = section(&doc, "### Digest reproduce");
+    for command in [
+        "cargo test --release --locked --test image -- image_digest_200k_from_flash",
+        "cargo test --release --locked --test image -- image_digest_bench",
+        "size_digest_baseline target/thumbv7em-none-eabihf/release/size_digest",
+        "cargo +nightly rustc --release --locked --bin size_digest --target-dir target/nightly -- -Z emit-stack-sizes",
+    ] {
+        assert!(
+            reproduce.contains(command),
+            "### Digest reproduce must list `{command}`"
+        );
+    }
+}
