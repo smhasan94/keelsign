@@ -677,11 +677,12 @@ impl<'a> Image<'a> {
     ///    the header is [`ParseError::Truncated`].
     /// 2. [`ParseError::SizeOverflow`] for the hashed region; then the unprotected info
     ///    header must fit the reader (`hashed_len + 4 <= len`), or
-    ///    [`ParseError::Truncated`].
+    ///    [`ParseError::Truncated`] (also when that sum overflows `u32`: no reader holds
+    ///    it, and [`Image::parse`] reports such bytes as truncated too).
     /// 3. Its `tlv_tot` (the magic is checked later) gives the TLV areas' size,
     ///    `protect_tlv_size + max(tlv_tot, 4)`.
-    /// 4. They must fit the reader ([`ParseError::Truncated`]) and then `tlv_buf`
-    ///    ([`Error::TlvAreaTooLarge`]).
+    /// 4. They must fit the reader ([`ParseError::Truncated`], also when their end
+    ///    overflows `u32`) and then `tlv_buf` ([`Error::TlvAreaTooLarge`]).
     /// 5. They are read into the front of `tlv_buf` and validated by
     ///    [`Image::parse_parts`], which never sees bytes past the TLV areas or the slot.
     ///
@@ -708,7 +709,7 @@ impl<'a> Image<'a> {
         let hashed_len = header.hashed_len()?;
         let info_end = hashed_len
             .checked_add(TLV_INFO_SIZE as u32)
-            .ok_or(ParseError::SizeOverflow)?;
+            .ok_or(ParseError::Truncated)?;
         if info_end > slot {
             return Err(ParseError::Truncated.into());
         }
@@ -717,9 +718,7 @@ impl<'a> Image<'a> {
         let tlv_tot = TlvInfo::parse(&info)?.tlv_tot.max(TLV_INFO_SIZE as u16);
         // At most 2 * u16::MAX: no overflow.
         let total = u32::from(header.protect_tlv_size).saturating_add(u32::from(tlv_tot));
-        let end = tlv_offset
-            .checked_add(total)
-            .ok_or(ParseError::SizeOverflow)?;
+        let end = tlv_offset.checked_add(total).ok_or(ParseError::Truncated)?;
         if end > slot {
             return Err(ParseError::Truncated.into());
         }
@@ -753,7 +752,11 @@ impl<'a> Image<'a> {
     /// - The bytes hashed over [`Image::hashed_range`] start with the header bytes in
     ///   `raw`: the header must not be re-read from storage that could have changed
     ///   between parsing and hashing. [`image_digest`](crate::digest::image_digest) hashes
-    ///   [`Image::raw_header`] for this reason.
+    ///   [`Image::raw_header`] for this reason. Only the header is pinned:
+    ///   [`image_digest`](crate::digest::image_digest) re-reads the protected TLV bytes
+    ///   from the reader, so the bytes hashed are not the `tlv_bytes` copy that
+    ///   [`Image::protected`] exposes (as in MCUboot); policy on protected TLV contents
+    ///   (SHA-46) must allow for that.
     pub fn parse_parts(raw: RawHeader, tlv_bytes: &'a [u8]) -> Result<Image<'a>, ParseError> {
         let header = raw.header;
         let tlv_offset = header.tlv_offset()?;
@@ -2116,10 +2119,21 @@ mod tests {
         );
         let mut d = synth(None, &[]);
         set_u32(&mut d, 12, u32::MAX - 31);
+        assert_eq!(Image::parse(&d), Err(ParseError::SizeOverflow));
         let mut slot: &[u8] = &d;
         assert_eq!(
             Image::read_from(&mut slot, &mut [0u8; 4096]),
             Err(Error::Parse(ParseError::SizeOverflow))
+        );
+        // The hashed region fits u32 but `hashed_len + 4` does not: Truncated from both
+        // (no slot holds the unprotected info header).
+        let mut d = synth(None, &[]);
+        set_u32(&mut d, 12, u32::MAX - 34);
+        assert_eq!(Image::parse(&d), Err(ParseError::Truncated));
+        let mut slot: &[u8] = &d;
+        assert_eq!(
+            Image::read_from(&mut slot, &mut [0u8; 4096]),
+            Err(Error::Parse(ParseError::Truncated))
         );
     }
 

@@ -142,7 +142,6 @@ impl<F: ReadNorFlash> ImageReader for NorFlashReader<F> {
     }
 
     fn read(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), ReadError> {
-        let () = Self::READ_SIZE_IS_ONE;
         let n = u32::try_from(buf.len()).map_err(|_| ReadError::OutOfBounds)?;
         let end = offset.checked_add(n).ok_or(ReadError::OutOfBounds)?;
         if end > self.len {

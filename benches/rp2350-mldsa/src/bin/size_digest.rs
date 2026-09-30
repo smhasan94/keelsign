@@ -12,13 +12,13 @@ use defmt::info;
 use defmt_rtt as _;
 use embassy_rp::flash::{Blocking, Flash};
 use embassy_rp::peripherals::FLASH;
+use keelsign_verify::image::Image;
+use keelsign_verify::{DEFAULT_CHUNK_LEN, ImageReader, NorFlashReader, image_digest};
 
 /// External QSPI flash of the Pico 2 W: 4 MiB.
 const FLASH_SIZE: usize = 4 * 1024 * 1024;
 /// Where the XIP window maps the flash.
 const XIP_BASE: u32 = 0x1000_0000;
-use keelsign_verify::image::Image;
-use keelsign_verify::{DEFAULT_CHUNK_LEN, ImageReader, NorFlashReader, image_digest};
 
 static IMAGE: &[u8] = include_bytes!("../../../../tests/fixtures/images/mcuboot-ed25519.bin");
 
