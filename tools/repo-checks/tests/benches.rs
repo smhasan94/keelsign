@@ -1,8 +1,9 @@
 //! Checks for the standalone on-target benchmark projects under `benches/` (SHA-34).
 
 use repo_checks::{
-    BENCHES, Example, LMS_BENCH_FILES, LMS_ON_TARGET_TESTS, LMS_SIZE_BINS, LMS_STACK_LIMIT,
-    ScratchDir, cargo_in, python_script, run_capture, run_ok, workspace_root,
+    BENCHES, DIGEST_BENCH_FILES, DIGEST_ON_TARGET_TESTS, DIGEST_SIZE_BINS, DIGEST_STACK_LIMIT,
+    Example, LMS_BENCH_FILES, LMS_ON_TARGET_TESTS, LMS_SIZE_BINS, LMS_STACK_LIMIT, ScratchDir,
+    cargo_in, python_script, run_capture, run_ok, workspace_root,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -74,7 +75,11 @@ fn bench_by_name(name: &str) -> &'static Example {
 fn bench_projects_exist() {
     for bench in &BENCHES {
         let dir = bench_dir(bench);
-        for rel in BENCH_FILES.iter().chain(&LMS_BENCH_FILES) {
+        for rel in BENCH_FILES
+            .iter()
+            .chain(&LMS_BENCH_FILES)
+            .chain(&DIGEST_BENCH_FILES)
+        {
             assert!(dir.join(rel).is_file(), "{}: missing {rel}", bench.name);
         }
         let cargo_toml = read_bench(bench, "Cargo.toml");
@@ -99,6 +104,8 @@ fn bench_projects_exist() {
             ("mldsa-kat", "../mldsa-kat"),
             ("lms-kat", "../lms-kat"),
             ("stack-paint", "../stack-paint"),
+            // SHA-42: tests/image.rs and size_digest use the reader and digest directly.
+            ("keelsign-verify", "../../keelsign-verify"),
         ] {
             let line = dependency_line(&cargo_toml, dep)
                 .unwrap_or_else(|| panic!("{}: must depend on {dep}", bench.name));
@@ -141,7 +148,11 @@ fn bench_projects_exist() {
                 bench.name
             );
         }
-        for bin in SIZE_BINS.iter().chain(&LMS_SIZE_BINS) {
+        for bin in SIZE_BINS
+            .iter()
+            .chain(&LMS_SIZE_BINS)
+            .chain(&DIGEST_SIZE_BINS)
+        {
             assert!(
                 cargo_toml.contains(&format!("[[bin]]\nname = \"{bin}\"\ntest = false\n")),
                 "{}: bin {bin} must be declared with `test = false`",
@@ -324,6 +335,48 @@ fn bench_tests_use_embedded_test_harness() {
                 bench.name
             );
         }
+
+        // SHA-42: the image-digest tests are a third embedded-test binary.
+        assert!(
+            cargo_toml.contains("[[test]]\nname = \"image\"\nharness = false\n"),
+            "{}: tests/image.rs must be a `harness = false` test",
+            bench.name
+        );
+        let image = read_bench(bench, "tests/image.rs");
+        for needle in [
+            "#![no_std]",
+            "#![no_main]",
+            "#[embedded_test::tests]",
+            "#[init]",
+            "compile_error!",
+            "defmt_rtt as _",
+            "DIGEST board=",
+            "stack_paint::paint",
+            "NorFlashReader::new",
+            "Image::read_from",
+            "mcuboot-ed25519-200k.bin",
+        ] {
+            assert!(
+                image.contains(needle),
+                "{}: tests/image.rs must contain `{needle}`",
+                bench.name
+            );
+        }
+        assert_eq!(DIGEST_STACK_LIMIT, 4096);
+        assert!(
+            image.contains("const STACK_LIMIT: u32 = 4096;")
+                && image.contains("mark.bytes > STACK_LIMIT")
+                && image.contains("mark.saturated"),
+            "{}: image_digest_bench must assert peak_stack <= {DIGEST_STACK_LIMIT} and !saturated",
+            bench.name
+        );
+        for test in DIGEST_ON_TARGET_TESTS {
+            assert!(
+                image.contains(&format!("fn {test}(")),
+                "{}: tests/image.rs must define the on-target test `{test}`",
+                bench.name
+            );
+        }
     }
 }
 
@@ -413,14 +466,18 @@ fn cross_build(name: &str) {
     run_ok(cargo_in(&dir, &target_dir).args(["test", "--no-run", "--release", "--locked"]));
     run_ok(cargo_in(&dir, &target_dir).args(["build", "--release", "--locked", "--bins"]));
     let release = target_dir.join(bench.target).join("release");
-    for bin in SIZE_BINS.iter().chain(&LMS_SIZE_BINS) {
+    for bin in SIZE_BINS
+        .iter()
+        .chain(&LMS_SIZE_BINS)
+        .chain(&DIGEST_SIZE_BINS)
+    {
         assert!(
             release.join(bin).is_file(),
             "expected ELF at {}",
             release.join(bin).display()
         );
     }
-    for test in ["kat", "lms"] {
+    for test in ["kat", "lms", "image"] {
         let found = fs::read_dir(release.join("deps"))
             .expect("read deps dir")
             .filter_map(Result::ok)
@@ -510,5 +567,29 @@ fn flash_sizes_script_runs() {
         assert_eq!(deltas.len(), 2, "{stdout}");
         assert_eq!(deltas[0], 0, "{}: LMS baseline delta", bench.name);
         assert!(deltas[1] > 0, "{}: size_lms must add flash", bench.name);
+
+        // SHA-42: size_digest over size_digest_baseline.
+        let (ok, stdout, stderr) = run_capture(
+            python_script("elf_sizes.py")
+                .arg("--baseline")
+                .arg(release.join(DIGEST_SIZE_BINS[0]))
+                .args(DIGEST_SIZE_BINS.map(|b| release.join(b))),
+        );
+        assert!(ok, "elf_sizes.py failed:\n{stderr}");
+        let deltas: Vec<i64> = stdout
+            .lines()
+            .skip(2)
+            .map(|row| {
+                row.split('|')
+                    .map(str::trim)
+                    .filter(|c| !c.is_empty())
+                    .nth(7)
+                    .and_then(|c| c.parse().ok())
+                    .unwrap_or_else(|| panic!("no Δ flash cell in `{row}`"))
+            })
+            .collect();
+        assert_eq!(deltas.len(), 2, "{stdout}");
+        assert_eq!(deltas[0], 0, "{}: digest baseline delta", bench.name);
+        assert!(deltas[1] > 0, "{}: size_digest must add flash", bench.name);
     }
 }

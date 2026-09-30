@@ -13,6 +13,8 @@ publish = false
 mldsa-kat = { path = "../mldsa-kat", features = ["cortex-m"] }
 lms-kat = { path = "../lms-kat" }
 stack-paint = { path = "../stack-paint" }
+# SHA-42: the image reader and digest, used directly by tests/image.rs and size_digest.
+keelsign-verify = { path = "../../keelsign-verify" }
 embassy-nrf = { version = "=0.11.0", features = ["defmt", "nrf52840"] }
 # Synchronous tests, no embassy executor. embedded-test's panic handler replaces
 # panic-probe in the test binary.
@@ -28,6 +30,10 @@ harness = false
 
 [[test]]
 name = "lms"
+harness = false
+
+[[test]]
+name = "image"
 harness = false
 
 [[bin]]
@@ -52,6 +58,16 @@ bench = false
 
 [[bin]]
 name = "size_lms"
+test = false
+bench = false
+
+[[bin]]
+name = "size_digest_baseline"
+test = false
+bench = false
+
+[[bin]]
+name = "size_digest"
 test = false
 bench = false
 
