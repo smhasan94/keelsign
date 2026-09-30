@@ -1,0 +1,586 @@
+{
+  "format": "KSLM v1: see the module docstring of scripts/gen_lms_vectors.py",
+  "generator": "scripts/gen_lms_vectors.py",
+  "message_hex": "6f7139d63bf0aed261fe5ae11b3a4ba86bbe7dc512b8a8293226b143a78c2177",
+  "outputs": {
+    "lms-host.bin": {
+      "bytes": 181052,
+      "cases": [
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 1,
+          "label": "rfc8554 Test Case 1: HSS L=2, M32_H5/W8 + M32_H5/W8",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "Ok",
+          "id": 2,
+          "label": "rfc8554 Test Case 2: HSS L=2, M32_H10/W4 + M32_H5/W8",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "Ok",
+          "id": 101,
+          "label": "acvp SP800-208 tg1 tc1 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: no modification",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 102,
+          "label": "acvp SP800-208 tg1 tc2 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: modify signature header",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 103,
+          "label": "acvp SP800-208 tg1 tc3 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: modify message",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 104,
+          "label": "acvp SP800-208 tg1 tc4 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: modify signature",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 105,
+          "label": "acvp SP800-208 tg2 tc5 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: modify signature header",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "Ok",
+          "id": 106,
+          "label": "acvp SP800-208 tg2 tc6 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: no modification",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 107,
+          "label": "acvp SP800-208 tg2 tc7 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: modify message",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 108,
+          "label": "acvp SP800-208 tg2 tc8 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: modify signature",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 201,
+          "label": "acvp 1.0 tg1 tc1 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: modify signature",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 202,
+          "label": "acvp 1.0 tg1 tc2 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: modify signature header",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "Ok",
+          "id": 203,
+          "label": "acvp 1.0 tg1 tc3 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: no modification",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 204,
+          "label": "acvp 1.0 tg1 tc4 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: modify message",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "Ok",
+          "id": 205,
+          "label": "acvp 1.0 tg2 tc5 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: no modification",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 206,
+          "label": "acvp 1.0 tg2 tc6 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: modify signature",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 207,
+          "label": "acvp 1.0 tg2 tc7 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: modify signature header",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 208,
+          "label": "acvp 1.0 tg2 tc8 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: modify message",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 301,
+          "label": "hsslms m32w8-h5-l1: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 302,
+          "label": "hsslms m32w8-h5h5-l2: LMS_SHA256_M32_H5+LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 303,
+          "label": "hsslms m32w8-h10-l1: LMS_SHA256_M32_H10 / LMOTS_SHA256_N32_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 304,
+          "label": "hsslms m32w8-h5h10-l2: LMS_SHA256_M32_H5+LMS_SHA256_M32_H10 / LMOTS_SHA256_N32_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 311,
+          "label": "hsslms m24w8-h5-l1: LMS_SHA256_M24_H5 / LMOTS_SHA256_N24_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 312,
+          "label": "hsslms m24w8-h5h5-l2: LMS_SHA256_M24_H5+LMS_SHA256_M24_H5 / LMOTS_SHA256_N24_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 313,
+          "label": "hsslms m24w8-h10-l1: LMS_SHA256_M24_H10 / LMOTS_SHA256_N24_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 321,
+          "label": "hsslms rotation-a: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 322,
+          "label": "hsslms rotation-b: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "Ok",
+          "id": 331,
+          "label": "hsslms m32w4-h5-l1: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W4",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "Ok",
+          "id": 332,
+          "label": "hsslms m24w2-h5-l1: LMS_SHA256_M24_H5 / LMOTS_SHA256_N24_W2",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "Ok",
+          "id": 333,
+          "label": "hsslms m32w8-h5h5h5-l3: LMS_SHA256_M32_H5+LMS_SHA256_M32_H5+LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "SignatureInvalid",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 401,
+          "label": "rfc8554 TC1 last byte flipped",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "SignatureInvalid",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 402,
+          "label": "rfc8554 TC1 bottom C flipped",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "SignatureInvalid",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 403,
+          "label": "rfc8554 TC1 bottom q flipped (wrong leaf index)",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "SignatureInvalid",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 404,
+          "label": "rfc8554 TC1 top q flipped (wrong tree index)",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 405,
+          "label": "rfc8554 TC1 one trailing byte",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 406,
+          "label": "rfc8554 TC1 key patched to L = 3",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 500,
+          "label": "rfc8554 TC1 truncated to 0 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 501,
+          "label": "rfc8554 TC1 truncated to 97 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 502,
+          "label": "rfc8554 TC1 truncated to 194 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 503,
+          "label": "rfc8554 TC1 truncated to 291 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 504,
+          "label": "rfc8554 TC1 truncated to 388 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 505,
+          "label": "rfc8554 TC1 truncated to 485 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 506,
+          "label": "rfc8554 TC1 truncated to 582 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 507,
+          "label": "rfc8554 TC1 truncated to 679 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 508,
+          "label": "rfc8554 TC1 truncated to 776 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 509,
+          "label": "rfc8554 TC1 truncated to 873 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 510,
+          "label": "rfc8554 TC1 truncated to 970 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 511,
+          "label": "rfc8554 TC1 truncated to 1067 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 512,
+          "label": "rfc8554 TC1 truncated to 1164 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 513,
+          "label": "rfc8554 TC1 truncated to 1261 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 514,
+          "label": "rfc8554 TC1 truncated to 1358 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 515,
+          "label": "rfc8554 TC1 truncated to 1455 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 516,
+          "label": "rfc8554 TC1 truncated to 1552 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 517,
+          "label": "rfc8554 TC1 truncated to 1649 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 518,
+          "label": "rfc8554 TC1 truncated to 1746 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 519,
+          "label": "rfc8554 TC1 truncated to 1843 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 520,
+          "label": "rfc8554 TC1 truncated to 1940 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 521,
+          "label": "rfc8554 TC1 truncated to 2037 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 522,
+          "label": "rfc8554 TC1 truncated to 2134 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 523,
+          "label": "rfc8554 TC1 truncated to 2231 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 524,
+          "label": "rfc8554 TC1 truncated to 2328 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 525,
+          "label": "rfc8554 TC1 truncated to 2425 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 526,
+          "label": "rfc8554 TC1 truncated to 2522 bytes",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 527,
+          "label": "rfc8554 TC1 truncated to 2619 bytes",
+          "source": "rfc8554"
+        }
+      ],
+      "count": 64,
+      "sha256": "54d6fdfb6a2901e9e200c5cc245f37968947a09af657f5366ef8e26213453d16",
+      "version": 1
+    },
+    "lms-target.bin": {
+      "bytes": 30151,
+      "cases": [
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 1,
+          "label": "rfc8554 Test Case 1: HSS L=2, M32_H5/W8 + M32_H5/W8",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "Ok",
+          "id": 2,
+          "label": "rfc8554 Test Case 2: HSS L=2, M32_H10/W4 + M32_H5/W8",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "Ok",
+          "id": 106,
+          "label": "acvp SP800-208 tg2 tc6 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: no modification",
+          "source": "acvp"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 302,
+          "label": "hsslms m32w8-h5h5-l2: LMS_SHA256_M32_H5+LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 311,
+          "label": "hsslms m24w8-h5-l1: LMS_SHA256_M24_H5 / LMOTS_SHA256_N24_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 312,
+          "label": "hsslms m24w8-h5h5-l2: LMS_SHA256_M24_H5+LMS_SHA256_M24_H5 / LMOTS_SHA256_N24_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 321,
+          "label": "hsslms rotation-a: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "Ok",
+          "expect_rfc_all_sets": "Ok",
+          "id": 322,
+          "label": "hsslms rotation-b: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "Ok",
+          "id": 331,
+          "label": "hsslms m32w4-h5-l1: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W4",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_rfc_all_sets": "Ok",
+          "id": 333,
+          "label": "hsslms m32w8-h5h5h5-l3: LMS_SHA256_M32_H5+LMS_SHA256_M32_H5+LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
+          "source": "hsslms"
+        },
+        {
+          "expect_cnsa": "SignatureInvalid",
+          "expect_rfc_all_sets": "SignatureInvalid",
+          "id": 401,
+          "label": "rfc8554 TC1 last byte flipped",
+          "source": "rfc8554"
+        },
+        {
+          "expect_cnsa": "MalformedSignature",
+          "expect_rfc_all_sets": "MalformedSignature",
+          "id": 405,
+          "label": "rfc8554 TC1 one trailing byte",
+          "source": "rfc8554"
+        }
+      ],
+      "count": 12,
+      "sha256": "7826988d69e1c116267faa5e237c6ec03f6f232139529dc71c59446c14d2776f",
+      "version": 1
+    }
+  },
+  "sources": {
+    "acvp_lms_1_0": {
+      "commit": "975de31eb83d87039ec88934fdc47d8c312b892d",
+      "path": "gen-val/json-files/LMS-sigVer-1.0/internalProjection.json",
+      "repo": "https://github.com/usnistgov/ACVP-Server",
+      "sha256": "298bf08f3dab576483b731dc58a4feab18b93e1e741bc6192133285962cf77dd",
+      "url": "https://raw.githubusercontent.com/usnistgov/ACVP-Server/975de31eb83d87039ec88934fdc47d8c312b892d/gen-val/json-files/LMS-sigVer-1.0/internalProjection.json"
+    },
+    "acvp_sp800_208": {
+      "commit": "975de31eb83d87039ec88934fdc47d8c312b892d",
+      "path": "gen-val/json-files/LMS-sigVer-SP800-208/internalProjection.json",
+      "repo": "https://github.com/usnistgov/ACVP-Server",
+      "sha256": "015bb30cb60d4fb24bc69d0cb074965c5fd10d1c70b01d09a5914d4947e2dedf",
+      "url": "https://raw.githubusercontent.com/usnistgov/ACVP-Server/975de31eb83d87039ec88934fdc47d8c312b892d/gen-val/json-files/LMS-sigVer-SP800-208/internalProjection.json"
+    },
+    "hsslms": {
+      "files": [
+        "src/hsslms/utils.py",
+        "src/hsslms/lmots.py",
+        "src/hsslms/lms.py",
+        "src/hsslms/hss.py"
+      ],
+      "package": "hsslms==0.1.3",
+      "sha256": "8d0a1f2bbc5f10f53f6abb394247bf185976088fbbb698a7f8c14031e97a4be5",
+      "url": "https://files.pythonhosted.org/packages/d4/d2/f3976dbdb80d05c1eba6e2de8005c04c962a71611a0975d0bf379a0d8853/hsslms-0.1.3.tar.gz"
+    },
+    "rfc8554": {
+      "sha256": "d5bfdbd457dfe7bc5f67cc1f62482999c2f55bf8033f2af56da323f2ffc2c055",
+      "url": "https://www.rfc-editor.org/rfc/rfc8554.txt"
+    }
+  }
+}

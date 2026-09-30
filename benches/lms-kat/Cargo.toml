@@ -1,0 +1,13 @@
+[package]
+name = "lms-kat"
+description = "LMS/HSS known-answer fixtures and case runner for the SHA-65 host and on-target tests (not published)."
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+keelsign-verify = { path = "../../keelsign-verify" }
+
+[lints]
+workspace = true
