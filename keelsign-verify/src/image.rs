@@ -14,10 +14,20 @@
 //! [`Image::parse`] validates everything once, before exposing anything: the header, both
 //! TLV info headers and every TLV header in both areas, against the input's bounds. After
 //! that, iterating the TLVs ([`TlvArea::iter`], [`TlvArea::pairs`], [`Image::tlvs`])
-//! cannot fail, and [`TlvArea::pairs`] feeds
+//! cannot fail, and `image.unprotected().pairs()` feeds
 //! [`select_pq_signature`](crate::select_pq_signature) and [`verify_pq`](crate::verify_pq)
 //! directly. The parser reads the input only through bounds-checked slicing and checked
 //! arithmetic; every malformed input is a [`ParseError`].
+//!
+//! # Post-quantum signature selection
+//!
+//! PQ selection MUST use the unprotected area only: `image.unprotected().pairs()`, never
+//! [`Image::tlvs`] or the protected area's pairs. keelsign TLVs are unprotected-only
+//! ([docs/image-format.md][spec]), so keelsign TLVs in the protected area are ignored for
+//! PQ selection: a PQ signature TLV there is inside `M`, the bytes it would sign, so it can
+//! never be a valid signature over `M`. The parser still yields them (from
+//! [`Image::protected`] and [`Image::tlvs`]); rejecting such images outright is a candidate
+//! image-policy rule (SHA-46).
 //!
 //! # What the parser does not decide
 //!
@@ -35,9 +45,19 @@
 //!
 //! - Little-endian images only. A big-endian image fails the magic check
 //!   ([`ParseError::BadMagic`]).
-//! - Two rules are intentionally stricter than MCUboot: a header size below
-//!   [`IMAGE_HEADER_SIZE`] is [`ParseError::HeaderTooSmall`], and a TLV info header with
-//!   `tlv_tot < 4` (smaller than itself) is [`ParseError::LengthMismatch`].
+//! - Three rules are intentionally stricter than MCUboot:
+//!   - a header size below [`IMAGE_HEADER_SIZE`] is [`ParseError::HeaderTooSmall`];
+//!   - a TLV info header with `tlv_tot < 4` (smaller than itself) is
+//!     [`ParseError::LengthMismatch`];
+//!   - the protected TLVs must tile the protected area exactly, ending at `prot_end`
+//!     (`hdr_size + img_size + protect_tlv_size`): a protected TLV whose header or value
+//!     runs past `prot_end`, or 1–3 bytes left over before it, is
+//!     [`ParseError::LengthMismatch`]. MCUboot `a8ffd2c`'s `bootutil_tlv_iter_next` bounds
+//!     each TLV by `end = it->prot ? it->prot_end : it->tlv_end` (`tlv.c:151`, checked at
+//!     `:163-164` and `:179`), and `bootutil_img_validate` walks with `IMAGE_TLV_ANY` and
+//!     `prot = false` (`image_validate.c:285`), so there protected TLVs are bounded only by
+//!     `tlv_end`; the unprotected info header is skipped only when a TLV ends exactly at
+//!     `prot_end` (`tlv.c:133-142`). Such an image can be accepted by MCUboot.
 //! - A post-quantum signature TLV (`0x4BA1..=0x4BA3`) longer than
 //!   [`MAX_PQ_SIGNATURE_LEN`] is [`ParseError::PqSignatureTooLong`], in either area.
 //! - Bytes after the unprotected TLV area (a padded slot's trailer) are allowed;
@@ -48,6 +68,7 @@
 use core::fmt;
 use core::ops::Range;
 
+use crate::algorithm::Algorithm;
 use crate::tlv::{
     KEELSIGN_TLV_RANGE, MAX_PQ_SIGNATURE_LEN, TLV_KEELSIGN_KEY_ID, TLV_LMS_HSS_SIG,
     TLV_MLDSA44_SIG, TLV_MLDSA65_SIG,
@@ -485,6 +506,12 @@ impl<'a> TlvArea<'a> {
     /// The area's TLVs as `(type, value)` pairs, the input of
     /// [`select_pq_signature`](crate::select_pq_signature) and
     /// [`verify_pq`](crate::verify_pq).
+    ///
+    /// PQ selection MUST use the unprotected area's pairs, `image.unprotected().pairs()`.
+    /// keelsign TLVs are unprotected-only (docs/image-format.md), so keelsign TLVs in the
+    /// protected area are ignored for PQ selection: a PQ signature there is inside `M` and
+    /// can never be a valid signature over `M`. Rejecting such images is a candidate policy
+    /// rule (SHA-46). See the [module docs](self#post-quantum-signature-selection).
     pub fn pairs(&self) -> impl Iterator<Item = (u16, &'a [u8])> + use<'a> {
         self.iter().map(|tlv| tlv.as_pair())
     }
@@ -526,8 +553,9 @@ impl<'a> Iterator for TlvIter<'a> {
 /// A parsed, validated MCUboot image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Image<'a> {
-    /// The image header.
-    pub header: Header,
+    /// The image header. Private so that a copied `Image` cannot have its header edited
+    /// out of step with its TLV areas; read it with [`Image::header`].
+    header: Header,
     protected: Option<TlvArea<'a>>,
     unprotected: TlvArea<'a>,
 }
@@ -535,6 +563,26 @@ pub struct Image<'a> {
 impl<'a> Image<'a> {
     /// Parse and validate a whole image: header, body and both TLV areas. Bytes after the
     /// unprotected TLV area (a slot trailer) are allowed; see [`Image::tlv_end`].
+    ///
+    /// # Error precedence
+    ///
+    /// When an input has several faults, the first check in this order decides the error:
+    ///
+    /// 1. Header errors, from [`Header::parse`]: [`ParseError::Truncated`] (fewer than
+    ///    [`IMAGE_HEADER_SIZE`] bytes), then [`ParseError::BadMagic`], then
+    ///    [`ParseError::HeaderTooSmall`].
+    /// 2. [`ParseError::SizeOverflow`] for the whole hashed region
+    ///    (`hdr_size + img_size + protect_tlv_size`) before any [`ParseError::Truncated`]
+    ///    for the body or TLV areas.
+    /// 3. For the protected area: its info magic ([`ParseError::BadTlvInfoMagic`]) and its
+    ///    size against the header ([`ParseError::ProtectedSizeMismatch`]) before its walk;
+    ///    with no protected area announced, a protected magic where the unprotected area
+    ///    starts is [`ParseError::ProtectedSizeMismatch`]. Then the unprotected area's info
+    ///    magic, then its walk.
+    /// 4. Within an area: `tlv_tot < 4` ([`ParseError::LengthMismatch`]), then its end
+    ///    ([`ParseError::SizeOverflow`], [`ParseError::Truncated`]), then its TLVs in
+    ///    order. Within one TLV, [`ParseError::LengthMismatch`] (header or value past the
+    ///    area) before [`ParseError::PqSignatureTooLong`].
     ///
     /// # Example
     ///
@@ -558,8 +606,8 @@ impl<'a> Image<'a> {
     /// ];
     ///
     /// let image = Image::parse(&IMAGE)?;
-    /// assert_eq!(image.header.img_size, 4);
-    /// assert_eq!(image.header.version.build_num, 4);
+    /// assert_eq!(image.header().img_size, 4);
+    /// assert_eq!(image.header().version.build_num, 4);
     /// assert!(image.protected().is_none());
     /// assert_eq!(image.hashed_range(), 0..36);
     /// assert_eq!(image.tlv_end(), 48);
@@ -581,7 +629,27 @@ impl<'a> Image<'a> {
     /// example, read from flash in pieces). `tlv_bytes` starts at
     /// [`Header::tlv_offset`]; offsets in the result are still relative to the image
     /// start.
+    ///
+    /// `header` is re-checked: a `hdr_size` below [`IMAGE_HEADER_SIZE`] is
+    /// [`ParseError::HeaderTooSmall`], however the [`Header`] was made (its fields are
+    /// public, so it can be built by hand). The magic is not re-checked: a [`Header`] does
+    /// not hold it.
+    ///
+    /// # Contract
+    ///
+    /// The caller must ensure that:
+    ///
+    /// - `tlv_bytes` is exactly the bytes from [`Header::tlv_offset`] to the end of the
+    ///   slot's usable area, no fewer (so [`ParseError::Truncated`] means the image does not
+    ///   fit the slot) and no more (so TLVs past the slot are rejected, as MCUboot rejects an
+    ///   image whose `tlv_end` exceeds the slot, `image_validate.c:300`).
+    /// - The bytes hashed over [`Image::hashed_range`] are the same bytes `header` was
+    ///   parsed from: the header must not be re-read from storage that could have changed
+    ///   between parsing and hashing.
     pub fn parse_parts(header: Header, tlv_bytes: &'a [u8]) -> Result<Image<'a>, ParseError> {
+        if usize::from(header.hdr_size) < IMAGE_HEADER_SIZE {
+            return Err(ParseError::HeaderTooSmall);
+        }
         let tlv_offset = header.tlv_offset()?;
         let hashed_len = header.hashed_len()?;
         let prot_size = header.protect_tlv_size;
@@ -620,6 +688,11 @@ impl<'a> Image<'a> {
         })
     }
 
+    /// The image header.
+    pub fn header(&self) -> &Header {
+        &self.header
+    }
+
     /// The protected TLV area, if the header announces one.
     pub fn protected(&self) -> Option<&TlvArea<'a>> {
         self.protected.as_ref()
@@ -644,6 +717,12 @@ impl<'a> Image<'a> {
     }
 
     /// Every TLV: the protected area's, then the unprotected area's.
+    ///
+    /// Not the input of PQ selection: that MUST be `self.unprotected().pairs()`. keelsign
+    /// TLVs are unprotected-only (docs/image-format.md), so keelsign TLVs in the protected
+    /// area, which this iterator yields, are ignored for PQ selection; a PQ signature there
+    /// is inside `M` and can never be a valid signature over `M`. Rejecting such images is
+    /// a candidate policy rule (SHA-46).
     pub fn tlvs(&self) -> impl Iterator<Item = Tlv<'a>> + use<'a> {
         self.protected
             .map(|area| area.iter())
@@ -704,11 +783,10 @@ fn split_tlv(rest: &[u8]) -> Result<(u16, &[u8], &[u8]), ParseError> {
     Ok((tlv_type, value, next))
 }
 
+/// Whether `tlv_type` is a post-quantum signature TLV, bounded by [`MAX_PQ_SIGNATURE_LEN`].
+/// Derived from [`Algorithm`] so that a future PQ TLV cannot escape the bound.
 fn is_pq_signature(tlv_type: u16) -> bool {
-    matches!(
-        tlv_type,
-        TLV_MLDSA44_SIG | TLV_MLDSA65_SIG | TLV_LMS_HSS_SIG
-    )
+    Algorithm::from_tlv_type(tlv_type).is_some()
 }
 
 #[cfg(test)]
@@ -892,26 +970,26 @@ mod tests {
         let entry = entry(name);
         let header = object(entry, "header");
         assert_eq!(
-            u64::from(image.header.hdr_size),
+            u64::from(image.header().hdr_size),
             num(header, "hdr_size"),
             "{name}"
         );
         assert_eq!(
-            u64::from(image.header.protect_tlv_size),
+            u64::from(image.header().protect_tlv_size),
             num(header, "protect_tlv_size"),
             "{name}"
         );
         assert_eq!(
-            u64::from(image.header.img_size),
+            u64::from(image.header().img_size),
             num(header, "img_size"),
             "{name}"
         );
         assert_eq!(
-            u64::from(image.header.flags.0),
+            u64::from(image.header().flags.0),
             num(header, "flags"),
             "{name}"
         );
-        let v = image.header.version;
+        let v = image.header().version;
         assert_eq!(
             format!("{}.{}.{}+{}", v.major, v.minor, v.revision, v.build_num),
             field(header, "version"),
@@ -1134,7 +1212,7 @@ mod tests {
         }
         if let Some(p) = image.protected() {
             assert_eq!(p.range().end, hashed.end);
-            assert_eq!(Ok(p.range().start), image.header.tlv_offset());
+            assert_eq!(Ok(p.range().start), image.header().tlv_offset());
         }
     }
 
@@ -1148,8 +1226,8 @@ mod tests {
         for (name, data) in SAMPLES {
             let image = Image::parse(data).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_matches_manifest(name, &image);
-            assert_eq!(image.header.hdr_size, 0x200, "{name}");
-            assert_eq!(image.header.img_size, 1536, "{name}");
+            assert_eq!(image.header().hdr_size, 0x200, "{name}");
+            assert_eq!(image.header().img_size, 1536, "{name}");
             assert_eq!(image.tlv_end() as usize, data.len(), "{name}");
             assert_in_bounds(data, &image);
             let entry = entry(name);
@@ -1194,9 +1272,9 @@ mod tests {
         let image = Image::parse(data).unwrap();
         assert_matches_manifest(name, &image);
         assert_in_bounds(data, &image);
-        assert_eq!(image.header.flags, ImageFlags(0));
+        assert_eq!(image.header().flags, ImageFlags(0));
         assert_eq!(
-            image.header.version,
+            image.header().version,
             ImageVersion {
                 major: 1,
                 minor: 2,
@@ -1329,7 +1407,7 @@ mod tests {
     fn big_endian_tlv_info_is_bad_tlv_info_magic() {
         for (name, data) in all_valid() {
             let image = Image::parse(data).unwrap();
-            let tlv_off = image.header.tlv_offset().unwrap() as usize;
+            let tlv_off = image.header().tlv_offset().unwrap() as usize;
             let hashed = image.hashed_range().end as usize;
             // The protected info header written big-endian.
             if image.protected().is_some() {
@@ -1351,10 +1429,15 @@ mod tests {
         for (name, data) in all_valid() {
             let image = Image::parse(data).unwrap();
             let end = image.tlv_end() as usize;
-            let tlv_off = image.header.tlv_offset().unwrap() as usize;
+            let tlv_off = image.header().tlv_offset().unwrap() as usize;
             let hashed = image.hashed_range().end as usize;
             // Every structural boundary, and one byte either side.
-            let mut boundaries = vec![0, 4, IMAGE_HEADER_SIZE, usize::from(image.header.hdr_size)];
+            let mut boundaries = vec![
+                0,
+                4,
+                IMAGE_HEADER_SIZE,
+                usize::from(image.header().hdr_size),
+            ];
             boundaries.extend([tlv_off, tlv_off + 2, tlv_off + TLV_INFO_SIZE, hashed]);
             boundaries.extend([hashed + 2, hashed + TLV_INFO_SIZE]);
             let base = data.as_ptr() as usize;
@@ -1401,7 +1484,7 @@ mod tests {
         let mut flips = 0;
         for (name, data) in all_valid() {
             let image = Image::parse(data).unwrap();
-            let tlv_off = image.header.tlv_offset().unwrap() as usize;
+            let tlv_off = image.header().tlv_offset().unwrap() as usize;
             let hashed = image.hashed_range().end as usize;
             // (offset, bytes) of every magic and length field.
             let mut fields = vec![(0, 4), (8, 2), (10, 2), (12, 4)];
@@ -1790,6 +1873,121 @@ mod tests {
     }
 
     #[test]
+    fn parse_parts_rejects_hand_built_small_header() {
+        let d = synth(None, &[(IMAGE_TLV_SHA256, &[0; 32])]);
+        let good = Header::parse(&d).unwrap();
+        let tlv_bytes = &d[36..];
+        assert!(Image::parse_parts(good, tlv_bytes).is_ok());
+        for hdr_size in 0..32u16 {
+            // Header fields are public: a Header that Header::parse would refuse.
+            let header = Header { hdr_size, ..good };
+            assert_eq!(
+                Image::parse_parts(header, tlv_bytes),
+                Err(ParseError::HeaderTooSmall),
+                "{hdr_size}"
+            );
+        }
+        // Checked before anything else, even with TLV bytes that are not a TLV area.
+        let header = Header {
+            hdr_size: 0,
+            ..good
+        };
+        assert_eq!(
+            Image::parse_parts(header, &[]),
+            Err(ParseError::HeaderTooSmall)
+        );
+        let header = Header {
+            hdr_size: 31,
+            img_size: u32::MAX,
+            ..good
+        };
+        assert_eq!(
+            Image::parse_parts(header, tlv_bytes),
+            Err(ParseError::HeaderTooSmall)
+        );
+    }
+
+    #[test]
+    fn protected_keelsign_pq_tlv_is_ignored_for_selection() {
+        let key_id = [0x11; 16];
+        let lms = [0x33; 64];
+        let protected_sig = [0x44; 100];
+        let d = synth(
+            Some(&[(TLV_MLDSA44_SIG, &protected_sig)]),
+            &[(TLV_KEELSIGN_KEY_ID, &key_id), (TLV_LMS_HSS_SIG, &lms)],
+        );
+        let image = Image::parse(&d).unwrap();
+        assert_in_bounds(&d, &image);
+
+        // tlvs() yields every TLV, the protected ML-DSA-44 one first.
+        let all: Vec<(bool, u16, &[u8])> = image
+            .tlvs()
+            .map(|t| (t.protected, t.tlv_type, t.value))
+            .collect();
+        assert_eq!(
+            all,
+            [
+                (true, TLV_MLDSA44_SIG, &protected_sig[..]),
+                (false, TLV_KEELSIGN_KEY_ID, &key_id[..]),
+                (false, TLV_LMS_HSS_SIG, &lms[..]),
+            ]
+        );
+        // The protected PQ TLV lies inside the hashed bytes M.
+        let base = d.as_ptr() as usize;
+        let at = image.tlvs().next().unwrap().value.as_ptr() as usize - base;
+        assert!(range(image.hashed_range()).contains(&at));
+
+        // Selection over the unprotected area ignores it.
+        let selected = select_pq_signature(image.unprotected().pairs()).unwrap();
+        assert_eq!(selected.algorithm, Algorithm::LmsHss);
+        assert_eq!(selected.key_id, key_id);
+        assert_eq!(selected.signature, lms);
+        // Feeding every TLV instead would see two PQ signatures.
+        assert_eq!(
+            select_pq_signature(image.tlvs().map(|t| t.as_pair())),
+            Err(Error::MultiplePqSignatures)
+        );
+    }
+
+    #[test]
+    fn protected_tlv_spilling_past_prot_end_is_length_mismatch() {
+        let unprot = area_bytes(TLV_INFO_MAGIC, &[(IMAGE_TLV_SHA256, &[0; 32])]);
+        // A protected area of `tot` bytes (announced consistently by the header and the
+        // info header) holding `tlvs`, then the unprotected area.
+        let image = |tot: u16, tlvs: &[u8]| {
+            let mut d = header_bytes(32, tot, 4);
+            d.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD]);
+            d.extend_from_slice(&TLV_PROT_INFO_MAGIC.to_le_bytes());
+            d.extend_from_slice(&tot.to_le_bytes());
+            d.extend_from_slice(tlvs);
+            d.extend_from_slice(&unprot);
+            d
+        };
+        let sec_cnt = [0x50, 0x00, 4, 0, 7, 0, 0, 0];
+        let good = image(12, &sec_cnt);
+        assert!(Image::parse(&good).is_ok());
+
+        // The SEC_CNT value runs past prot_end, into the unprotected info header.
+        for len in [5u16, 8, 8 + 36] {
+            let mut d = good.clone();
+            set_u16(&mut d, 42, len);
+            assert_eq!(Image::parse(&d), Err(ParseError::LengthMismatch), "{len}");
+            assert_eq!(oracle(&d).map(|_| ()), Err(ParseError::LengthMismatch));
+        }
+        // 1 to 3 bytes left over before prot_end: a TLV header that cannot fit.
+        for extra in 1..=3u16 {
+            let mut tlvs = sec_cnt.to_vec();
+            tlvs.resize(tlvs.len() + usize::from(extra), 0);
+            let d = image(12 + extra, &tlvs);
+            assert_eq!(Image::parse(&d), Err(ParseError::LengthMismatch), "{extra}");
+            assert_eq!(oracle(&d).map(|_| ()), Err(ParseError::LengthMismatch));
+        }
+        // A protected TLV header straddling prot_end.
+        let d = image(6, &[0x50, 0x00]);
+        assert_eq!(Image::parse(&d), Err(ParseError::LengthMismatch));
+    }
+
+    #[test]
     fn every_parse_error_variant_is_reachable_and_distinct() {
         // One input per variant. The match is exhaustive, so a new variant needs a case.
         fn case(e: ParseError) -> Vec<u8> {
@@ -1885,7 +2083,10 @@ mod tests {
         // Flags are parsed, never acted on (SHA-46).
         let mut d = synth(None, &[]);
         set_u32(&mut d, 16, u32::MAX);
-        assert_eq!(Image::parse(&d).unwrap().header.flags, ImageFlags(u32::MAX));
+        assert_eq!(
+            Image::parse(&d).unwrap().header().flags,
+            ImageFlags(u32::MAX)
+        );
         // Constants from image.h at a8ffd2c.
         assert_eq!(IMAGE_MAGIC, 0x96f3_b83d);
         assert_eq!((TLV_INFO_MAGIC, TLV_PROT_INFO_MAGIC), (0x6907, 0x6908));
@@ -1926,7 +2127,9 @@ mod tests {
 
     fn check_any(bytes: &[u8]) {
         let result = Image::parse(bytes);
-        assert_eq!(result.as_ref().err().copied(), oracle(bytes).err());
+        // The error, or on Ok the TLV list (area, type, value offset and length), the
+        // hashed range end and tlv_end, all match the oracle's walk.
+        assert_eq!(summary(bytes), oracle(bytes));
         if let Ok(image) = result {
             assert_in_bounds(bytes, &image);
             for tlv in image.tlvs() {

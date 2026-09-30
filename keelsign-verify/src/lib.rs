@@ -8,7 +8,11 @@
 //!
 //! - [`image`] parses and validates an MCUboot image (header, protected and unprotected
 //!   TLV areas) without panicking on any input, and yields its TLVs;
-//!   [`image::TlvArea::pairs`] feeds [`select_pq_signature`] and [`verify_pq`].
+//!   [`image::TlvArea::pairs`] feeds [`select_pq_signature`] and [`verify_pq`]. PQ
+//!   selection MUST use the unprotected area, `image.unprotected().pairs()`: keelsign TLVs
+//!   are unprotected-only (docs/image-format.md), so keelsign TLVs in the protected area
+//!   are ignored for PQ selection (a PQ signature there is inside `M` and can never be a
+//!   valid signature over `M`; rejecting such images is a candidate SHA-46 policy rule).
 //! - [`TrustedKeys`] holds up to `N` borrowed public keys and finds one by key ID
 //!   ([`key_id_of`]).
 //! - [`verify_pq`] picks the single post-quantum signature TLV and the key-ID TLV out of

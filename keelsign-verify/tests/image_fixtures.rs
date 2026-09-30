@@ -174,8 +174,8 @@ fn every_fixture_walks_and_selects_expected_tlvs() {
         );
         let prot: Vec<u16> = protected(&image).iter().map(|(k, _)| *k).collect();
         assert_eq!(prot, tlv_list(&field(&entry, "protected_tlvs")), "{name}");
-        assert_eq!(image.header.hdr_size, 0x200, "{name}");
-        assert_eq!(image.header.img_size, 1536, "{name}");
+        assert_eq!(image.header().hdr_size, 0x200, "{name}");
+        assert_eq!(image.header().img_size, 1536, "{name}");
         assert_eq!(
             image.tlv_end() as usize,
             data.len(),
@@ -344,10 +344,10 @@ fn digest_covers_protected_tlvs() {
         [0x0050, 0x10A0],
         "SEC_CNT and a vendor TLV, protected"
     );
-    assert!(image.header.protect_tlv_size > 0);
+    assert!(image.header().protect_tlv_size > 0);
 
     let digest = sha256(signed(&data, &image));
-    let without_protected = sha256(&data[..image.header.tlv_offset().unwrap() as usize]);
+    let without_protected = sha256(&data[..image.header().tlv_offset().unwrap() as usize]);
     assert_ne!(digest, without_protected);
     let sha_tlv = unprotected(&image)
         .iter()
@@ -474,7 +474,7 @@ fn golden_images_match_manifest() {
         }
         let image = Image::parse(&data).unwrap_or_else(|e| panic!("{name}: {e}"));
         let header = object(&entry, "header");
-        let h = image.header;
+        let h = *image.header();
         assert_eq!(h.hdr_size.to_string(), field(header, "hdr_size"), "{name}");
         assert_eq!(
             h.protect_tlv_size.to_string(),
