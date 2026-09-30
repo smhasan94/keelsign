@@ -269,7 +269,10 @@ without heap, panics or slice indexing. The device path,
 `keelsign_verify::verify_pq` with `DefaultBackend`, applies the keelsign parameter
 policy `ParameterPolicy::cnsa_2_0()`: LMS_SHA256_M32_H{5..25} (0x05–0x09) with
 LMOTS_SHA256_N32_W8 (0x04), or LMS_SHA256_M24_H{5..25} (0x0A–0x0E) with
-LMOTS_SHA256_N24_W8 (0x08), at most 2 HSS levels, the same hash at every level. The
+LMOTS_SHA256_N24_W8 (0x08), at most 2 HSS levels, the same hash at every level. Despite
+its name this policy is not CNSA 2.0's: it accepts two-level HSS (L ≤ 2), which CNSA 2.0
+does not approve; SHA-240 renames or splits it into a strict `L = 1` policy and the
+device default (docs/image-format.md, "Accepted LMS parameter sets and CNSA 2.0"). The
 policy is checked for every level before anything is hashed; anything outside it is
 `Error::UnsupportedParameterSet`. `ParameterPolicy::rfc_8554_all_sets()` (every
 SHA-256 / SHA-256/192 set, W1–W8, up to 8 levels) exists only for the host tests against
@@ -306,7 +309,8 @@ links SHA-256 (for key IDs) and the fixture parser.
 
 `benches/lms-kat` holds script-generated fixtures (`scripts/gen_lms_vectors.py`; pinned
 sources and sha256 in `benches/lms-kat/fixtures/MANIFEST.json`). Each case carries two
-expectations, one for `verify_pq` (CNSA policy) and one for the RFC policy:
+expectations, one for `verify_pq` (the keelsign policy `cnsa_2_0()`, which accepts
+L ≤ 2 and is renamed or split in SHA-240) and one for the RFC policy:
 
 - RFC 8554 Appendix F Test Case 1 (HSS L=2, both levels M32_H5/W8): verifies through
   `verify_pq`. Test Case 2 (top level M32_H10/W4): `UnsupportedParameterSet` through

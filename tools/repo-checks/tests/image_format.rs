@@ -97,7 +97,7 @@ fn tables(text: &str) -> Vec<Vec<Vec<String>>> {
     out
 }
 
-/// A number cell such as `3,604` or `2,420`.
+/// A number cell such as `3,924` or `2,420`.
 fn parse_number(cell: &str) -> Option<u64> {
     cell.replace(',', "").trim().parse().ok()
 }
@@ -377,7 +377,7 @@ fn sizes_table_matches_lms_formula_and_mldsa_constants() {
         }
         max = max.max(bytes);
     }
-    assert_eq!(lms_rows, 8, "m 24/32 x H10/H20 x L1/L2");
+    assert_eq!(lms_rows, 12, "m 24/32 x H10/H20/H25 x L1/L2");
     assert!(rows.iter().any(|r| r[0] == "ML-DSA-44") && rows.iter().any(|r| r[0] == "ML-DSA-65"));
     let max_const: u64 = const_value(&src, "MAX_PQ_SIGNATURE_LEN")
         .replace('_', "")
@@ -387,7 +387,7 @@ fn sizes_table_matches_lms_formula_and_mldsa_constants() {
         max, max_const,
         "MAX_PQ_SIGNATURE_LEN is the table's largest row"
     );
-    assert_eq!(max_const, hss_w8_len(32, &[20, 20]));
+    assert_eq!(max_const, hss_w8_len(32, &[25, 25]));
 
     // The ML-DSA constants of keelsign-verify agree with FIPS 204.
     let algorithm = read("keelsign-verify/src/algorithm.rs");

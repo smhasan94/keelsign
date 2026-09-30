@@ -77,16 +77,16 @@ pub const KEY_ID_LEN: usize = 16;
 /// [spec]: https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md#ml-dsa-context
 pub const MLDSA_CONTEXT: &[u8] = b"keelsign-mcuboot-image-v1";
 
-/// The largest post-quantum signature TLV value in keelsign's v0.1 signing profile:
-/// 3,604 bytes, an HSS signature with two levels of LMS_SHA256_M32_H20 /
-/// LMOTS_SHA256_N32_W8. ML-DSA-65 (3,309 bytes) and every other profile set are smaller.
+/// The maximum post-quantum signature TLV length the verifier accepts: 3,924 bytes, an
+/// HSS signature with two levels of LMS_SHA256_M32_H25 / LMOTS_SHA256_N32_W8, the largest
+/// set the LMS/HSS parameter policy admits. ML-DSA-65 (3,309 bytes) and every other
+/// accepted set are smaller.
 ///
-/// A sizing budget for partitions and buffers (see [docs/image-format.md, Sizes][spec]),
-/// not a check: the verifier accepts any signature whose length matches its public
-/// key's parameter set.
+/// The image parser (SHA-35) enforces it as a hard parse bound. It also sizes partitions
+/// and buffers (see [docs/image-format.md, Sizes][spec]).
 ///
 /// [spec]: https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md#sizes
-pub const MAX_PQ_SIGNATURE_LEN: usize = 3_604;
+pub const MAX_PQ_SIGNATURE_LEN: usize = 3_924;
 
 #[cfg(test)]
 mod tests {
@@ -174,16 +174,16 @@ mod tests {
     }
 
     #[test]
-    fn max_pq_signature_len_is_hss2_h20_m32() {
-        assert_eq!(hss_w8_sig_len(32, 20, 2), 3_604);
-        assert_eq!(MAX_PQ_SIGNATURE_LEN, hss_w8_sig_len(32, 20, 2));
-        // Every other set in the v0.1 profile fits: ML-DSA-44/65 (FIPS 204 Table 2) and
-        // LMS/HSS with m in {24, 32}, H in {10, 20}, L in {1, 2}.
+    fn max_pq_signature_len_is_hss2_h25_m32() {
+        assert_eq!(hss_w8_sig_len(32, 25, 2), 3_924);
+        assert_eq!(MAX_PQ_SIGNATURE_LEN, hss_w8_sig_len(32, 25, 2));
+        // Every other accepted set fits: ML-DSA-44/65 (FIPS 204 Table 2) and LMS/HSS with
+        // m in {24, 32}, H5..=H25 and L in {1, 2} (equal heights bound mixed ones).
         for len in [2_420, 3_309] {
             assert!(len < MAX_PQ_SIGNATURE_LEN, "{len}");
         }
         for m in [24, 32] {
-            for h in [10, 20] {
+            for h in [5, 10, 15, 20, 25] {
                 for levels in [1, 2] {
                     assert!(hss_w8_sig_len(m, h, levels) <= MAX_PQ_SIGNATURE_LEN);
                 }
@@ -197,5 +197,9 @@ mod tests {
         assert_eq!(hss_w8_sig_len(24, 20, 1), 1_144);
         assert_eq!(hss_w8_sig_len(24, 10, 2), 1_852);
         assert_eq!(hss_w8_sig_len(24, 20, 2), 2_332);
+        assert_eq!(hss_w8_sig_len(32, 20, 2), 3_604);
+        assert_eq!(hss_w8_sig_len(32, 25, 1), 1_936);
+        assert_eq!(hss_w8_sig_len(24, 25, 1), 1_264);
+        assert_eq!(hss_w8_sig_len(24, 25, 2), 2_572);
     }
 }

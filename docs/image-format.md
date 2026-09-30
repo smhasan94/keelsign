@@ -31,6 +31,13 @@ Rules:
 
 - Signers emit exactly one `0x4BA0` and exactly one PQ signature TLV (`0x4BA1`, `0x4BA2`
   or `0x4BA3`), after every MCUboot TLV: key ID first, then the signature.
+- That order is a signer rule only. Verifiers MUST NOT depend on the relative order of
+  the keelsign TLVs, nor on their position among the MCUboot TLVs.
+- **Byte order.** keelsign supports only little-endian images: the image header fields,
+  both TLV info headers and every TLV header are little-endian, and a verifier rejects
+  anything else. imgtool can write big-endian images (`imgtool sign -e/--endian big`,
+  `scripts/imgtool/main.py:439-440`; the same option in imgtool 2.4.0); keelsign does not
+  support them.
 - Verifiers MUST ignore TLV types they do not know, in both areas, including the reserved
   `0x4BA4`–`0x4BAF`. A future keelsign TLV with verification meaning gets a new ID from
   the reserved block and a new version of this document.
@@ -58,8 +65,15 @@ M = SHA-256( image header || image body || protected TLV area )
 The protected TLV area is included with its TLV info header (magic `0x6908`) when
 `ih_protect_tlv_size != 0`, and absent otherwise. These are the bytes and the value of
 MCUboot's own `IMAGE_TLV_SHA256` (`0x10`): MCUboot hashes `ih_hdr_size + ih_img_size +
-ih_protect_tlv_size` bytes (`boot/bootutil/src/bootutil_img_hash.c:122-135`;
+ih_protect_tlv_size` bytes (sizes at `boot/bootutil/src/bootutil_img_hash.c:122-135`,
+hashing from `bootutil_sha_init` to `bootutil_sha_finish` at `:137-210`;
 `docs/design.md:159-164` and `:1349-1351`).
+
+The verifier MUST reject, rather than hash anyway, an image whose protected area is
+malformed: `ih_protect_tlv_size != 0` with a TLV info magic other than `0x6908`, or a
+protected info header whose `it_tlv_tot != ih_protect_tlv_size`. MCUboot's TLV iterator
+rejects both too (`boot/bootutil/src/tlv.c:66-77`). SHA-35 (parser) and SHA-42 (digest)
+enforce this.
 
 - **ML-DSA-44/65:** pure ML-DSA (FIPS 204 `ML-DSA.Sign` / `ML-DSA.Verify`) with message
   `M` and context string `MLDSA_CONTEXT` ([ML-DSA context](#ml-dsa-context)). Never
@@ -68,9 +82,13 @@ ih_protect_tlv_size` bytes (`boot/bootutil/src/bootutil_img_hash.c:122-135`;
 - The same `M` is signed by the Ed25519 half of a hybrid image ([Hybrid layout](#hybrid-layout)).
 
 The verifier computes `M` itself while hashing the image in chunks (SHA-42), and also
-requires the `IMAGE_TLV_SHA256` TLV to be present and equal to `M` (SHA-46). Images
-carrying `IMAGE_TLV_SIG_PURE` (`0x25`, `image.h:109`), MCUboot's "signature over the image,
-not its digest" mode, are rejected.
+requires the `IMAGE_TLV_SHA256` TLV to be present and equal to `M` (SHA-46). Every
+`IMAGE_TLV_SHA256` (`0x10`) present MUST equal `M`, and a keelsign verifier rejects an
+image carrying more than one. Images hashed with SHA-384 or SHA-512
+(`IMAGE_TLV_SHA384` `0x11` / `IMAGE_TLV_SHA512` `0x12`, `image.h:102-103`, no `0x10`) are
+unsupported in v0.1 and rejected. These rules are enforced by SHA-35, SHA-42 and SHA-46;
+the sample images do not exercise them. Images carrying `IMAGE_TLV_SIG_PURE` (`0x25`,
+`image.h:109`), MCUboot's "signature over the image, not its digest" mode, are rejected.
 
 ### Rationale
 
@@ -88,13 +106,17 @@ not its digest" mode, are rejected.
   the image is a protocol choice, not HashML-DSA. NIST has confirmed that computing μ
   outside the signing module is permitted ("FAQ – FIPS 204 – Computing mu", March 2025),
   which is the same property: the signer only needs `M`.
-- **Not HashML-DSA.** HashML-DSA is not allowed in CNSA 2.0 (CNSA 2.0 FAQ v2.1) and
+- **Not HashML-DSA.** NSA's CNSA 2.0 FAQ v2.1 says NSA "anticipates there will be no
+  need for HashML-DSA in NSS" ([CNSA 2.0](#accepted-lms-parameter-sets-and-cnsa-20)), and
   draft-connolly-cfrg-ml-dsa-security-considerations-02 §3.2.5 discourages it
   (verification ambiguity, hash-algorithm confusion); pure ML-DSA over `M` avoids both.
 - **Applies to both families.** The same `M` is the message for ML-DSA and LMS/HSS, so
   the parser, the hashing and the dispatch are identical for every algorithm.
 - **Protected TLVs are covered.** Everything MCUboot authenticates (header, body,
   protected TLVs such as the security counter) is covered by the PQ signature too.
+- **Collision assumption.** Signing `M` caps image binding at SHA-256 collision
+  resistance (128 bits), below ML-DSA-65's category-3 target; this is MCUboot's own
+  assumption for every signature it verifies.
 
 ## Key ID
 
@@ -113,6 +135,10 @@ The key ID only selects a trusted key: it is public, travels unprotected, and a 
 swapped ID selects either no key (`Error::KeyNotTrusted`) or another trusted key whose
 signature check then fails. 16 bytes make an accidental collision among a device's few
 trusted keys negligible, and `TrustedKeys::new` refuses duplicate IDs anyway.
+
+A PQ signature TLV whose type differs from the selected key's algorithm (for example an
+`0x4BA1` ML-DSA-44 signature naming an LMS/HSS key) is rejected with
+`Error::KeyAlgorithmMismatch`; it is never re-interpreted as another algorithm.
 
 The Ed25519 key of a hybrid image is identified by MCUboot's own `IMAGE_TLV_KEYHASH`
 (`0x01`): SHA-256 of the DER SubjectPublicKeyInfo, which is what imgtool embeds and
@@ -136,6 +162,12 @@ signature, both over the same `M`. The unprotected TLV area is, in order:
 - Exactly one KEYHASH + ED25519 pair, KEYHASH immediately before ED25519: MCUboot picks
   the key from the KEYHASH TLV and ignores a signature TLV that no KEYHASH precedes
   (`image_validate.c:364-403`, reset after each signature at `:433`).
+- "Exactly one pair" is a verifier rule too: in hybrid mode SHA-46 rejects an image with
+  zero KEYHASH + ED25519 pairs or with more than one. MCUboot's own semantics differ: it
+  verifies every signature whose KEYHASH names a known key, each result overwriting the
+  last (`image_validate.c:413-414`, taken at `:562-564`), and skips a signature that
+  follows an unknown KEYHASH (`:396-403`). This is the one intentional difference between
+  the two validators.
 - MCUboot TLVs first, then the keelsign TLVs, so `imgtool sign` output is kept byte for
   byte and keelsign only appends (and fixes up `it_tlv_tot`).
 - A PQ-only image has rows 1, 4 and 5.
@@ -156,10 +188,10 @@ An image carries exactly one PQ signature TLV; more than one is
 
 ## Sizes
 
-PQ and key-ID TLV values in keelsign's v0.1 signing profile (ML-DSA-44/65; LMS/HSS with
-LM-OTS W8, m ∈ {24, 32}, tree heights H10 and H20, one or two HSS levels). An HSS
-signature with W8 is `4 + L·(4 + (4 + n + p·n) + 4 + h·m) + (L − 1)·(24 + m)` bytes with
-n = m and p = 34 (n = 32) or 26 (n = 24) (RFC 8554 §4.5, §5.4, §6.2; SP 800-208 Table 4).
+PQ and key-ID TLV values for ML-DSA-44/65 and for LMS/HSS with LM-OTS W8, m ∈ {24, 32},
+tree heights H10, H20 and H25 and one or two HSS levels. An HSS signature with W8 is
+`4 + L·(4 + (4 + n + p·n) + 4 + h·m) + (L − 1)·(24 + m)` bytes with n = m and p = 34
+(n = 32) or 26 (n = 24) (RFC 8554 §4.5, §5.4, §6.2; SP 800-208 Table 4).
 
 | Item | Parameters | Levels | Bytes |
 |---|---|---|---|
@@ -168,19 +200,23 @@ n = m and p = 34 (n = 32) or 26 (n = 24) (RFC 8554 §4.5, §5.4, §6.2; SP 800-2
 | ML-DSA-65 | FIPS 204 | — | 3,309 |
 | LMS/HSS | M32 H10 | 1 | 1,456 |
 | LMS/HSS | M32 H20 | 1 | 1,776 |
+| LMS/HSS | M32 H25 | 1 | 1,936 |
 | LMS/HSS | M32 H10+H10 | 2 | 2,964 |
 | LMS/HSS | M32 H20+H20 | 2 | 3,604 |
+| LMS/HSS | M32 H25+H25 | 2 | 3,924 |
 | LMS/HSS | M24 H10 | 1 | 904 |
 | LMS/HSS | M24 H20 | 1 | 1,144 |
+| LMS/HSS | M24 H25 | 1 | 1,264 |
 | LMS/HSS | M24 H10+H10 | 2 | 1,852 |
 | LMS/HSS | M24 H20+H20 | 2 | 2,332 |
+| LMS/HSS | M24 H25+H25 | 2 | 2,572 |
 
-`MAX_PQ_SIGNATURE_LEN = 3,604` bytes (HSS-2, M32, H20+H20) is the largest of these. It is
-a budget, not a verifier limit: the verifier accepts H5, H15 and H25 too (for example
-HSS-2 M32 H25+H25 is 3,924 bytes), which are outside the v0.1 profile and must be budgeted
-separately.
+`MAX_PQ_SIGNATURE_LEN = 3,924` bytes (HSS-2, M32, H25+H25) is the largest PQ signature
+TLV value the verifier accepts ([Accepted LMS parameter sets](#accepted-lms-parameter-sets-and-cnsa-20):
+H5–H25, at most two levels; every mixed-height two-level signature is smaller). The
+parser (SHA-35) enforces it as a hard parse bound on the PQ signature TLV length.
 
-Worst-case unprotected TLV area of a v0.1 hybrid image:
+Worst-case unprotected TLV area of a hybrid image:
 
 | Part | Bytes |
 |---|---|
@@ -189,12 +225,19 @@ Worst-case unprotected TLV area of a v0.1 hybrid image:
 | KEYHASH TLV (4 + 32) | 36 |
 | ED25519 TLV (4 + 64) | 68 |
 | Key-ID TLV (4 + 16) | 20 |
-| PQ signature TLV (4 + `MAX_PQ_SIGNATURE_LEN`) | 3,608 |
-| Total | 3,772 |
+| PQ signature TLV (4 + `MAX_PQ_SIGNATURE_LEN`) | 3,928 |
+| Total | 4,092 |
 
 **Budget rule:** reserve one 4 KiB flash page after the image body for the TLV areas
-(protected and unprotected). The worst case above leaves 324 bytes for protected TLVs.
-Per-board slot and partition numbers are SHA-58.
+(protected and unprotected). The worst case above leaves 4 bytes for protected TLVs:
+room for the protected TLV info header and nothing else, so an image with the largest PQ
+signature and any protected TLV (a security counter, for example) needs more than one
+page.
+
+The TLV areas count against the slot's usable size, which is the slot minus MCUboot's
+trailer: MCUboot rejects an image whose TLV area ends beyond `bootutil_max_image_size`
+(`boot/bootutil/src/bootutil_misc.c:355`, checked at `image_validate.c:300`). Per-board
+slot and partition numbers are SHA-58.
 
 ## ML-DSA context
 
@@ -210,35 +253,62 @@ made with the same ML-DSA key. The ML-DSA backend (SHA-44) passes it to
 
 ## Accepted LMS parameter sets and CNSA 2.0
 
+**The only CNSA 2.0-compliant keelsign configuration is single-tree LMS (L = 1) verified
+under the strict policy (planned in SHA-240). ML-DSA-44 and ML-DSA-65 are never CNSA 2.0
+algorithms: CNSA 2.0 uses ML-DSA-87.**
+
 keelsign-verify accepts HSS keys and signatures with LM-OTS W8, SHA-256 (m = n = 32) or
 SHA-256/192 (m = n = 24), tree heights H5–H25, the same hash at every level, and at most
 two levels. Today this policy is `keelsign_verify::lms::ParameterPolicy::cnsa_2_0()`, and
-`lms::verify` / `DefaultBackend` use it.
+`lms::verify` / `DefaultBackend` use it; despite its name it accepts `L = 2`.
 
-CNSA 2.0 (CNSA 2.0 FAQ v2.1, December 2024) allows LMS and XMSS for firmware and software
-signing only, and only the single-tree variants: HSS and XMSS^MT are not approved for
-national security systems (NSS). An HSS key with two levels is therefore not CNSA 2.0
-compliant, so the name `cnsa_2_0()` for a policy that accepts `L = 2` is inaccurate.
-**Planned split** (a separate follow-up ticket; the code does not change in SHA-37):
+Sources:
+
+- **ML-DSA-87 is CNSA 2.0's ML-DSA** (NSA-authored IETF drafts, checked for this
+  document): draft-jenkins-cnsa2-pkix-profile-05 (M. Jenkins, NSA-CCSS, July 2026) §4:
+  "The signature applied to all CNSA Suite certificates and CRLs MUST be made with a
+  ML-DSA-87 signing key."; draft-guthrie-cnsa2-ipsec-profile-04 (R. Guthrie, NSA-CCSS,
+  July 2026) §3: "NSA has selected two: ML-DSA-87 [FIPS204] for signing and ML-KEM-1024
+  [FIPS203] for key establishment."
+- **HashML-DSA.** NSA announced CNSA 2.0 FAQ v2.1 on the NIST pqc-forum ("Updates to the
+  CNSA 2.0 FAQ", Morgan B. Stern, NSA Cybersecurity, 13 January 2025); a reply in that
+  thread (J. Mattsson, 14 January 2025) quotes the FAQ's sentence: "Because HashML-DSA
+  does not offer any functionality not already offered by the CNSA hash functions
+  combined in a standard way with ML-DSA-87, and because standard ML-DSA-87 is expected to
+  be widely supported, NSA anticipates there will be no need for HashML-DSA in NSS."
+  keelsign never uses HashML-DSA ([Signing mode](#signing-mode)).
+- **Single-tree LMS/XMSS only, for firmware — from secondary sources.** The CNSA 2.0 FAQ
+  v2.1 PDF itself could not be retrieved (media.defense.gov returns HTTP 403), so this
+  rule is taken from M. Ivezic, "NSA Updates CNSA 2.0 Guidance After NIST Finalizes
+  Post-Quantum Standards", PostQuantum.com, 29 December 2024: "HSS (the multi-tree variant
+  of LMS) and XMSS^MT are not approved for NSS. Only single-tree LMS and XMSS are allowed
+  for software and firmware signing." It must be re-checked against the FAQ itself. Under
+  it, an HSS key with two levels is not CNSA 2.0 compliant.
+
+**Planned split** (follow-up ticket SHA-240; the code does not change in SHA-37):
 
 | Policy | Levels | LM-OTS | Hash | Use |
 |---|---|---|---|---|
 | `cnsa_2_0()` | `L = 1` only | W8 | SHA-256 or SHA-256/192 | NSS deployments that must follow CNSA 2.0 |
 | `keelsign_default()` | `L ≤ 2` | W8 | SHA-256 or SHA-256/192 | the device default (`lms::verify`, `DefaultBackend`) |
 
-**Deviation from CNSA 2.0:** the device default accepts two-level HSS, which CNSA 2.0 does
-not approve for NSS; two levels let one long-lived top-level key certify many short-lived
-signing trees. NSS deployments must sign with a single LMS tree (`L = 1`) and verify with
-the strict `cnsa_2_0()` policy. Note also that CNSA 2.0's ML-DSA parameter set is
-ML-DSA-87; keelsign's ML-DSA-44/65 are not CNSA 2.0 algorithms (ML-DSA-87 is out of scope,
-see [Out of scope](#out-of-scope)).
+**Deviation from CNSA 2.0:** the device default accepts two-level HSS, which CNSA 2.0 (per
+the secondary source above) does not approve for NSS; two levels let one long-lived
+top-level key certify many short-lived signing trees. NSS deployments must sign with a
+single LMS tree (`L = 1`) and verify with the strict `cnsa_2_0()` policy (SHA-240). ML-DSA
+images, hybrid or not, are outside CNSA 2.0 whatever the policy (ML-DSA-87 is out of
+scope, see [Out of scope](#out-of-scope)).
 
 ## MCUboot compatibility
 
 - **Stock MCUboot ignores keelsign TLVs.** `bootutil_img_validate` walks every TLV and
   acts only on the types it was built for; its `switch` has no `default`, so other types
   are skipped (`image_validate.c:306-551`). A hybrid image therefore boots on an
-  unmodified Ed25519 MCUboot, which checks the SHA256, KEYHASH and ED25519 TLVs.
+  unmodified Ed25519 MCUboot, which checks the SHA256, KEYHASH and ED25519 TLVs, when the
+  TLV allow list is disabled or extended (Zephyr enables it by default; see below).
+- **No PQ guarantee on stock MCUboot.** Because a stock MCUboot ignores the keelsign PQ
+  TLVs, a hybrid image whose PQ signature is stripped or garbage still boots there. The
+  PQ guarantee exists only in a keelsign-enabled bootloader.
 - **Unprotected, not protected.** The PQ signature cannot be inside the area it signs,
   and the key ID follows MCUboot's KEYHASH, which is also unprotected. `imgtool sign
   --custom-tlv` accepts vendor types `0x00a0`–`0xfffe` (`scripts/imgtool/image.py:103-104`,
@@ -249,7 +319,8 @@ see [Out of scope](#out-of-scope)).
   `docs/design.md:170-176`). Zephyr's `CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST` defaults to `y`
   (`boot/zephyr/Kconfig:1327-1337`, mapped in
   `boot/zephyr/include/mcuboot_config/mcuboot_config.h:155-156`), and the Mynewt, Mbed,
-  Cypress and Espressif ports define it unconditionally. A keelsign-enabled MCUboot build
+  Cypress, Espressif and NuttX ports define it unconditionally (NuttX:
+  `boot/nuttx/include/mcuboot_config/mcuboot_config.h:138`). A keelsign-enabled MCUboot build
   (SHA-62) MUST either add `0x4BA0`–`0x4BA3` to the allow list or disable it. A stock
   Zephyr MCUboot with the default allow list **rejects** keelsign images.
 - **SHA256 TLV is mandatory.** MCUboot requires the hash TLV and compares it
@@ -278,7 +349,7 @@ Each row was checked against the cited source at the stated commit.
 - [x] Zephyr enables the allow list by default: `boot/zephyr/Kconfig:1327-1337` and
   `boot/zephyr/include/mcuboot_config/mcuboot_config.h:155-156` @ `a8ffd2c`.
 - [x] The image hash covers header, body and the protected TLV area with its info header:
-  `boot/bootutil/src/bootutil_img_hash.c:122-135` and `docs/design.md:159-164`,
+  `boot/bootutil/src/bootutil_img_hash.c:122-135`, `:137-210` and `docs/design.md:159-164`,
   `:1349-1351` @ `a8ffd2c`.
 - [x] The SHA256 TLV must be present and equal to the computed hash:
   `boot/bootutil/src/image_validate.c:341-362`, `:553-557` @ `a8ffd2c`.
@@ -294,7 +365,7 @@ Each row was checked against the cited source at the stated commit.
   `boot/bootutil/src/image_validate.c:87-90` @ `a8ffd2c`.
 - [x] `IMAGE_TLV_SIG_PURE` (`0x25`) marks a signature over the image instead of the hash:
   `boot/bootutil/include/bootutil/image.h:109-111` and
-  `boot/bootutil/src/image_validate.c:273-284` @ `a8ffd2c`.
+  `boot/bootutil/src/image_validate.c:273-284`, `:425-431` @ `a8ffd2c`.
 - [x] nRF Connect SDK uses `0x00A0` and `0x00A1`, which ruled out keelsign's first IDs:
   nrfconnect/sdk-mcuboot `boot/zephyr/firmware_loader_bm.c:23` @ `2b21b8b`, and
   nrfconnect/sdk-nrf `sysbuild/Kconfig.mcuboot:364-367`, `modules/mcuboot/Kconfig:155-157`
@@ -312,7 +383,7 @@ Each row was checked against the cited source at the stated commit.
 - The image parser (SHA-35), digest computation (SHA-42), hybrid policy and Ed25519
   verification (SHA-46), the ML-DSA backend (SHA-44), the CLI (SHA-49, SHA-51),
   per-board partition numbers (SHA-58) and the MCUboot allow-list glue (SHA-62).
-- The `cnsa_2_0()` / `keelsign_default()` policy split in code (follow-up ticket).
+- The `cnsa_2_0()` / `keelsign_default()` policy split in code (follow-up ticket SHA-240).
 
 ## Sample images
 
@@ -352,7 +423,17 @@ python3 scripts/gen_image_fixtures.py --check --imgtool .venv-imgtool/bin/imgtoo
   §2.2.2 (context strings), §3.2.4 (external μ), §3.2.5 (HashML-DSA),
   <https://datatracker.ietf.org/doc/draft-connolly-cfrg-ml-dsa-security-considerations/02/>.
 - NSA, Commercial National Security Algorithm Suite 2.0 FAQ, version 2.1, December 2024,
-  <https://media.defense.gov/2022/Sep/07/2003071836/-1/-1/0/CSI_CNSA_2.0_FAQ_.PDF>.
+  <https://media.defense.gov/2022/Sep/07/2003071836/-1/-1/0/CSI_CNSA_2.0_FAQ_.PDF>
+  (HTTP 403 when this document was written; not read directly).
+- M. Jenkins (NSA), draft-jenkins-cnsa2-pkix-profile-05, July 2026, §4,
+  <https://datatracker.ietf.org/doc/draft-jenkins-cnsa2-pkix-profile/05/>.
+- R. Guthrie (NSA), draft-guthrie-cnsa2-ipsec-profile-04, July 2026, §3,
+  <https://datatracker.ietf.org/doc/draft-guthrie-cnsa2-ipsec-profile/04/>.
+- M. B. Stern (NSA), "Updates to the CNSA 2.0 FAQ", NIST pqc-forum, 13 January 2025,
+  <https://groups.google.com/a/list.nist.gov/g/pqc-forum/c/sS47RFCdJ74>.
+- M. Ivezic, "NSA Updates CNSA 2.0 Guidance After NIST Finalizes Post-Quantum Standards",
+  PostQuantum.com, 29 December 2024 (secondary source),
+  <https://postquantum.com/security-pqc/nsa-cnsa-2-0-faq-v2-1-update/>.
 - RFC 8554, Leighton-Micali Hash-Based Signatures, <https://www.rfc-editor.org/rfc/rfc8554>.
 - NIST SP 800-208, Recommendation for Stateful Hash-Based Signature Schemes,
   <https://doi.org/10.6028/NIST.SP.800-208>.
