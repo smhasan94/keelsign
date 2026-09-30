@@ -40,12 +40,13 @@ const FIXTURES: [&str; 7] = [
 ];
 
 /// The golden MCUboot images (SHA-35), as named in MANIFEST.json.
-const GOLDEN: [&str; 5] = [
+const GOLDEN: [&str; 6] = [
     "mcuboot-rsa2048.bin",
     "mcuboot-ecdsa-p256.bin",
     "mcuboot-ed25519.bin",
     "mcuboot-ed25519-padded.bin",
     "rejected/mcuboot-ed25519-bigendian.bin",
+    "mcuboot-ed25519-200k.bin",
 ];
 
 fn fixture_dir() -> PathBuf {
@@ -532,5 +533,5 @@ fn golden_images_match_manifest() {
         );
         parsed += 1;
     }
-    assert_eq!(parsed, 4, "four little-endian golden images parse");
+    assert_eq!(parsed, 5, "five little-endian golden images parse");
 }

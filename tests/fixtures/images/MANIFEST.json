@@ -246,6 +246,34 @@
       "unprotected_tlv_lens": "32 32 71",
       "unprotected_tlvs": "0x0010 0x0001 0x0022"
     },
+    "mcuboot-ed25519-200k.bin": {
+      "body_drbg_label": "image-fixture-body-200k",
+      "body_len": 204800,
+      "bytes": 205579,
+      "description": "as mcuboot-ed25519.bin with a 204,800-byte body in a 0x40000-byte slot (chunked digest, SHA-42)",
+      "digest_hex": "1aa43db8cd306a3a38c9bb6f39a612bc137959ec2bb5e2595c9297751a0d8d7e",
+      "endian": "little",
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 204800,
+        "protect_tlv_size": 123,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
+      "key": "keys/ed25519-test-key.pem",
+      "keyhash_hex": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190",
+      "protected_tlv_lens": "4 91 12",
+      "protected_tlvs": "0x0050 0x0060 0x0040",
+      "sha256": "8717e00526cdde01e8760799083d61eb8b66ee9c3833eb6264a5a3a3c35b18b7",
+      "signature_len": 64,
+      "signature_tlv": "0x0024",
+      "slot_size": 262144,
+      "tlv_end": 205579,
+      "unprotected_tlv_lens": "32 32 64",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024"
+    },
     "mcuboot-ed25519-padded.bin": {
       "bytes": 8192,
       "description": "as mcuboot-ed25519.bin, padded to a 0x2000-byte slot with the boot trailer (--pad)",
