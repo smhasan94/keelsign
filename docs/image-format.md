@@ -393,7 +393,32 @@ Each row was checked against the cited source at the stated commit.
 ED25519 TLVs, made with a committed Ed25519 **test key** from a fixed public seed) plus the
 keelsign TLVs, with LMS/HSS signatures from the pinned independent signer hsslms 0.1.3.
 `MANIFEST.json` records every file's size and SHA-256 and the imgtool and cryptography
-versions. `keelsign-verify/tests/image_fixtures.rs` walks and verifies them.
+versions. `keelsign-verify/tests/image_fixtures.rs` parses them with
+`keelsign_verify::image` and verifies them.
+
+The same directory holds golden MCUboot images for the image parser (SHA-35): plain
+imgtool 2.4.0 output, no keelsign TLVs, each with a security counter (7), a dependency
+(image 1, version 1.2.3+4) and a boot record, so they carry the protected `SEC_CNT`,
+`BOOT_RECORD` and `DEPENDENCY` TLVs and the unprotected `SHA256`, `KEYHASH` and signature
+TLVs:
+
+| File | Signature | Notes |
+|---|---|---|
+| `mcuboot-rsa2048.bin` | RSA-2048 PSS (`0x20`) | key `keys/rsa2048-test-key.pem` |
+| `mcuboot-ecdsa-p256.bin` | ECDSA P-256 (`0x22`) | key `keys/ecdsa-p256-test-key.pem` |
+| `mcuboot-ed25519.bin` | Ed25519 (`0x24`) | key `keys/ed25519-test-key.pem` |
+| `mcuboot-ed25519-padded.bin` | Ed25519 (`0x24`) | padded to a `0x2000`-byte slot with the boot trailer (`--pad`); bytes after the TLV area are allowed |
+| `rejected/mcuboot-ed25519-bigendian.bin` | Ed25519 (`0x24`) | big-endian (`-e big`); rejected with `BadMagic` |
+
+The RSA-2048 and ECDSA P-256 keys are **test keys** derived deterministically from fixed
+public seeds, like the Ed25519 one; every committed key file starts with `# TEST KEY`.
+RSA-PSS and ECDSA signatures are randomised, so the script signs once (`imgtool sign
+--sig-out`), commits the base64 signatures under `sigs/`, and rebuilds the images from
+them with `imgtool sign --fix-sig sigs/NAME.sig --fix-sig-pubkey KEY`, byte for byte.
+`--resign` signs afresh and rewrites `sigs/` (needed only when the keys, the body or the
+imgtool options change). For each golden image `MANIFEST.json` records the header fields,
+the TLV types and lengths per area, `M` (`digest_hex`), `tlv_end`, the expected parse
+result (`expect_parse`) and whether `imgtool verify` applies (little-endian only).
 
 Tool prerequisite for regenerating (not for testing): `imgtool==2.4.0` in a virtual
 environment, passed with `--imgtool PATH` or found on `PATH`.
@@ -403,6 +428,9 @@ python3 -m venv .venv-imgtool && .venv-imgtool/bin/pip install imgtool==2.4.0
 python3 scripts/gen_image_fixtures.py --imgtool .venv-imgtool/bin/imgtool
 python3 scripts/gen_image_fixtures.py --check --imgtool .venv-imgtool/bin/imgtool
 ```
+
+`--check` also runs `imgtool verify --key` on every little-endian image and compares the
+TLV listing of `imgtool dumpinfo` with `MANIFEST.json` for each little-endian golden image.
 
 ## References
 

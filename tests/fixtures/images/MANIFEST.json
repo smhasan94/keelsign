@@ -9,6 +9,12 @@
     "version": "1.2.3+4"
   },
   "keys": {
+    "keys/ecdsa-p256-test-key.pem": {
+      "keyhash_hex": "1b1a70191fb7cfeab87188d256a25727f93b079b9b59533009905a6052689a46",
+      "note": "TEST KEY derived from a fixed public seed; never use for real images",
+      "public_der_hex": "3059301306072a8648ce3d020106082a8648ce3d0301070342000403725d6ddbb7aca85517c18c8a47431c39fd7ce902638f941715c9472d6f9a2b1bb111e35ba6ecc1e1b79fb6ed7d9b444a87004f8728cf2c8da08031ec7712c4",
+      "sha256": "3b5db28409928e59312594c1a30355817a5d8551c3e1651a868030166096e05e"
+    },
     "keys/ed25519-test-key.pem": {
       "note": "TEST KEY from a fixed public seed; never use for real images",
       "sha256": "6b483a1a801290a669339117036edce93f7482b423bedc04edeb8eedd4f50ca3"
@@ -17,6 +23,12 @@
       "keyhash_hex": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190",
       "note": "DER SubjectPublicKeyInfo of the Ed25519 test key; SHA-256 of it is the KEYHASH TLV",
       "sha256": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190"
+    },
+    "keys/rsa2048-test-key.pem": {
+      "keyhash_hex": "243b3b79ba834d441a927be78ec33fa759527030006ffa110815de892b3988af",
+      "note": "TEST KEY derived from a fixed public seed; never use for real images",
+      "public_der_hex": "3082010a02820101009b22c608f4851d87e2a0abaaacea2464eda781b107c450f544afadb781ee25284c30eb8049c994093a7ae90758f689fa287ed72e9103f32a000e36da7362540e551f68b66330093d067efe632ba6e991796cd1cdc8628cbf4c89675bdb8b3b8933c903bf323c11bcec8b4a6e1990950a7f4daeabb75a0926eec9f35bb40d18cb8bb2e2ec0895abcae78aeb51a6c229a28746a5c9bcbc0602c7b0c4aa8e97268f5f277b4096aa78d45a0a980b61b26bbf2d67a2f6530bcdb24e1b8a3ad2319e88ead1a3d5b5940125aa76cf9958703b946ccb91a09c9654e72415a83cd351456765d485c071b7ed71d9ad3c6f4804f3b60070e9b3082880d40b7574e44c60fd2d0203010001",
+      "sha256": "37f455bc4aa3c1bcb334f47a4f65789d195bdf91452410451902b23137da6c8e"
     }
   },
   "outputs": {
@@ -26,12 +38,24 @@
       "description": "invalid: one key ID and two PQ signature TLVs (LMS M32_H5, then ML-DSA-44 filler)",
       "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
       "ed25519": false,
+      "expect_parse": "Ok",
       "expect_verify_pq": "MultiplePqSignatures",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
       "key_id_hex": "f7e6078d1f2b541747b299359be05b7d",
+      "protected_tlv_lens": "",
       "protected_tlvs": "",
       "public_key_hex": "000000010000000500000004a5868fba0d62d858ef78936906d35366cd2216c0ebcfc3f80750bed362bdd3a0fd3303525084981a51824b5162c3d141",
       "sha256": "ee510ec1ec44e0048ad2cde31832a76764ad908a9c69b291b16c0e106675bdf3",
       "signature_lens": "1296 2420",
+      "tlv_end": 5832,
+      "unprotected_tlv_lens": "32 16 1296 2420",
       "unprotected_tlvs": "0x0010 0x4ba0 0x4ba3 0x4ba1",
       "verifiable": false
     },
@@ -41,12 +65,24 @@
       "description": "HSS L=2, both levels LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
       "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
       "ed25519": false,
+      "expect_parse": "Ok",
       "expect_verify_pq": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
       "key_id_hex": "76d91a3bd3171a9a49a03660c2f4424d",
+      "protected_tlv_lens": "",
       "protected_tlvs": "",
       "public_key_hex": "000000020000000500000004e285d641ec6950f411c95dca2016c790705267a95c16533583f0a916a5f0e47704395bb096e450fae01772e4de1b53d4",
       "sha256": "4f520995b91fedeeeff42c51b9fef88ec1a0468de930095cb9e9017c3a5d9dd7",
       "signature_lens": "2644",
+      "tlv_end": 4756,
+      "unprotected_tlv_lens": "32 16 2644",
       "unprotected_tlvs": "0x0010 0x4ba0 0x4ba3",
       "verifiable": true
     },
@@ -56,12 +92,24 @@
       "description": "hybrid: imgtool Ed25519 (KEYHASH + ED25519) plus LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, HSS L=1",
       "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
       "ed25519": true,
+      "expect_parse": "Ok",
       "expect_verify_pq": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
       "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "protected_tlv_lens": "",
       "protected_tlvs": "",
       "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
       "sha256": "a90459d7adb3b4b12f1bdf8f07f68b1c6c91b4cf489e4b023385462a23c55295",
       "signature_lens": "1296",
+      "tlv_end": 3512,
+      "unprotected_tlv_lens": "32 32 64 16 1296",
       "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3",
       "verifiable": true
     },
@@ -71,12 +119,24 @@
       "description": "LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, HSS L=1",
       "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
       "ed25519": false,
+      "expect_parse": "Ok",
       "expect_verify_pq": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
       "key_id_hex": "4796cd74df2ec5e2bce1f88598bbcc1f",
+      "protected_tlv_lens": "",
       "protected_tlvs": "",
       "public_key_hex": "0000000100000005000000047b6845092e596e395f31a236803249bb11b63a11db626b6cd7f9454129f27ab7a87f2b987c77a51f7ee36fdb1c58cc0a",
       "sha256": "7ef64eca6f168a23a1545f52dc59e179d542d3a5011dde8faa674137f2c27971",
       "signature_lens": "1296",
+      "tlv_end": 3408,
+      "unprotected_tlv_lens": "32 16 1296",
       "unprotected_tlvs": "0x0010 0x4ba0 0x4ba3",
       "verifiable": true
     },
@@ -86,12 +146,24 @@
       "description": "LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, HSS L=1, with protected SEC_CNT and vendor TLV 0x10A0",
       "digest_hex": "14bc390be01003e0c0a84e577c1156d8423f93b68337bcf0df0e9ffc189add83",
       "ed25519": false,
+      "expect_parse": "Ok",
       "expect_verify_pq": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 45,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
       "key_id_hex": "7c00207e36816370cd4ddecf93226998",
+      "protected_tlv_lens": "4 29",
       "protected_tlvs": "0x0050 0x10a0",
       "public_key_hex": "000000010000000500000004d21bc81cddbed63d809ce2070981cb9ce7171efe7b2e79b6d62e77a214aa3b01830b4b3dd6e354fc3c08f05430258727",
       "sha256": "50d504a38e88244ed2ed44ecd842c7faad6f91f9690d1eb7cd39026104c7eda1",
       "signature_lens": "1296",
+      "tlv_end": 3453,
+      "unprotected_tlv_lens": "32 16 1296",
       "unprotected_tlvs": "0x0010 0x4ba0 0x4ba3",
       "verifiable": true
     },
@@ -101,12 +173,24 @@
       "description": "ML-DSA-44 filler signature and public key (length-correct, does not verify)",
       "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
       "ed25519": false,
+      "expect_parse": "Ok",
       "expect_verify_pq": "UnsupportedAlgorithm",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
       "key_id_hex": "c7db8a9e6628b97767a73195fcbd1f6d",
+      "protected_tlv_lens": "",
       "protected_tlvs": "",
       "public_key_hex": "db62d8f381f03d5447e49f75235e0a4d25c4366e7c4dc1523c8753480baf9de04a2ac4cf5a17676081454c7f7a6f0868d220accfdeef7e615a034feecd0300fdecbccca5c316c88863fa0d15a283b2f382e42abb50cd3a6594887fa200bdeb77418db59840ed74d2771ee5e0353c9f33f906032e1ed6b5f60e59e9a78bc9944e7827d8ebe690e653b6527f911980669be09547e46e92eae8d41c728edfeb5688d4f3b93283a9ca584273dd39b53e168cd3d70e791d6a7127a618922e188246266c681a6fadaf26ceefade0c424f08c34b8f8c638fc7c1e2b8cf5defbe09025f3bca645d577eb6534e81bc0d5daf8837d8e48f0aaff0a01405ed12d94634c9a58edd94238d2ec793bb90e7bd900ff19af1174fddc1a2b6a596107a2f8e50a2d87c2154f812b7eb5d9ff760344153dff3be720c3da128ad165caab84c435b8cce9ed71094872dc8e367f87734bd3f17fb994c5b2805703397060cf9d137b3c78ef73878bcc11a1137608d8e62e606ce554efdd0e262ba7d220e6a847ed2ce8a40190b6cc564097e2c254dc7d0a25d8ea3964dafa65893339df609aed97b5da9b3576069cdcbd9f7023b960e2fc42801d984a97710cf1e6e4845cb6a2bafd8b7b0c7da0b91bba04279fa98a357c8d10d9dcb021c0ad811b42a0a8066642b5ab9e1f993e565d6d19adea22eef9e6c6bbbd29df592a586452f5e2af04ccfc4660c58ff3190154efd76b5a86e9f2e83f93dfbf21f28dcaf01bf13eeabc592bb76ee04cbe85229e121f3e4b4e6bb9e3ac598a5570961e961f421c2a37eb601b205392b05089e062fc2a0d92faf27d5cca42177cfa520ca61cd4c56054951ac84f772a49ea8ca7633ecdeb53a4bf12598672fe78b513c820e0f7f61dda32d41e6c00f36780d0d5a780ebbf442f18e54b67852cd6e1e0e74df4faa7df0fde4446e5c960f7edbe64fedb68b07a61efd24fe4d4fcecd0b31da6aa32735be7829c26ea6271510c4c037d7392551139a9c78adf5e3134ea04793c44bd211240a74299c8d7c6e05c033a633815c54247dbf9fb336e60ff041c38455ee9faee4b3ae596501feb63fa2ef5652eeec5542fc5f8be9a9848bd8904406fcc50a01b6a466960e2aee4ea606e43ae282bca441f0f57e2ade14b0053c02fc49e4e24bb9019dad0f5a372674ff623dd492f7adb0cb69c5f7d258035ef4786fd0fd4d3534cfb8d09fa426a8d22b4f68756d52afaf98039294b8317519a734d175faffce5f580fe2659876681e3165cde674f6015123374567bc8d416ebfc9273c9a4f41c5dd9520dfa731474c39ece0579568b29556603b1c777571eeab62279008033c0e9196ffa307dd3973f47472872dd5c9e7bc53553c31b6b17d7373561b25a2cc64f8536cdbf99fd5f1e708b213fb0b96816f97d5a439eae92a77b8d09384c5a27d6e47075e255881aee185b28c915e360c5bd51203ff0b400803cf827062f13a8213d4edf697800629a15b00ff403f258c13b4f293815d733519b2e63a98b90fc17cdda14a392026ce2c6a9ba397ed189d9306ef9beff8b6bd8b3a0f6b0acf037108e916e8ced9265b5093fe74685b0ac5c213bcd2fed42af39fd96e15dbd7801448768c4ec5aa0f56209e40f00e86e74a6c2490261e665cfdcd2d1818b36e32d967666835c7f345f9b9d482b2772e732223d798268247e1e2ca6acf8071914064ddbe1f500f49f650a6590b7eb82b62885856dd52098daf34369727b2b661923cd5a6c55ce43d17b7f5d9687fcc0f83d1da13c660145182339a4ee8782d1e5829d098953da91a192e0097afe59696480852c11a2855572c3a6b2867a7e20167cb8b195a0989e548d",
       "sha256": "454242aa74e674bdb02d21d09125b7945de803de2f30977aea883336f9b5bd3e",
       "signature_lens": "2420",
+      "tlv_end": 4532,
+      "unprotected_tlv_lens": "32 16 2420",
       "unprotected_tlvs": "0x0010 0x4ba0 0x4ba1",
       "verifiable": false
     },
@@ -116,14 +200,165 @@
       "description": "ML-DSA-65 filler signature and public key (length-correct, does not verify)",
       "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
       "ed25519": false,
+      "expect_parse": "Ok",
       "expect_verify_pq": "UnsupportedAlgorithm",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
       "key_id_hex": "3c06ca90cca77e17e207b738a4e55096",
+      "protected_tlv_lens": "",
       "protected_tlvs": "",
       "public_key_hex": "307dc8271a528707a59d784f8110643c89124b6c93bfae8988257f06d4fbf29d12a377e43810723c3aa3abc54ce03bd4151fd6fe868575a7fee2d5c497c3bd9b2a44e85b5490112dbfabcbe9c3a8d416856ec4e4ce7309379f42b9689267a42a035ad7167b526c6270c1b0de9b097a82d4e2bb5b9cd877c45c436141bd426dbc210cf5fe4eec47e06ad8b87e8c8c1d58ef34dffd2ce3737c7b8d5320b3adb235181b9bfa4c7e5b595ec6164aed4887abe66b87030a323cdcb8334a9c171d7c3dc8138abbc6243a1face7ce9ff16b01e65461122f836002590336d1a2be0512e5985539b901cc7e6daf5e43a9507b11f6154bf5892093443b020062ee0240608efda42d51a079dc05a2375bd484d741e317be6ced59fd5a9e76db7ce03093250ade64c85aff99331e843928e70d3278748599f64c3a039919e0da41832cb0b10c8dfc6fbe3c4a05a3ab8dfb156f08ffa0ac4e9bd722920f2124411f5d42187bf4b9780d0fcd17c4148d5e9859d9226363f40f6d509dbfa6d21cfe36a1b29e06757fc245c807f4ca3e9d54eec8c9e63511f583e39fa0a9475931e050e7ec15980c87cca6248c0fc7c0f0f9d1207647ca25df31eee89da62abd150cb8c8946270620056bb89867893e299dcb55f684d1dbc98e04049411846cd9ed1edcf99fd04a129251f50527844ab0361f12681e2857d2959218bf82a1b82b05d6b5b8b6e8b4a2526259940e0dffe2f3a64a360aa5d3d2ef74bbf24e65f475eb5607bdad712151a72847df651be2a705fc17baa20771bc618333ba5d219c89c84fd7761e105ac37880cafaec1a27eeaa94628e0903141bb57b5cc5c00fe5ec961152947e7ccfa57a50cde23f08dfc8b69703080abee6191d7d8e3e12df1ac8bff11ba9585f6c7f2f6f1a6b01e0cb8a6f38d40cbc0b828ab54b85046e4443ef380ece7e3d47d736091c588d7597e90648eae81627aff71bef619276dfc8b5b434fede4e09d808e2f3d216abe8da715e1465a84c6e9b9e6bf88cfd073d0f4d24ab2ae231ab1f1290fefe1f2951bf0a8461fd3f01038071b0a5a61a3a1b8c482544eb87e671e06730fd59cb0592093888c684ac41ffba69333ad2aa1ccceab9edc7a2960605e7fab5fa22d8c75fe8f678be11e9aa784f8bad2874adada6f30d3313859de8d0537ae57fe04368d5535be32e94821b32701ba5aee691efdd9be2e611537d90f994233d82fe31c260bb96848eff57749a4d64f47c9082db725b34e50bff7ddf7ac1d5da9b5ef160aced10bf59e89e2266632979a78ee7c093ab5c2a07bd2e2da043e79a4f3d977d5bad3cc9c63f15a3a696d872d3010c936b13d267487e4e637289e8ec1e8a9a8b7d8f8f201d106282bce5ff7908542ede8e75721b99dde33a99d382e5a1bc1a3ecd6738e0419b9d6e0053c29deae4edd1d2ce076bfdd31355af336e9f9b9ca6a3aa6f50f076f3359a8392a24658a73bbb1552cf671a1e45b8118a8b265f305626ee2f57b632481295435152b90fb7c76ac98e28501623668e61446a27cead0926c53cee472346010538ac319da0bd8c1e48579379f431161e3b5b49551d013b4a5a9be7f9aa94f3da25da045b66759569eb12b18c8d6fedf2c6515709ef219af267cd82a48ebc376ccc956fb6e1c2d0707ee4743f0dbdd24d9d2ed41712c2283d4ce1cc2b8e3b7739e55f29c9fdd36b77fa4325c9b8c1075358f5bc16e00a85671c355f88442c215bf9ec4c411241910d5ed91a0535fb9e3142830e2e14950e884210cb01b04125d08dfeb201e052c11daab35dc6189a27ee67bf388a80437e26dd23138273deebfd70a1689388e33b8d7658200971075b72d5d2be34f51e0504fded0c32a6ba0d0dc600ec7d5097ada56f2c44891e8ccfe868e90c7a22f1d3f7c36b72c1d9ebb7e0d4396ef1dff8366fb16f8e78491e84c55cede4c99692659787222dbd0170ce0f5f1b23d78bc2a943560d7c9a4c9ae67fce7e985280f563e0679872a09659a4bb54c37889c6808082b00d6a644ce69188cf5c176c146dd5ca39ae0443413439cb69ffa3e0c6fb263537666bffd1dbfd9e2cc2e4343ebc5d663738a89d771a41c528c0609fba3c4ca245c972884be0e2e2b6aabd00e1f3da0a4a6774bd553750183aab7f6eee6b479766766c726635ebf235be2f587e88b963ad1711617cf0844e242d1ac97f35a83a3b381256ebfc8045ad5a1d88de7a669dcf7987cbc466456908b53359bdbc6ab3d8c0567f7b31f8049d17b732b345ff87623acf53edef70947970b295c50116d73707668677739b875dcae9b39d2c3fedf688c18cef31d41761afa893ecf1361e6e8644f2e0306422946b8b4105a818ea2a3c88f298f1661f3b22a905061903be6083b005964595d55de48656470f6f5d23fd1a307c3b0f5bd54149bb236339e48afaee1464ad053f2c72e9ea336f5470ff5d4821886e1ed2110b7404df00682d299ddcec454ea6ead13d45d85ffc31051d8bf0581fad8c0421b6cebb1934e95fd16c2bb9d042433d4f06d8087396e0f9a61eec219f4c4c79bb281feb5e6be89452a78734b79eadfec9b57c05a8e1630a5cd3c6fbb5b1a7a610c5433fbe8d88b8899b9b7c8f969ab6d8ba5c11e3ae54b6ed24ad09bd50c8f73e7bfde1f71872ec5dc52aad95dd13020fcaa4905d280dfc2d2d66ad1324eef64ed1e1eb908c7c127bfdc01c7b771151866fa33a6b464ba6df12bfd40813a7629a7f9b397cdb2bd3afa501a98f4aa49683fb923",
       "sha256": "803376f92ac0a7ec5f8195d5b72c6dd78a0c8bf20739b285e14562f9af835079",
       "signature_lens": "3309",
+      "tlv_end": 5421,
+      "unprotected_tlv_lens": "32 16 3309",
       "unprotected_tlvs": "0x0010 0x4ba0 0x4ba2",
       "verifiable": false
+    },
+    "mcuboot-ecdsa-p256.bin": {
+      "bytes": 2322,
+      "description": "imgtool ECDSA P-256, SEC_CNT, BOOT_RECORD and DEPENDENCY",
+      "digest_hex": "303b98cdaa776e8c5a57b180dd7d7fed1e1ab138535bfee57b952ddf24b1c737",
+      "endian": "little",
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 123,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
+      "key": "keys/ecdsa-p256-test-key.pem",
+      "keyhash_hex": "1b1a70191fb7cfeab87188d256a25727f93b079b9b59533009905a6052689a46",
+      "protected_tlv_lens": "4 91 12",
+      "protected_tlvs": "0x0050 0x0060 0x0040",
+      "sha256": "bb768144f70fc570fcda6a0b7b127fda4b04892148d92e2959a73274d17883e1",
+      "signature_len": 71,
+      "signature_tlv": "0x0022",
+      "tlv_end": 2322,
+      "unprotected_tlv_lens": "32 32 71",
+      "unprotected_tlvs": "0x0010 0x0001 0x0022"
+    },
+    "mcuboot-ed25519-padded.bin": {
+      "bytes": 8192,
+      "description": "as mcuboot-ed25519.bin, padded to a 0x2000-byte slot with the boot trailer (--pad)",
+      "digest_hex": "4eaeaf5d62fb41180444e1679b03c6b489360523d805afc4c5e032b37aac1745",
+      "endian": "little",
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 123,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
+      "key": "keys/ed25519-test-key.pem",
+      "keyhash_hex": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190",
+      "protected_tlv_lens": "4 91 12",
+      "protected_tlvs": "0x0050 0x0060 0x0040",
+      "sha256": "8725c3eb730f6d9e9bc1c5ed0323fe4d570c51866bfc98a5afda8f69db98cac2",
+      "signature_len": 64,
+      "signature_tlv": "0x0024",
+      "tlv_end": 2315,
+      "unprotected_tlv_lens": "32 32 64",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024"
+    },
+    "mcuboot-ed25519.bin": {
+      "bytes": 2315,
+      "description": "imgtool Ed25519, SEC_CNT, BOOT_RECORD and DEPENDENCY",
+      "digest_hex": "4eaeaf5d62fb41180444e1679b03c6b489360523d805afc4c5e032b37aac1745",
+      "endian": "little",
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 123,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
+      "key": "keys/ed25519-test-key.pem",
+      "keyhash_hex": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190",
+      "protected_tlv_lens": "4 91 12",
+      "protected_tlvs": "0x0050 0x0060 0x0040",
+      "sha256": "f07dad7b90f1780e87a1d759e4f761cf1fc429f5826bc27384c98bc5188cc46b",
+      "signature_len": 64,
+      "signature_tlv": "0x0024",
+      "tlv_end": 2315,
+      "unprotected_tlv_lens": "32 32 64",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024"
+    },
+    "mcuboot-rsa2048.bin": {
+      "bytes": 2507,
+      "description": "imgtool RSA-2048 PSS, SEC_CNT, BOOT_RECORD and DEPENDENCY",
+      "digest_hex": "0dc5794116bfeda410343a9029b7078fd48c1ace74b68c1af8bd3394643f5fb3",
+      "endian": "little",
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 123,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
+      "key": "keys/rsa2048-test-key.pem",
+      "keyhash_hex": "243b3b79ba834d441a927be78ec33fa759527030006ffa110815de892b3988af",
+      "protected_tlv_lens": "4 91 12",
+      "protected_tlvs": "0x0050 0x0060 0x0040",
+      "sha256": "841270474c16648da0eb50b5737ddc900307ce9724e9e97b3879b0e2c2a68178",
+      "signature_len": 256,
+      "signature_tlv": "0x0020",
+      "tlv_end": 2507,
+      "unprotected_tlv_lens": "32 32 256",
+      "unprotected_tlvs": "0x0010 0x0001 0x0020"
+    },
+    "rejected/mcuboot-ed25519-bigendian.bin": {
+      "bytes": 2315,
+      "description": "as mcuboot-ed25519.bin but big-endian (-e big): unsupported, the parser rejects it",
+      "digest_hex": "c8eed5f34c1cee593bd75c48dd9e6f7fcef1c75b246ae80bf6cafc2a1aaf2e00",
+      "endian": "big",
+      "expect_parse": "BadMagic",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 123,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "key": "keys/ed25519-test-key.pem",
+      "keyhash_hex": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190",
+      "protected_tlv_lens": "4 91 12",
+      "protected_tlvs": "0x0050 0x0060 0x0040",
+      "sha256": "7c10a3f14e3c8d533f34bbb6cc1927bb15d1ef2eb116d4473a586d6635419188",
+      "signature_len": 64,
+      "signature_tlv": "0x0024",
+      "tlv_end": 2315,
+      "unprotected_tlv_lens": "32 32 64",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024"
+    }
+  },
+  "signatures": {
+    "sigs/mcuboot-ecdsa-p256.sig": {
+      "decoded_bytes": 71,
+      "image": "mcuboot-ecdsa-p256.bin",
+      "note": "base64 ecdsa-p256 signature of mcuboot-ecdsa-p256.bin (imgtool sign --sig-out); reused with --fix-sig",
+      "sha256": "19d3c7ae964422ec15e66f2db990f670979231a8480a1ffc054860fe41718539"
+    },
+    "sigs/mcuboot-rsa2048.sig": {
+      "decoded_bytes": 256,
+      "image": "mcuboot-rsa2048.bin",
+      "note": "base64 rsa2048 signature of mcuboot-rsa2048.bin (imgtool sign --sig-out); reused with --fix-sig",
+      "sha256": "4975bffecc81788cb6253adfd0e3fac19b6f8652c944aac73910d54cd4a843b4"
     }
   },
   "sources": {
