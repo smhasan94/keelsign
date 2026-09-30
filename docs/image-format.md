@@ -304,11 +304,12 @@ Sources:
   December 2024), read from the Wayback Machine snapshot of 23 December 2025,
   <https://web.archive.org/web/20251223232129/https://media.defense.gov/2022/Sep/07/2003071836/-1/-1/0/CSI_CNSA_2.0_FAQ_.PDF>
   (sha256 and size in [References](#references); the direct media.defense.gov URL
-  returned HTTP 403 on 2026-09-30). Its question "Q: Can I use HSS or XMSSMT from NIST SP 800-208?" is
-  answered: "From NIST SP 800-208, NSA has only approved LMS and XMSS for use in NSS. The
-  multi-tree algorithms HSS and XMSSMT are not allowed." So an HSS key with two levels is
-  not CNSA 2.0 compliant.
-- **LMS parameters.** The FAQ's algorithm table lists LMS (NIST SP 800-208) for
+  returned HTTP 403 on 2026-09-30). Its question on page 6 of 21 of the archived PDF,
+  "Q: Can I use HSS or XMSSMT from NIST SP 800-208?", is answered: "From NIST SP 800-208,
+  NSA has only approved LMS and XMSS for use in NSS. The multi-tree algorithms HSS and
+  XMSSMT are not allowed." [XMSS^MT; the superscript is lost in the text extraction.] So
+  an HSS key with two levels is not CNSA 2.0 compliant.
+- **LMS parameters.** The FAQ's algorithm table (page 3 of the archived PDF) lists LMS (NIST SP 800-208) for
   "digitally signing firmware and software" with "All parameters approved for all
   classification levels. LMS SHA-256/192 is recommended.", and its hash-based-signature
   answer names the "preferred parameter set is Section 4.2, LMS with SHA-256/192". Both

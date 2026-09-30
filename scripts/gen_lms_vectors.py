@@ -54,7 +54,7 @@ Binary format "KSLM v2" (little-endian lengths):
             verify_pq_with(&DefaultBackend::cnsa_2_0(), ...) (ParameterPolicy::cnsa_2_0:
             the same W8 pairs, single tree only, L = 1); `expect_rfc_all_sets` the result
             of lms::verify_with_policy with ParameterPolicy::rfc_8554_all_sets.
-  Version 1 had two expectations (`expect_default`, now `expect_default`, and
+  Version 1 had two expectations (`expect_cnsa`, now `expect_default`, and
   `expect_rfc_all_sets`); version 2 adds `expect_cnsa_2_0` and changes no pk, sig or msg.
 
 The strict expectation is derived by one rule, not written per case:
