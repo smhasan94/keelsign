@@ -266,17 +266,18 @@ in-house verifier of HSS signatures (RFC 8554 §4.6 Algorithm 4b, §5.4.2 Algori
 §6.3) over SHA-256 and SHA-256/192 (SP 800-208 §2.3, the leftmost 24 bytes of SHA-256),
 built on the `sha2 =0.11.0` dependency `keelsign-verify` already has for key IDs. It runs
 without heap, panics or slice indexing. The device path,
-`keelsign_verify::verify_pq` with `DefaultBackend`, applies the keelsign parameter
-policy `ParameterPolicy::cnsa_2_0()`: LMS_SHA256_M32_H{5..25} (0x05–0x09) with
+`keelsign_verify::verify_pq` with `DefaultBackend::new()`, applies the device default
+`ParameterPolicy::keelsign_default()`: LMS_SHA256_M32_H{5..25} (0x05–0x09) with
 LMOTS_SHA256_N32_W8 (0x04), or LMS_SHA256_M24_H{5..25} (0x0A–0x0E) with
-LMOTS_SHA256_N24_W8 (0x08), at most 2 HSS levels, the same hash at every level. Despite
-its name this policy is not CNSA 2.0's: it accepts two-level HSS (L ≤ 2), which CNSA 2.0
-does not approve; SHA-240 renames or splits it into a strict `L = 1` policy and the
-device default (docs/image-format.md, "Accepted LMS parameter sets and CNSA 2.0"). The
-policy is checked for every level before anything is hashed; anything outside it is
-`Error::UnsupportedParameterSet`. `ParameterPolicy::rfc_8554_all_sets()` (every
-SHA-256 / SHA-256/192 set, W1–W8, up to 8 levels) exists only for the host tests against
-published vectors outside the policy; `verify_pq` never reaches it.
+LMOTS_SHA256_N24_W8 (0x08), at most 2 HSS levels, the same hash at every level. Two
+levels deviate from CNSA 2.0, which allows single-tree LMS only; the strict
+`ParameterPolicy::cnsa_2_0()` (same pairs, `L = 1` only, SHA-240) is selected with
+`verify_pq_with(&DefaultBackend::cnsa_2_0(), ..)` (docs/image-format.md, "Accepted LMS
+parameter sets and CNSA 2.0"). The policy is checked for every level before anything is
+hashed; anything outside it is `Error::UnsupportedParameterSet`.
+`ParameterPolicy::rfc_8554_all_sets()` (every SHA-256 / SHA-256/192 set, W1–W8, up to
+8 levels) exists only for the host tests against published vectors outside the device
+policies; no device path reaches it.
 
 ### Crate choice
 
@@ -308,9 +309,12 @@ links SHA-256 (for key IDs) and the fixture parser.
 ### Known-answer evidence
 
 `benches/lms-kat` holds script-generated fixtures (`scripts/gen_lms_vectors.py`; pinned
-sources and sha256 in `benches/lms-kat/fixtures/MANIFEST.json`). Each case carries two
-expectations, one for `verify_pq` (the keelsign policy `cnsa_2_0()`, which accepts
-L ≤ 2 and is renamed or split in SHA-240) and one for the RFC policy:
+sources and sha256 in `benches/lms-kat/fixtures/MANIFEST.json`; format KSLM v2). Each case
+carries three expectations: `verify_pq` (`keelsign_default()`, L ≤ 2), the strict device
+path `verify_pq_with(&DefaultBackend::cnsa_2_0(), ..)` (`cnsa_2_0()`: every `L ≠ 1` key is
+`UnsupportedParameterSet` before the signature is read, so the script derives this column
+as the default expectation for `L = 1` keys and `UnsupportedParameterSet` otherwise) and
+the RFC policy. The results below are for `verify_pq`:
 
 - RFC 8554 Appendix F Test Case 1 (HSS L=2, both levels M32_H5/W8): verifies through
   `verify_pq`. Test Case 2 (top level M32_H10/W4): `UnsupportedParameterSet` through
@@ -329,7 +333,7 @@ L ≤ 2 and is renamed or split in SHA-240) and one for the RFC policy:
   (RFC 8554 Algorithm 6a step 2i), and only the bottom-level LM-OTS typecode inside the
   signature changed from N32_W8 to N24_W8 (step 2c; every length still follows from the
   public key and the gate covers public keys only, so only the typecode check rejects
-  it). Both are `SignatureInvalid` under both policies.
+  it). Both are `SignatureInvalid` under the default and RFC policies.
 
 AC1 evidence note: accepted-set SHA-256/192 and HSS-2/W8 coverage comes from RFC 8554
 Test Case 1 plus the fixtures signed by the pinned independent `hsslms 0.1.3`. No NIST
@@ -340,8 +344,12 @@ tests only; no fixture is signed above H10.
 The host set (`lms-host.bin`, 66 cases) runs in `cargo test --workspace`; the on-target
 set (`lms-target.bin`, 14 cases: TC1, TC2, ACVP SP800-208 tc 6, hsslms M32 H5+H5,
 M24 H5 and H5+H5, rotation A and B, W4, L=3, the flipped last byte, the trailing
-byte, q = 2^h and the LM-OTS typecode mismatch) runs on each board in `lms_kat`, which checks both expectations of every case and
-the key-rotation pair.
+byte, q = 2^h and the LM-OTS typecode mismatch) runs on each board in `lms_kat`, which
+checks all three expectations of every case (the strict one through
+`DefaultBackend::cnsa_2_0()`, in the same binary; there is no separate strict build) and
+the key-rotation pair. Under `cnsa_2_0()` the target set holds single trees that verify
+(M24 H5, rotation A and B) and valid two-level cases that are refused (TC1, M32 H5+H5,
+M24 H5+H5).
 
 ### LMS method
 
@@ -355,7 +363,7 @@ Same as for ML-DSA (see [Method](#method)), with these differences:
   32,768 B of stack. The headline per set is the shortest-message valid case
   (`bench_summarize.py`).
 - **Flash**: `size_lms` minus `size_lms_baseline`. Both parse the LMS target fixture,
-  find its first case the policy accepts and build a trusted-key set for it (so SHA-256
+  find its first case the default policy accepts and build a trusted-key set for it (so SHA-256
   and the parser cancel out); `size_lms` adds one black-boxed `verify_pq`.
 - **Static frame**: nightly `-Z emit-stack-sizes` own-frame sizes of `size_lms`, summed
   along the deepest call chain below `lms_kat::verify_with_keys`: `verify_with_keys`
@@ -383,7 +391,7 @@ p = 34 (N32/W8) or 26 (N24/W8); an HSS signature with L levels is
 `4 + L * LMS signature + (L - 1) * (24 + m)` (so an L=1 image carries 1,456 B for M32 H10
 and 904 B for M24 H10). At H20 the LMS / HSS-2 (H20+H20) sizes are 1,772 / 3,604 B (M32)
 and 1,140 / 2,332 B (M24). Public keys are 60 B (M32) and 52 B (M24). The hsslms
-fixtures confirm the H5 and H10 sizes (`lms_kat::host_kat::hsslms_signed_cnsa_cases_verify`).
+fixtures confirm the H5 and H10 sizes (`lms_kat::host_kat::hsslms_signed_w8_cases_verify_under_keelsign_default`).
 
 Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
 
@@ -426,8 +434,8 @@ cargo test --release --locked --test lms -- lms_rotation_key_b_verifies_against_
 cargo test --release --locked --test lms -- lms_bench 2>&1 | tee ../../docs/bench-logs/nrf52840-lms-run1.txt
 ```
 
-`lms_kat` logs `KAT board=… set=LMS src=… tc=… expect_cnsa=… cnsa=… expect_rfc=… rfc=…
-result=ok` per case and `ROTATION board=… … ok`; summarise the bench log with
+`lms_kat` logs `KAT board=… set=LMS src=… tc=… expect_default=… default=… expect_cnsa2=…
+cnsa2=… expect_rfc=… rfc=… result=ok` per case and `ROTATION board=… … ok`; summarise the bench log with
 `python3 scripts/bench_summarize.py docs/bench-logs/nrf52840-lms-run1.txt` and record
 the headline cycles, time and peak stack in [LMS results](#lms-results). The SHA-34
 filter `-- _bench` now also runs `lms_bench`.

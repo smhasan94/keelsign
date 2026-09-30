@@ -209,7 +209,7 @@ impl ParameterPolicy {
     /// W1, W2, W4 and W8), up to the RFC's eight levels.
     ///
     /// **Host and test use only, never on a device**: it exists to check this
-    /// implementation against published vectors outside the keelsign policy (RFC 8554
+    /// implementation against published vectors outside the device policies (RFC 8554
     /// Test Case 2, the NIST ACVP LMS vectors). No device entry point reaches it:
     /// [`DefaultBackend`](crate::DefaultBackend) has no constructor for it, so neither
     /// [`verify_pq`](crate::verify_pq) nor [`verify_pq_with`](crate::verify_pq_with) with

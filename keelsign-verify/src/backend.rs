@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn trusted_w2_key_is_unsupported_parameter_set_through_verify_pq() {
         // HSS L=1, LMS_SHA256_M24_H10 (0x0B) with LMOTS_SHA256_N24_W2 (0x06): a valid
-        // SP 800-208 set outside the keelsign policy.
+        // SP 800-208 set outside both device policies.
         let mut pk = Vec::new();
         pk.extend_from_slice(&1u32.to_be_bytes());
         pk.extend_from_slice(&0x0Bu32.to_be_bytes());

@@ -313,6 +313,8 @@ fn bench_tests_use_embedded_test_harness() {
             "stack_paint::paint",
             "check_rotation",
             "LMS_TARGET",
+            // SHA-240: lms_kat checks the strict CNSA 2.0 expectation too.
+            "cnsa_2_0",
         ] {
             assert!(
                 lms.contains(needle),

@@ -216,7 +216,8 @@ tree heights H10, H20 and H25 and one or two HSS levels. An HSS signature with W
 
 `MAX_PQ_SIGNATURE_LEN = 3,924` bytes (HSS-2, M32, H25+H25) is the largest PQ signature
 TLV value the verifier accepts ([Accepted LMS parameter sets](#accepted-lms-parameter-sets-and-cnsa-20):
-H5–H25, at most two levels; every mixed-height two-level signature is smaller). The
+H5–H25, at most two levels under the default policy, one under `cnsa_2_0()`; every
+mixed-height two-level signature is smaller). The
 parser (SHA-35) enforces it as a hard parse bound on the PQ signature TLV length.
 
 Worst-case unprotected TLV area of a hybrid image:
@@ -256,14 +257,31 @@ made with the same ML-DSA key. The ML-DSA backend (SHA-44) passes it to
 
 ## Accepted LMS parameter sets and CNSA 2.0
 
-**The only CNSA 2.0-compliant keelsign configuration is single-tree LMS (L = 1) verified
-under the strict policy (planned in SHA-240). ML-DSA-44 and ML-DSA-65 are never CNSA 2.0
-algorithms: CNSA 2.0 uses ML-DSA-87.**
+**The only CNSA 2.0-compliant keelsign configuration is single-tree LMS (`L = 1`) verified
+under `ParameterPolicy::cnsa_2_0()` (`DefaultBackend::cnsa_2_0()` with `verify_pq_with`).
+ML-DSA-44 and ML-DSA-65 are never CNSA 2.0 algorithms: CNSA 2.0 uses ML-DSA-87.**
 
-keelsign-verify accepts HSS keys and signatures with LM-OTS W8, SHA-256 (m = n = 32) or
-SHA-256/192 (m = n = 24), tree heights H5–H25, the same hash at every level, and at most
-two levels. Today this policy is `keelsign_verify::lms::ParameterPolicy::cnsa_2_0()`, and
-`lms::verify` / `DefaultBackend` use it; despite its name it accepts `L = 2`.
+keelsign-verify has two device policies for LMS/HSS (`keelsign_verify::lms::ParameterPolicy`,
+SHA-240). Both accept LM-OTS W8 with SHA-256 (m = n = 32) or SHA-256/192 (m = n = 24),
+tree heights H5–H25 and the same hash at every level; they differ only in the number of
+HSS levels:
+
+| Policy | Levels | LM-OTS | Hash | Entry points | Use |
+|---|---|---|---|---|---|
+| `keelsign_default()` | `L ≤ 2` | W8 | SHA-256 or SHA-256/192 | `lms::verify`, `DefaultBackend::new()`, `verify_pq` | the device default |
+| `cnsa_2_0()` | `L = 1` only | W8 | SHA-256 or SHA-256/192 | `DefaultBackend::cnsa_2_0()` via `verify_pq_with` | NSS deployments that must follow CNSA 2.0 |
+| `rfc_8554_all_sets()` | `L ≤ 8` | W1–W8 | SHA-256 or SHA-256/192 | none on a device (`lms::verify_with_policy` in host tests) | checking published vectors outside the device policies |
+
+An integrator selects the strict policy in code, at the call site:
+`verify_pq_with(&DefaultBackend::cnsa_2_0(), &keys, image.unprotected().pairs(), &digest)`.
+There is no Cargo feature for it, and `DefaultBackend` has no constructor for
+`rfc_8554_all_sets()`. Under `cnsa_2_0()` an HSS public key with `L ≥ 2` is
+`UnsupportedParameterSet` before its signature is read. A single LMS tree is an HSS key
+with `L = 1`: RFC 8554 §6 says "HSS allows L=1, in which case the HSS public key and
+signature formats are essentially the LMS public key and signature formats, prepended by
+a fixed field", and "In the specific case of L=1, the format of an HSS signature is
+u32str(0) || sig[0]". So keelsign's HSS-framed `L = 1` key and signature are single-tree
+LMS; what CNSA 2.0 forbids is `L ≥ 2`.
 
 Sources:
 
@@ -279,28 +297,32 @@ Sources:
   does not offer any functionality not already offered by the CNSA hash functions
   combined in a standard way with ML-DSA-87, and because standard ML-DSA-87 is expected to
   be widely supported, NSA anticipates there will be no need for HashML-DSA in NSS."
-  keelsign never uses HashML-DSA ([Signing mode](#signing-mode)).
-- **Single-tree LMS/XMSS only, for firmware — from secondary sources.** The CNSA 2.0 FAQ
-  v2.1 PDF itself could not be retrieved (media.defense.gov returns HTTP 403), so this
-  rule is taken from M. Ivezic, "NSA Updates CNSA 2.0 Guidance After NIST Finalizes
-  Post-Quantum Standards", PostQuantum.com, 29 December 2024: "HSS (the multi-tree variant
-  of LMS) and XMSS^MT are not approved for NSS. Only single-tree LMS and XMSS are allowed
-  for software and firmware signing." It must be re-checked against the FAQ itself. Under
-  it, an HSS key with two levels is not CNSA 2.0 compliant.
+  The FAQ itself (next item) carries this sentence verbatim. keelsign never uses
+  HashML-DSA ([Signing mode](#signing-mode)).
+- **Single-tree LMS/XMSS only.** NSA, *The Commercial National Security Algorithm Suite
+  2.0 and Quantum Computing FAQ* (CNSA 2.0 FAQ v2.1, U/OO/194427-22, PP-24-4014,
+  December 2024), read from the Wayback Machine snapshot of 23 December 2025,
+  <https://web.archive.org/web/20251223232129/https://media.defense.gov/2022/Sep/07/2003071836/-1/-1/0/CSI_CNSA_2.0_FAQ_.PDF>
+  (sha256 and size in [References](#references); the direct media.defense.gov URL
+  returned HTTP 403 on 2026-09-30). Its question "Q: Can I use HSS or XMSSMT from NIST SP 800-208?" is
+  answered: "From NIST SP 800-208, NSA has only approved LMS and XMSS for use in NSS. The
+  multi-tree algorithms HSS and XMSSMT are not allowed." So an HSS key with two levels is
+  not CNSA 2.0 compliant.
+- **LMS parameters.** The FAQ's algorithm table lists LMS (NIST SP 800-208) for
+  "digitally signing firmware and software" with "All parameters approved for all
+  classification levels. LMS SHA-256/192 is recommended.", and its hash-based-signature
+  answer names the "preferred parameter set is Section 4.2, LMS with SHA-256/192". Both
+  device policies accept both hash sizes, each with W8 only; NSA's preferred hash is
+  SHA-256/192 (M24).
 
-**Planned split** (follow-up ticket SHA-240; the code does not change in SHA-37):
-
-| Policy | Levels | LM-OTS | Hash | Use |
-|---|---|---|---|---|
-| `cnsa_2_0()` | `L = 1` only | W8 | SHA-256 or SHA-256/192 | NSS deployments that must follow CNSA 2.0 |
-| `keelsign_default()` | `L ≤ 2` | W8 | SHA-256 or SHA-256/192 | the device default (`lms::verify`, `DefaultBackend`) |
-
-**Deviation from CNSA 2.0:** the device default accepts two-level HSS, which CNSA 2.0 (per
-the secondary source above) does not approve for NSS; two levels let one long-lived
-top-level key certify many short-lived signing trees. NSS deployments must sign with a
-single LMS tree (`L = 1`) and verify with the strict `cnsa_2_0()` policy (SHA-240). ML-DSA
-images, hybrid or not, are outside CNSA 2.0 whatever the policy (ML-DSA-87 is out of
-scope, see [Out of scope](#out-of-scope)).
+**Deviation from CNSA 2.0:** the device default `keelsign_default()` (`lms::verify`,
+`DefaultBackend::new()`, `verify_pq`) accepts two-level HSS (`L ≤ 2`), which the CNSA 2.0
+FAQ v2.1 says is not allowed in NSS. Two levels let one long-lived top-level key certify
+many short-lived signing trees, and `MAX_PQ_SIGNATURE_LEN` is sized for them. NSS
+deployments must sign with a single LMS tree (`L = 1`) and verify with
+`DefaultBackend::cnsa_2_0()` through `verify_pq_with`. ML-DSA images, hybrid or not, are
+outside CNSA 2.0 whatever the policy (ML-DSA-87 is out of scope, see
+[Out of scope](#out-of-scope)).
 
 ## MCUboot compatibility
 
@@ -386,7 +408,6 @@ Each row was checked against the cited source at the stated commit.
 - The image parser (SHA-35), digest computation (SHA-42), hybrid policy and Ed25519
   verification (SHA-46), the ML-DSA backend (SHA-44), the CLI (SHA-49, SHA-51),
   per-board partition numbers (SHA-58) and the MCUboot allow-list glue (SHA-62).
-- The `cnsa_2_0()` / `keelsign_default()` policy split in code (follow-up ticket SHA-240).
 
 ## Sample images
 
@@ -454,18 +475,21 @@ TLV listing of `imgtool dumpinfo` with `MANIFEST.json` for each little-endian go
 - D. Connolly, draft-connolly-cfrg-ml-dsa-security-considerations-02, March 2026,
   §2.2.2 (context strings), §3.2.4 (external μ), §3.2.5 (HashML-DSA),
   <https://datatracker.ietf.org/doc/draft-connolly-cfrg-ml-dsa-security-considerations/02/>.
-- NSA, Commercial National Security Algorithm Suite 2.0 FAQ, version 2.1, December 2024,
-  <https://media.defense.gov/2022/Sep/07/2003071836/-1/-1/0/CSI_CNSA_2.0_FAQ_.PDF>
-  (HTTP 403 when this document was written; not read directly).
+- NSA, The Commercial National Security Algorithm Suite 2.0 and Quantum Computing FAQ,
+  version 2.1 (U/OO/194427-22, PP-24-4014), December 2024. Read from the Wayback Machine
+  snapshot `20251223232129`,
+  <https://web.archive.org/web/20251223232129/https://media.defense.gov/2022/Sep/07/2003071836/-1/-1/0/CSI_CNSA_2.0_FAQ_.PDF>
+  (441,742 bytes, 21 pages, sha256
+  `ca447adb27af022f6bcca70873ef3404a7db0758fa0626fe9cd994451d86f5e0`). The direct URL,
+  <https://media.defense.gov/2022/Sep/07/2003071836/-1/-1/0/CSI_CNSA_2.0_FAQ_.PDF>,
+  returned HTTP 403 on 2026-09-30.
 - M. Jenkins (NSA), draft-jenkins-cnsa2-pkix-profile-05, July 2026, §4,
   <https://datatracker.ietf.org/doc/draft-jenkins-cnsa2-pkix-profile/05/>.
 - R. Guthrie (NSA), draft-guthrie-cnsa2-ipsec-profile-04, July 2026, §3,
   <https://datatracker.ietf.org/doc/draft-guthrie-cnsa2-ipsec-profile/04/>.
 - M. B. Stern (NSA), "Updates to the CNSA 2.0 FAQ", NIST pqc-forum, 13 January 2025,
   <https://groups.google.com/a/list.nist.gov/g/pqc-forum/c/sS47RFCdJ74>.
-- M. Ivezic, "NSA Updates CNSA 2.0 Guidance After NIST Finalizes Post-Quantum Standards",
-  PostQuantum.com, 29 December 2024 (secondary source),
-  <https://postquantum.com/security-pqc/nsa-cnsa-2-0-faq-v2-1-update/>.
-- RFC 8554, Leighton-Micali Hash-Based Signatures, <https://www.rfc-editor.org/rfc/rfc8554>.
+- RFC 8554, Leighton-Micali Hash-Based Signatures, §6 (HSS with `L = 1`),
+  <https://www.rfc-editor.org/rfc/rfc8554>.
 - NIST SP 800-208, Recommendation for Stateful Hash-Based Signature Schemes,
   <https://doi.org/10.6028/NIST.SP.800-208>.

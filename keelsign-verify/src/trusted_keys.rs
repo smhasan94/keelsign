@@ -339,8 +339,8 @@ mod tests {
                 1
             );
         }
-        // L outside 1..=8 or an unknown LMS typecode are refused too; the keelsign policy
-        // is not: W2 (outside it), L = 3..=8 (above MAX_HSS_LEVELS) and m != n pass here
+        // L outside 1..=8 or an unknown LMS typecode are refused too; the LMS policies
+        // are not: W2 (outside them), L = 3..=8 (above MAX_HSS_LEVELS) and m != n pass here
         // and are refused when verifying.
         for (levels, lms_type, ots_type, ok) in [
             (0u32, 0x05u32, 0x04u32, false),
