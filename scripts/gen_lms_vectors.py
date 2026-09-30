@@ -25,7 +25,7 @@ Sources:
 Signed cases (all over one fixed 32-byte message):
   * M32/W8: H5 L1, H5+H5 L2, H10 L1, H5+H10 L2; M24/W8: H5 L1, H5+H5 L2, H10 L1.
   * Rotation keys A and B (M32/W8 H5 L1, two seeds).
-  * Outside the keelsign policy: M32/W4 H5 L1, M24/W2 H5 L1, HSS L=3 (M32/W8 H5 x 3).
+  * Outside the keelsign device policies: M32/W4 H5 L1, M24/W2 H5 L1, HSS L=3 (M32/W8 H5 x 3).
 
 Derived negatives (from RFC 8554 Test Case 1): last byte flipped, C of the bottom
 LM-OTS signature flipped, bottom and top q flipped, truncated at every 97th byte, one
@@ -41,16 +41,33 @@ Outputs:
   * lms-host.bin: every case (host KATs).
   * lms-target.bin: the on-target subset (TARGET_IDS).
 
-Binary format "KSLM v1" (little-endian lengths):
-  header:   b"KSLM", u16 version (1), u16 case count
+Binary format "KSLM v2" (little-endian lengths):
+  header:   b"KSLM", u16 version (2), u16 case count
   per case: u16 id, u8 source (0 = rfc8554, 1 = acvp, 2 = hsslms),
-            u8 expect_cnsa, u8 expect_rfc_all_sets, u16 pk_len, u16 sig_len, u16 msg_len,
-            then pk, sig and msg bytes.
+            u8 expect_default, u8 expect_cnsa_2_0, u8 expect_rfc_all_sets,
+            u16 pk_len, u16 sig_len, u16 msg_len, then pk, sig and msg bytes.
   Expectation codes: 0 SignatureInvalid, 1 Ok, 2 UnsupportedParameterSet,
-            3 MalformedSignature, 4 InvalidPublicKey. `expect_cnsa` is the result of
-            keelsign_verify::verify_pq (policy ParameterPolicy::cnsa_2_0);
-            `expect_rfc_all_sets` the result of lms::verify_with_policy with
-            ParameterPolicy::rfc_8554_all_sets.
+            3 MalformedSignature, 4 InvalidPublicKey. One expectation per policy:
+            `expect_default` is the result of keelsign_verify::verify_pq (policy
+            ParameterPolicy::keelsign_default: W8, at most two HSS levels);
+            `expect_cnsa_2_0` the result of the strict device path
+            verify_pq_with(&DefaultBackend::cnsa_2_0(), ...) (ParameterPolicy::cnsa_2_0:
+            the same W8 pairs, single tree only, L = 1); `expect_rfc_all_sets` the result
+            of lms::verify_with_policy with ParameterPolicy::rfc_8554_all_sets.
+  Version 1 had two expectations (`expect_default`, now `expect_default`, and
+  `expect_rfc_all_sets`); version 2 adds `expect_cnsa_2_0` and changes no pk, sig or msg.
+
+The strict expectation is derived by one rule, not written per case:
+  expect_cnsa_2_0 = expect_default if L(pk) == 1 else UnsupportedParameterSet
+where L(pk) is the first u32 of the HSS public key. Why: the verifier applies the policy
+to the public key before it reads the signature (typecode pair, then 1 <= L <= max_levels,
+then the key length), and the two device policies differ only in max_levels (2 and 1).
+So for an L = 1 key every check is the same under both, and a key with L != 1 (every key
+here holds L and both typecodes, 12 bytes or more; the script checks that) is
+UnsupportedParameterSet under cnsa_2_0 whatever its signature holds: a key with L = 0 or
+L > 2 is already UnsupportedParameterSet under the default, and every L = 2 key is refused
+by the level check. That includes the negatives derived from RFC 8554 Test Case 1
+(401-406, 5xx), whose key has L = 2, and 407/408 (hsslms case 302, L = 2).
 
 Case IDs: 1-2 RFC 8554 Test Case 1-2; 100 + tcId ACVP SP800-208; 200 + tcId ACVP 1.0;
 3xx hsslms-signed; 401-406 derived from TC1, 407-408 derived from hsslms case 302; 500 + k TC1 truncated to 97 * k bytes.
@@ -79,7 +96,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURE_DIR = REPO_ROOT / "benches" / "lms-kat" / "fixtures"
 
 MAGIC = b"KSLM"
-VERSION = 1
+VERSION = 2
 
 SOURCE_RFC8554 = 0
 SOURCE_ACVP = 1
@@ -231,10 +248,10 @@ def acvp_cases(data, id_base, expected_groups):
                     "id": id_base + t["tcId"],
                     "source": SOURCE_ACVP,
                     "label": f"acvp {doc['revision']} tg{g['tgId']} tc{t['tcId']} {g['lmsMode']}/{g['lmOtsMode']}: {t['reason']}",
-                    # W1 / W2 are outside the keelsign policy; the RFC policy accepts them,
+                    # W1 / W2 are outside the keelsign device policies; the RFC policy accepts them,
                     # and every modification keeps the lengths (typecode, q, message or
                     # signature bytes), so invalid cases are SignatureInvalid.
-                    "expect_cnsa": UNSUPPORTED,
+                    "expect_default": UNSUPPORTED,
                     "expect_rfc": OK if valid else INVALID,
                     "pk": u32(1) + lms_pk,
                     "sig": u32(0) + bytes.fromhex(t["signature"]),
@@ -291,7 +308,7 @@ def hsslms_sign(hsslms, label, lms_names, ots_name, message):
     return pk, sig
 
 
-# id, label, LMS parameter sets per level, LM-OTS set, expect_cnsa, expect_rfc_all_sets.
+# id, label, LMS parameter sets per level, LM-OTS set, expect_default, expect_rfc_all_sets.
 SIGNED = [
     (301, "m32w8-h5-l1", ["LMS_SHA256_M32_H5"], "LMOTS_SHA256_N32_W8", OK, OK),
     (302, "m32w8-h5h5-l2", ["LMS_SHA256_M32_H5", "LMS_SHA256_M32_H5"], "LMOTS_SHA256_N32_W8", OK, OK),
@@ -317,14 +334,14 @@ SIGNED = [
 
 def hsslms_cases(hsslms):
     cases = []
-    for case_id, label, lms_names, ots_name, expect_cnsa, expect_rfc in SIGNED:
+    for case_id, label, lms_names, ots_name, expect_default, expect_rfc in SIGNED:
         pk, sig = hsslms_sign(hsslms, label, lms_names, ots_name, MESSAGE)
         cases.append(
             {
                 "id": case_id,
                 "source": SOURCE_HSSLMS,
                 "label": f"hsslms {label}: {'+'.join(lms_names)} / {ots_name}",
-                "expect_cnsa": expect_cnsa,
+                "expect_default": expect_default,
                 "expect_rfc": expect_rfc,
                 "pk": pk,
                 "sig": sig,
@@ -352,12 +369,12 @@ def derived_negatives(tc1):
     bottom = 4 + 1292 + 56
     bottom_c = bottom + 4 + 4
 
-    def case(case_id, label, expect_cnsa, expect_rfc, pk=pk, sig=sig):
+    def case(case_id, label, expect_default, expect_rfc, pk=pk, sig=sig):
         return {
             "id": case_id,
             "source": SOURCE_RFC8554,
             "label": f"rfc8554 TC1 {label}",
-            "expect_cnsa": expect_cnsa,
+            "expect_default": expect_default,
             "expect_rfc": expect_rfc,
             "pk": pk,
             "sig": sig,
@@ -370,7 +387,7 @@ def derived_negatives(tc1):
         case(403, "bottom q flipped (wrong leaf index)", INVALID, INVALID, sig=flip(sig, bottom + 3)),
         case(404, "top q flipped (wrong tree index)", INVALID, INVALID, sig=flip(sig, top_q + 3)),
         case(405, "one trailing byte", MALFORMED, MALFORMED, sig=sig + b"\x00"),
-        # L = 3 in the key: outside the keelsign policy (at most 2 levels); under the RFC
+        # L = 3 in the key: outside the keelsign default policy (at most 2 levels); under the RFC
         # policy Nspk + 1 != L.
         case(406, "key patched to L = 3", UNSUPPORTED, MALFORMED, pk=u32(3) + pk[4:]),
     ]
@@ -402,7 +419,7 @@ def hsslms_derived_negatives(base):
             "id": case_id,
             "source": SOURCE_HSSLMS,
             "label": f"hsslms m32w8-h5h5-l2 {label}",
-            "expect_cnsa": INVALID,
+            "expect_default": INVALID,
             "expect_rfc": INVALID,
             "pk": pk,
             "sig": new_sig,
@@ -437,6 +454,37 @@ def cross_check(hsslms, cases):
             sys.exit(f"hsslms verify disagrees with case {case['id']} ({case['label']}): {verdict}")
 
 
+# ---- Strict CNSA 2.0 expectation ------------------------------------------------------
+
+
+def hss_levels(pk):
+    """L, the first u32 of an HSS public key (RFC 8554 section 6.1)."""
+    return int.from_bytes(pk[:4], "big")
+
+
+def strict_expectation(case):
+    """The cnsa_2_0 expectation: the default one for an L = 1 key, else
+    UnsupportedParameterSet (see the module docstring for why)."""
+    return case["expect_default"] if hss_levels(case["pk"]) == 1 else UNSUPPORTED
+
+
+def check_expectations(cases):
+    """Self-checks of the three expectation columns."""
+    for c in cases:
+        if len(c["pk"]) < 12:
+            sys.exit(f"case {c['id']}: the strict rule needs L and both typecodes in the key")
+        for key in ("expect_default", "expect_cnsa_2_0", "expect_rfc"):
+            if c[key] not in EXPECT_NAMES:
+                sys.exit(f"case {c['id']}: {key} = {c[key]} is not an expectation code")
+        if c["expect_default"] == OK and hss_levels(c["pk"]) == 2 and c["expect_cnsa_2_0"] != UNSUPPORTED:
+            sys.exit(f"case {c['id']}: a valid L = 2 case must be UnsupportedParameterSet under cnsa_2_0")
+    for pk_len, name in ((60, "SHA-256"), (52, "SHA-256/192")):
+        if not any(
+            hss_levels(c["pk"]) == 1 and len(c["pk"]) == pk_len and c["expect_cnsa_2_0"] == OK for c in cases
+        ):
+            sys.exit(f"no L = 1 {name} case is Ok under cnsa_2_0")
+
+
 # ---- Output ---------------------------------------------------------------------------
 
 
@@ -444,10 +492,11 @@ def encode_fixture(cases):
     out = bytearray(MAGIC + struct.pack("<HH", VERSION, len(cases)))
     for c in cases:
         out += struct.pack(
-            "<HBBBHHH",
+            "<HBBBBHHH",
             c["id"],
             c["source"],
-            c["expect_cnsa"],
+            c["expect_default"],
+            c["expect_cnsa_2_0"],
             c["expect_rfc"],
             len(c["pk"]),
             len(c["sig"]),
@@ -463,7 +512,8 @@ def manifest_cases(cases):
             "id": c["id"],
             "label": c["label"],
             "source": SOURCE_NAMES[c["source"]],
-            "expect_cnsa": EXPECT_NAMES[c["expect_cnsa"]],
+            "expect_default": EXPECT_NAMES[c["expect_default"]],
+            "expect_cnsa_2_0": EXPECT_NAMES[c["expect_cnsa_2_0"]],
             "expect_rfc_all_sets": EXPECT_NAMES[c["expect_rfc"]],
         }
         for c in cases
@@ -489,7 +539,7 @@ def generate(out_dir):
             "id": 1,
             "source": SOURCE_RFC8554,
             "label": "rfc8554 Test Case 1: HSS L=2, M32_H5/W8 + M32_H5/W8",
-            "expect_cnsa": OK,
+            "expect_default": OK,
             "expect_rfc": OK,
             **rfc[1],
         },
@@ -497,7 +547,7 @@ def generate(out_dir):
             "id": 2,
             "source": SOURCE_RFC8554,
             "label": "rfc8554 Test Case 2: HSS L=2, M32_H10/W4 + M32_H5/W8",
-            "expect_cnsa": UNSUPPORTED,
+            "expect_default": UNSUPPORTED,
             "expect_rfc": OK,
             **rfc[2],
         },
@@ -510,6 +560,10 @@ def generate(out_dir):
         cases = rfc_cases + acvp + signed + derived_negatives(rfc[1]) + hsslms_derived_negatives(signed_by_id[302])
         cross_check(hsslms, cases)
 
+    for c in cases:
+        c["expect_cnsa_2_0"] = strict_expectation(c)
+    check_expectations(cases)
+
     ids = [c["id"] for c in cases]
     if len(ids) != len(set(ids)):
         sys.exit("duplicate case IDs")
@@ -518,7 +572,12 @@ def generate(out_dir):
 
     manifest = {
         "generator": "scripts/gen_lms_vectors.py",
-        "format": "KSLM v1: see the module docstring of scripts/gen_lms_vectors.py",
+        "format": "KSLM v2: see the module docstring of scripts/gen_lms_vectors.py",
+        "policies": {
+            "expect_default": "keelsign_verify::verify_pq (ParameterPolicy::keelsign_default)",
+            "expect_cnsa_2_0": "verify_pq_with(&DefaultBackend::cnsa_2_0(), ...) (ParameterPolicy::cnsa_2_0, L = 1 only)",
+            "expect_rfc_all_sets": "lms::verify_with_policy(&ParameterPolicy::rfc_8554_all_sets(), ...)",
+        },
         "message_hex": MESSAGE.hex(),
         "sources": {name: {**source, "url": raw_url(source)} for name, source in sorted(SOURCES.items())},
         "outputs": {},

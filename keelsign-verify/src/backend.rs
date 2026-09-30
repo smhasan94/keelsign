@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn cnsa_2_0_backend_rejects_two_level_keys_and_accepts_single_trees_through_verify_pq_with() {
-        use crate::lms::tests::{MSG, hss};
+        use crate::lms::{MSG, hss};
 
         let cases = [
             // (levels, hash) -> expected under keelsign_default, under cnsa_2_0

@@ -1,468 +1,534 @@
 {
-  "format": "KSLM v1: see the module docstring of scripts/gen_lms_vectors.py",
+  "format": "KSLM v2: see the module docstring of scripts/gen_lms_vectors.py",
   "generator": "scripts/gen_lms_vectors.py",
   "message_hex": "6f7139d63bf0aed261fe5ae11b3a4ba86bbe7dc512b8a8293226b143a78c2177",
   "outputs": {
     "lms-host.bin": {
-      "bytes": 186546,
+      "bytes": 186612,
       "cases": [
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 1,
           "label": "rfc8554 Test Case 1: HSS L=2, M32_H5/W8 + M32_H5/W8",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "Ok",
           "id": 2,
           "label": "rfc8554 Test Case 2: HSS L=2, M32_H10/W4 + M32_H5/W8",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "Ok",
           "id": 101,
           "label": "acvp SP800-208 tg1 tc1 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: no modification",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 102,
           "label": "acvp SP800-208 tg1 tc2 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: modify signature header",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 103,
           "label": "acvp SP800-208 tg1 tc3 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: modify message",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 104,
           "label": "acvp SP800-208 tg1 tc4 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: modify signature",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 105,
           "label": "acvp SP800-208 tg2 tc5 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: modify signature header",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "Ok",
           "id": 106,
           "label": "acvp SP800-208 tg2 tc6 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: no modification",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 107,
           "label": "acvp SP800-208 tg2 tc7 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: modify message",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 108,
           "label": "acvp SP800-208 tg2 tc8 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: modify signature",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 201,
           "label": "acvp 1.0 tg1 tc1 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: modify signature",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 202,
           "label": "acvp 1.0 tg1 tc2 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: modify signature header",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "Ok",
           "id": 203,
           "label": "acvp 1.0 tg1 tc3 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: no modification",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 204,
           "label": "acvp 1.0 tg1 tc4 LMS_SHA256_M24_H5/LMOTS_SHA256_N24_W1: modify message",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "Ok",
           "id": 205,
           "label": "acvp 1.0 tg2 tc5 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: no modification",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 206,
           "label": "acvp 1.0 tg2 tc6 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: modify signature",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 207,
           "label": "acvp 1.0 tg2 tc7 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: modify signature header",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 208,
           "label": "acvp 1.0 tg2 tc8 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: modify message",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "Ok",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 301,
           "label": "hsslms m32w8-h5-l1: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 302,
           "label": "hsslms m32w8-h5h5-l2: LMS_SHA256_M32_H5+LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "Ok",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 303,
           "label": "hsslms m32w8-h10-l1: LMS_SHA256_M32_H10 / LMOTS_SHA256_N32_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 304,
           "label": "hsslms m32w8-h5h10-l2: LMS_SHA256_M32_H5+LMS_SHA256_M32_H10 / LMOTS_SHA256_N32_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "Ok",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 311,
           "label": "hsslms m24w8-h5-l1: LMS_SHA256_M24_H5 / LMOTS_SHA256_N24_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 312,
           "label": "hsslms m24w8-h5h5-l2: LMS_SHA256_M24_H5+LMS_SHA256_M24_H5 / LMOTS_SHA256_N24_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "Ok",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 313,
           "label": "hsslms m24w8-h10-l1: LMS_SHA256_M24_H10 / LMOTS_SHA256_N24_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "Ok",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 321,
           "label": "hsslms rotation-a: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "Ok",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 322,
           "label": "hsslms rotation-b: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "Ok",
           "id": 331,
           "label": "hsslms m32w4-h5-l1: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W4",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "Ok",
           "id": 332,
           "label": "hsslms m24w2-h5-l1: LMS_SHA256_M24_H5 / LMOTS_SHA256_N24_W2",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "Ok",
           "id": 333,
           "label": "hsslms m32w8-h5h5h5-l3: LMS_SHA256_M32_H5+LMS_SHA256_M32_H5+LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "SignatureInvalid",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "SignatureInvalid",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 401,
           "label": "rfc8554 TC1 last byte flipped",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "SignatureInvalid",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "SignatureInvalid",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 402,
           "label": "rfc8554 TC1 bottom C flipped",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "SignatureInvalid",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "SignatureInvalid",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 403,
           "label": "rfc8554 TC1 bottom q flipped (wrong leaf index)",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "SignatureInvalid",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "SignatureInvalid",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 404,
           "label": "rfc8554 TC1 top q flipped (wrong tree index)",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 405,
           "label": "rfc8554 TC1 one trailing byte",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 406,
           "label": "rfc8554 TC1 key patched to L = 3",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 500,
           "label": "rfc8554 TC1 truncated to 0 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 501,
           "label": "rfc8554 TC1 truncated to 97 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 502,
           "label": "rfc8554 TC1 truncated to 194 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 503,
           "label": "rfc8554 TC1 truncated to 291 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 504,
           "label": "rfc8554 TC1 truncated to 388 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 505,
           "label": "rfc8554 TC1 truncated to 485 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 506,
           "label": "rfc8554 TC1 truncated to 582 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 507,
           "label": "rfc8554 TC1 truncated to 679 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 508,
           "label": "rfc8554 TC1 truncated to 776 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 509,
           "label": "rfc8554 TC1 truncated to 873 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 510,
           "label": "rfc8554 TC1 truncated to 970 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 511,
           "label": "rfc8554 TC1 truncated to 1067 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 512,
           "label": "rfc8554 TC1 truncated to 1164 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 513,
           "label": "rfc8554 TC1 truncated to 1261 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 514,
           "label": "rfc8554 TC1 truncated to 1358 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 515,
           "label": "rfc8554 TC1 truncated to 1455 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 516,
           "label": "rfc8554 TC1 truncated to 1552 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 517,
           "label": "rfc8554 TC1 truncated to 1649 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 518,
           "label": "rfc8554 TC1 truncated to 1746 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 519,
           "label": "rfc8554 TC1 truncated to 1843 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 520,
           "label": "rfc8554 TC1 truncated to 1940 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 521,
           "label": "rfc8554 TC1 truncated to 2037 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 522,
           "label": "rfc8554 TC1 truncated to 2134 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 523,
           "label": "rfc8554 TC1 truncated to 2231 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 524,
           "label": "rfc8554 TC1 truncated to 2328 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 525,
           "label": "rfc8554 TC1 truncated to 2425 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 526,
           "label": "rfc8554 TC1 truncated to 2522 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 527,
           "label": "rfc8554 TC1 truncated to 2619 bytes",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "SignatureInvalid",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "SignatureInvalid",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 407,
           "label": "hsslms m32w8-h5h5-l2 bottom q = 2^h (step 2i)",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "SignatureInvalid",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "SignatureInvalid",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 408,
           "label": "hsslms m32w8-h5h5-l2 bottom LM-OTS typecode in signature N32_W8 -> N24_W8 (step 2c)",
@@ -470,105 +536,119 @@
         }
       ],
       "count": 66,
-      "sha256": "058472c06e1b4711252624e3193d1076c5317a78740e55319f54a50d089e68a7",
-      "version": 1
+      "sha256": "5ef95dcd02b179dda941f6eef6ba7e4f62ce912557be723bbb1f66070248b950",
+      "version": 2
     },
     "lms-target.bin": {
-      "bytes": 35645,
+      "bytes": 35659,
       "cases": [
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 1,
           "label": "rfc8554 Test Case 1: HSS L=2, M32_H5/W8 + M32_H5/W8",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "Ok",
           "id": 2,
           "label": "rfc8554 Test Case 2: HSS L=2, M32_H10/W4 + M32_H5/W8",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "Ok",
           "id": 106,
           "label": "acvp SP800-208 tg2 tc6 LMS_SHA256_M24_H10/LMOTS_SHA256_N24_W2: no modification",
           "source": "acvp"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 302,
           "label": "hsslms m32w8-h5h5-l2: LMS_SHA256_M32_H5+LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "Ok",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 311,
           "label": "hsslms m24w8-h5-l1: LMS_SHA256_M24_H5 / LMOTS_SHA256_N24_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 312,
           "label": "hsslms m24w8-h5h5-l2: LMS_SHA256_M24_H5+LMS_SHA256_M24_H5 / LMOTS_SHA256_N24_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "Ok",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 321,
           "label": "hsslms rotation-a: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "Ok",
+          "expect_cnsa_2_0": "Ok",
+          "expect_default": "Ok",
           "expect_rfc_all_sets": "Ok",
           "id": 322,
           "label": "hsslms rotation-b: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "Ok",
           "id": 331,
           "label": "hsslms m32w4-h5-l1: LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W4",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "UnsupportedParameterSet",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "UnsupportedParameterSet",
           "expect_rfc_all_sets": "Ok",
           "id": 333,
           "label": "hsslms m32w8-h5h5h5-l3: LMS_SHA256_M32_H5+LMS_SHA256_M32_H5+LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "SignatureInvalid",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "SignatureInvalid",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 401,
           "label": "rfc8554 TC1 last byte flipped",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "MalformedSignature",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "MalformedSignature",
           "expect_rfc_all_sets": "MalformedSignature",
           "id": 405,
           "label": "rfc8554 TC1 one trailing byte",
           "source": "rfc8554"
         },
         {
-          "expect_cnsa": "SignatureInvalid",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "SignatureInvalid",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 407,
           "label": "hsslms m32w8-h5h5-l2 bottom q = 2^h (step 2i)",
           "source": "hsslms"
         },
         {
-          "expect_cnsa": "SignatureInvalid",
+          "expect_cnsa_2_0": "UnsupportedParameterSet",
+          "expect_default": "SignatureInvalid",
           "expect_rfc_all_sets": "SignatureInvalid",
           "id": 408,
           "label": "hsslms m32w8-h5h5-l2 bottom LM-OTS typecode in signature N32_W8 -> N24_W8 (step 2c)",
@@ -576,9 +656,14 @@
         }
       ],
       "count": 14,
-      "sha256": "9da5660898e1cff2e68459057996d81ad9bf102776b9b8c7a34eee08dbf74ffd",
-      "version": 1
+      "sha256": "f8ef8ffc7edce17bd036679c718b07d2f0f44c0ebbf3bda5794f53b896f93e8a",
+      "version": 2
     }
+  },
+  "policies": {
+    "expect_cnsa_2_0": "verify_pq_with(&DefaultBackend::cnsa_2_0(), ...) (ParameterPolicy::cnsa_2_0, L = 1 only)",
+    "expect_default": "keelsign_verify::verify_pq (ParameterPolicy::keelsign_default)",
+    "expect_rfc_all_sets": "lms::verify_with_policy(&ParameterPolicy::rfc_8554_all_sets(), ...)"
   },
   "sources": {
     "acvp_lms_1_0": {

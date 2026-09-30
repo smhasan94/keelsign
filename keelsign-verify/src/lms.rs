@@ -697,8 +697,12 @@ pub(crate) const fn test_public_key(fill: u8) -> [u8; 60] {
     key
 }
 
+/// The test signer, for the backend tests (`crate::backend::tests`).
 #[cfg(test)]
-pub(crate) mod tests {
+pub(crate) use tests::{MSG, hss};
+
+#[cfg(test)]
+mod tests {
     // Host test code, not no_std firmware: failing a test with a message is the point.
     #![allow(
         clippy::panic,
