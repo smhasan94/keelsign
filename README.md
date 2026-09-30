@@ -5,7 +5,8 @@ Post-quantum firmware signing kit. Sign firmware on the host with ML-DSA or LMS/
 format so MCUboot and embassy-boot users keep their existing update pipeline.
 
 **Status: placeholder / name reservation.** The published `0.0.1` crates contain no
-functionality.
+functionality. Unreleased on `main`: `keelsign-verify` parses MCUboot images and verifies
+LMS/HSS signatures; ML-DSA, image hashing and the CLI are not there yet.
 
 ## Crates
 

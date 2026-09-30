@@ -18,5 +18,9 @@ ml-dsa = []
 # Key IDs are truncated SHA-256 digests of the public key. Defaults off: no `alloc`.
 sha2 = { version = "=0.11.0", default-features = false }
 
+[dev-dependencies]
+# Property tests of the image parser (SHA-35). Host tests only; without `fork`/`timeout`.
+proptest = { version = "=1.11.0", default-features = false, features = ["std"] }
+
 [lints]
 workspace = true
