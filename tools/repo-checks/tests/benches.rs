@@ -1,7 +1,8 @@
 //! Checks for the standalone on-target benchmark projects under `benches/` (SHA-34).
 
 use repo_checks::{
-    BENCHES, Example, ScratchDir, cargo_in, python_script, run_capture, run_ok, workspace_root,
+    BENCHES, Example, LMS_BENCH_FILES, LMS_ON_TARGET_TESTS, LMS_SIZE_BINS, LMS_STACK_LIMIT,
+    ScratchDir, cargo_in, python_script, run_capture, run_ok, workspace_root,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -73,7 +74,7 @@ fn bench_by_name(name: &str) -> &'static Example {
 fn bench_projects_exist() {
     for bench in &BENCHES {
         let dir = bench_dir(bench);
-        for rel in BENCH_FILES {
+        for rel in BENCH_FILES.iter().chain(&LMS_BENCH_FILES) {
             assert!(dir.join(rel).is_file(), "{}: missing {rel}", bench.name);
         }
         let cargo_toml = read_bench(bench, "Cargo.toml");
@@ -96,6 +97,7 @@ fn bench_projects_exist() {
         }
         for (dep, path) in [
             ("mldsa-kat", "../mldsa-kat"),
+            ("lms-kat", "../lms-kat"),
             ("stack-paint", "../stack-paint"),
         ] {
             let line = dependency_line(&cargo_toml, dep)
@@ -139,7 +141,7 @@ fn bench_projects_exist() {
                 bench.name
             );
         }
-        for bin in SIZE_BINS {
+        for bin in SIZE_BINS.iter().chain(&LMS_SIZE_BINS) {
             assert!(
                 cargo_toml.contains(&format!("[[bin]]\nname = \"{bin}\"\ntest = false\n")),
                 "{}: bin {bin} must be declared with `test = false`",
@@ -281,6 +283,47 @@ fn bench_tests_use_embedded_test_harness() {
                 bench.name
             );
         }
+
+        // SHA-65: the LMS/HSS tests are a second embedded-test binary.
+        assert!(
+            cargo_toml.contains("[[test]]\nname = \"lms\"\nharness = false\n"),
+            "{}: tests/lms.rs must be a `harness = false` test",
+            bench.name
+        );
+        let lms = read_bench(bench, "tests/lms.rs");
+        for needle in [
+            "#![no_std]",
+            "#![no_main]",
+            "#[embedded_test::tests]",
+            "#[init]",
+            "compile_error!",
+            "defmt_rtt as _",
+            "BENCH board=",
+            "stack_paint::paint",
+            "check_rotation",
+            "LMS_TARGET",
+        ] {
+            assert!(
+                lms.contains(needle),
+                "{}: tests/lms.rs must contain `{needle}`",
+                bench.name
+            );
+        }
+        assert_eq!(LMS_STACK_LIMIT, 32_768);
+        assert!(
+            lms.contains("const STACK_LIMIT: u32 = 32_768;")
+                && lms.contains("mark.bytes <= STACK_LIMIT")
+                && lms.contains("!mark.saturated"),
+            "{}: lms_bench must assert peak_stack <= {LMS_STACK_LIMIT} and !saturated",
+            bench.name
+        );
+        for test in LMS_ON_TARGET_TESTS {
+            assert!(
+                lms.contains(&format!("fn {test}(")),
+                "{}: tests/lms.rs must define the on-target test `{test}`",
+                bench.name
+            );
+        }
     }
 }
 
@@ -314,7 +357,7 @@ fn benches_excluded_from_root_workspace() {
             bench.name
         );
     }
-    for member in ["mldsa-kat", "stack-paint"] {
+    for member in ["mldsa-kat", "lms-kat", "stack-paint"] {
         assert!(
             metadata.contains(&format!("\"name\":\"{member}\"")),
             "{member} must be a root workspace member (host KATs run in `cargo test --workspace`)"
@@ -370,25 +413,27 @@ fn cross_build(name: &str) {
     run_ok(cargo_in(&dir, &target_dir).args(["test", "--no-run", "--release", "--locked"]));
     run_ok(cargo_in(&dir, &target_dir).args(["build", "--release", "--locked", "--bins"]));
     let release = target_dir.join(bench.target).join("release");
-    for bin in SIZE_BINS {
+    for bin in SIZE_BINS.iter().chain(&LMS_SIZE_BINS) {
         assert!(
             release.join(bin).is_file(),
             "expected ELF at {}",
             release.join(bin).display()
         );
     }
-    let has_kat = fs::read_dir(release.join("deps"))
-        .expect("read deps dir")
-        .filter_map(Result::ok)
-        .any(|e| {
-            let name = e.file_name().to_string_lossy().into_owned();
-            name.starts_with("kat-") && !name.contains('.')
-        });
-    assert!(
-        has_kat,
-        "expected the kat test ELF under {}",
-        release.display()
-    );
+    for test in ["kat", "lms"] {
+        let found = fs::read_dir(release.join("deps"))
+            .expect("read deps dir")
+            .filter_map(Result::ok)
+            .any(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                name.starts_with(&format!("{test}-")) && !name.contains('.')
+            });
+        assert!(
+            found,
+            "expected the {test} test ELF under {}",
+            release.display()
+        );
+    }
 }
 
 #[test]
@@ -441,5 +486,29 @@ fn flash_sizes_script_runs() {
                 );
             }
         }
+
+        // SHA-65: size_lms over size_lms_baseline.
+        let (ok, stdout, stderr) = run_capture(
+            python_script("elf_sizes.py")
+                .arg("--baseline")
+                .arg(release.join(LMS_SIZE_BINS[0]))
+                .args(LMS_SIZE_BINS.map(|b| release.join(b))),
+        );
+        assert!(ok, "elf_sizes.py failed:\n{stderr}");
+        let deltas: Vec<i64> = stdout
+            .lines()
+            .skip(2)
+            .map(|row| {
+                row.split('|')
+                    .map(str::trim)
+                    .filter(|c| !c.is_empty())
+                    .nth(7)
+                    .and_then(|c| c.parse().ok())
+                    .unwrap_or_else(|| panic!("no Δ flash cell in `{row}`"))
+            })
+            .collect();
+        assert_eq!(deltas.len(), 2, "{stdout}");
+        assert_eq!(deltas[0], 0, "{}: LMS baseline delta", bench.name);
+        assert!(deltas[1] > 0, "{}: size_lms must add flash", bench.name);
     }
 }

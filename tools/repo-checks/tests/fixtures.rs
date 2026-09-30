@@ -161,3 +161,132 @@ fn fixture_script_regenerates_identically() {
     );
     assert!(stdout.contains("fixtures match a fresh regeneration"));
 }
+
+// ---- SHA-65: LMS/HSS fixtures in benches/lms-kat/fixtures/ -----------------------------
+
+/// (file, case count) of the LMS/HSS fixtures.
+const LMS_FIXTURES: [(&str, u16); 2] = [("lms-host.bin", 64), ("lms-target.bin", 12)];
+
+/// Upstream pins of scripts/gen_lms_vectors.py: (name in the manifest, pinned URL part,
+/// upstream sha256).
+const LMS_SOURCES: [(&str, &str, &str); 4] = [
+    (
+        "rfc8554",
+        "https://www.rfc-editor.org/rfc/rfc8554.txt",
+        "d5bfdbd457dfe7bc5f67cc1f62482999c2f55bf8033f2af56da323f2ffc2c055",
+    ),
+    (
+        "acvp_sp800_208",
+        "975de31eb83d87039ec88934fdc47d8c312b892d",
+        "015bb30cb60d4fb24bc69d0cb074965c5fd10d1c70b01d09a5914d4947e2dedf",
+    ),
+    (
+        "acvp_lms_1_0",
+        "975de31eb83d87039ec88934fdc47d8c312b892d",
+        "298bf08f3dab576483b731dc58a4feab18b93e1e741bc6192133285962cf77dd",
+    ),
+    (
+        "hsslms",
+        "hsslms-0.1.3.tar.gz",
+        "8d0a1f2bbc5f10f53f6abb394247bf185976088fbbb698a7f8c14031e97a4be5",
+    ),
+];
+
+fn lms_manifest() -> String {
+    let path = workspace_root().join("benches/lms-kat/fixtures/MANIFEST.json");
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+}
+
+#[test]
+fn lms_fixtures_match_manifest() {
+    let manifest = lms_manifest();
+    let outputs = json_object(&manifest, "outputs");
+    for (name, count) in LMS_FIXTURES {
+        let path = workspace_root().join("benches/lms-kat/fixtures").join(name);
+        let bytes = fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let entry = json_object(outputs, name);
+        assert_eq!(
+            sha256_hex(&bytes),
+            json_field(entry, "sha256"),
+            "{name}: sha256 differs from MANIFEST.json; regenerate with scripts/gen_lms_vectors.py"
+        );
+        assert_eq!(
+            bytes.len().to_string(),
+            json_field(entry, "bytes"),
+            "{name}: size"
+        );
+        assert_eq!(&bytes[..4], b"KSLM", "{name}: magic");
+        assert_eq!(
+            u16::from_le_bytes([bytes[4], bytes[5]]),
+            1,
+            "{name}: version"
+        );
+        let header_count = u16::from_le_bytes([bytes[6], bytes[7]]);
+        assert_eq!(header_count, count, "{name}: case count");
+        assert_eq!(
+            json_field(entry, "count"),
+            count.to_string(),
+            "{name}: count"
+        );
+        assert_eq!(
+            entry.matches("\"id\":").count(),
+            usize::from(count),
+            "{name}: manifest lists every case"
+        );
+    }
+    let host = json_object(outputs, "lms-host.bin");
+    for source in ["\"rfc8554\"", "\"acvp\"", "\"hsslms\""] {
+        assert!(host.contains(source), "host fixture has {source} cases");
+    }
+}
+
+#[test]
+fn lms_manifest_pins_sources() {
+    let manifest = lms_manifest();
+    let script = fs::read_to_string(workspace_root().join("scripts/gen_lms_vectors.py"))
+        .expect("read scripts/gen_lms_vectors.py");
+    let sources = json_object(&manifest, "sources");
+    for (name, pin, sha256) in LMS_SOURCES {
+        let entry = json_object(sources, name);
+        assert_eq!(
+            json_field(entry, "sha256"),
+            sha256,
+            "{name}: upstream sha256"
+        );
+        let url = json_field(entry, "url");
+        assert!(url.starts_with("https://"), "{name}: {url}");
+        assert!(
+            url.contains(pin),
+            "{name}: URL must be pinned to `{pin}`: {url}"
+        );
+        for needle in [pin, sha256] {
+            assert!(
+                script.contains(needle),
+                "scripts/gen_lms_vectors.py must pin `{needle}` ({name})"
+            );
+        }
+    }
+    // The signer is vendored at run time, never installed.
+    assert!(json_object(sources, "hsslms").contains("\"hsslms==0.1.3\""));
+    for forbidden in ["pip install", "subprocess", "ensurepip"] {
+        assert!(
+            !script.contains(forbidden),
+            "scripts/gen_lms_vectors.py must not `{forbidden}`"
+        );
+    }
+    assert!(
+        manifest.contains("\"generator\": \"scripts/gen_lms_vectors.py\""),
+        "MANIFEST.json names its generator"
+    );
+}
+
+#[test]
+#[ignore = "needs network access to rfc-editor.org, raw.githubusercontent.com and files.pythonhosted.org, and python3"]
+fn lms_fixture_script_regenerates_identically() {
+    let (ok, stdout, stderr) = run_capture(python_script("gen_lms_vectors.py").arg("--check"));
+    assert!(
+        ok,
+        "gen_lms_vectors.py --check failed:\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(stdout.contains("fixtures match a fresh regeneration"));
+}

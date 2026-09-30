@@ -407,3 +407,210 @@ fn three_run_logs_consistent_within_5_percent() {
         assert!(ok, "{board}: runs not within 5 %:\n{stdout}\n{stderr}");
     }
 }
+
+// ---- SHA-65: LMS/HSS ------------------------------------------------------------------
+
+const LMS_SECTION: &str = "## LMS/HSS verify (SHA-65)";
+const LMS_SETS: [(&str, usize, usize); 2] = [
+    // (set, n = m, p for W8)
+    ("LMS SHA-256 M32/W8", 32, 34),
+    ("LMS SHA-256/192 M24/W8", 24, 26),
+];
+
+/// RFC 8554 §5.4: an LMS signature is `4 + (4 + n * (p + 1)) + 4 + m * h` bytes (m = n).
+fn lms_signature_len(n: usize, p: usize, h: usize) -> usize {
+    4 + (4 + n * (p + 1)) + 4 + n * h
+}
+
+#[test]
+fn lms_results_table_covers_boards_and_sets() {
+    let doc = doc();
+    // The LMS section comes after the SHA-34 sections, which stay intact.
+    let follow_ups = doc.find("\n## Follow-ups\n").expect("## Follow-ups");
+    let lms_at = doc
+        .find(&format!("\n{LMS_SECTION}\n"))
+        .unwrap_or_else(|| panic!("docs/benchmarks.md needs `{LMS_SECTION}`"));
+    assert!(lms_at > follow_ups, "the LMS section follows ## Follow-ups");
+    let lms = section(&doc, LMS_SECTION);
+    for heading in [
+        "### Crate choice",
+        "### Known-answer evidence",
+        "### LMS method",
+        "### LMS results",
+        "### LMS reproduce",
+    ] {
+        assert!(
+            lms.contains(&format!("\n{heading}\n")),
+            "{LMS_SECTION} needs `{heading}`"
+        );
+    }
+    let results = section(&doc, "### LMS results");
+    let header = results
+        .lines()
+        .find(|l| l.starts_with("| Board | Set |"))
+        .expect("### LMS results needs the board × set table");
+    for column in [
+        "Verify cycles",
+        "Peak stack (measured)",
+        "Static frame",
+        "Flash Δ release",
+        "Flash Δ size",
+        "LMS signature (H10)",
+        "HSS signature (H10+H10, L=2)",
+    ] {
+        assert!(
+            header.contains(column),
+            "LMS table needs a `{column}` column"
+        );
+    }
+    let table: String = results
+        .lines()
+        .skip_while(|l| !l.starts_with("| Board | Set |"))
+        .take_while(|l| l.starts_with('|'))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let rows = table_rows(&table);
+    assert_eq!(rows.len(), 4, "one row per board × set");
+    for board in BOARDS {
+        for (set, n, p) in LMS_SETS {
+            let row = rows
+                .iter()
+                .find(|r| r[0] == board && r[1] == set)
+                .unwrap_or_else(|| panic!("LMS table has no row for {board} {set}"));
+            assert_eq!(row.len(), 10, "{board} {set}: 10 columns");
+            // Cycles, time and measured stack: a value or pending hardware.
+            for i in [2, 3, 4] {
+                let cell = &row[i];
+                assert!(
+                    cell == PENDING || cell.chars().any(|c| c.is_ascii_digit()),
+                    "{board} {set} column {i}: `{cell}` must be a value or `{PENDING}`"
+                );
+            }
+            // Static frame and flash are measured without hardware.
+            for i in [5, 6, 7] {
+                let value = parse_bytes(&row[i])
+                    .unwrap_or_else(|| panic!("{board} {set} column {i}: `{}`", row[i]));
+                assert!(value > 0, "{board} {set} column {i} must be positive");
+            }
+            let frame = parse_bytes(&row[5]).unwrap();
+            assert!(frame <= 32_768, "{board} {set}: static frame over 32 KB");
+            // Signature sizes follow RFC 8554 for H10.
+            let lms_sig = lms_signature_len(n, p, 10);
+            assert_eq!(
+                parse_bytes(&row[8]),
+                Some(lms_sig as u64),
+                "{board} {set} LMS"
+            );
+            assert_eq!(
+                parse_bytes(&row[9]),
+                Some((4 + 2 * lms_sig + 24 + n) as u64),
+                "{board} {set} HSS-2"
+            );
+        }
+    }
+    // The plan's reference sizes.
+    assert_eq!(lms_signature_len(32, 34, 10), 1452);
+    assert_eq!(lms_signature_len(24, 26, 10), 900);
+    assert_eq!(lms_signature_len(32, 34, 20), 1772);
+    assert_eq!(lms_signature_len(24, 26, 20), 1140);
+
+    let reproduce = section(&doc, "### LMS reproduce");
+    for command in [
+        "python3 scripts/gen_lms_vectors.py --check",
+        "cargo test --release --locked --test lms -- lms_kat",
+        "cargo test --release --locked --test lms -- lms_bench",
+        "cargo test --release --locked --test lms -- lms_rotation_key_b_verifies_against_a_b_and_fails_against_a",
+        "--baseline target/thumbv7em-none-eabihf/release/size_lms_baseline",
+        "cargo +nightly rustc --release --locked --bin size_lms --target-dir target/nightly -- -Z emit-stack-sizes",
+    ] {
+        assert!(
+            reproduce.contains(command),
+            "### LMS reproduce must list `{command}`"
+        );
+    }
+}
+
+#[test]
+fn lms_crate_choice_recorded() {
+    let doc = doc();
+    let choice = section(&doc, "### Crate choice");
+    for candidate in ["hbs-lms 0.1.1", "lms-signature 0.1.0-rc.2", "in-house"] {
+        assert!(
+            choice.contains(candidate),
+            "### Crate choice must compare `{candidate}`"
+        );
+    }
+    let recorded: Vec<&str> = choice
+        .lines()
+        .filter(|l| l.starts_with("Choice: "))
+        .collect();
+    assert_eq!(
+        recorded.len(),
+        1,
+        "exactly one `Choice:` line: {recorded:?}"
+    );
+    assert!(
+        recorded[0].starts_with("Choice: in-house"),
+        "{}",
+        recorded[0]
+    );
+    assert!(
+        choice.contains("no new dependency; sha2 =0.11.0 already pinned"),
+        "### Crate choice must carry the E8.2 justification"
+    );
+    assert!(choice.contains("E8.2"));
+    let evidence = section(&doc, "### Known-answer evidence");
+    for needle in ["hsslms 0.1.3", "Test Case 1", "SHA-256/192", "No NIST"] {
+        assert!(
+            evidence.contains(needle),
+            "### Known-answer evidence must record `{needle}`"
+        );
+    }
+    // The crate choice matches the code: no LMS crate among keelsign-verify's dependencies.
+    let manifest = fs::read_to_string(workspace_root().join("keelsign-verify/Cargo.toml"))
+        .expect("read keelsign-verify/Cargo.toml");
+    for krate in ["hbs-lms", "lms-signature"] {
+        assert!(
+            !manifest.contains(krate),
+            "keelsign-verify must not depend on {krate}"
+        );
+    }
+    assert!(
+        workspace_root()
+            .join("keelsign-verify/src/lms.rs")
+            .is_file()
+    );
+}
+
+/// A synthetic LMS log: no Wycheproof cases, so the headline is the shortest-message
+/// valid case of each set.
+#[test]
+fn bench_summarize_headline_for_lms_logs() {
+    let scratch = ScratchDir::new("bench_summarize_lms");
+    let mut log = String::new();
+    for (set, src, tc, msg_len, valid, cycles) in [
+        ("LMS-M32_H5-W8-L2", "rfc8554", 1, 162, true, 9_000_000u32),
+        ("LMS-M32_H5-W8-L2", "hsslms", 302, 32, true, 8_500_000),
+        ("LMS-M32_H5-W8-L2", "rfc8554", 401, 162, false, 9_100_000),
+        ("LMS-M24_H5-W8-L1", "hsslms", 311, 32, true, 3_000_000),
+    ] {
+        log += &format!(
+            "0.1 [INFO ] BENCH board=rp2350 set={set} src={src} tc={tc} msg_len={msg_len} \
+             sig_len=2644 expect_valid={valid} ok=true result=Ok cycles={cycles} us={} \
+             peak_stack=2000 saturated=false (lms tests/lms.rs:1)\n",
+            cycles / 150
+        );
+    }
+    let path = scratch.path().join("lms.txt");
+    fs::write(&path, log).expect("write synthetic log");
+    let (ok, stdout, stderr) = run_capture(python_script("bench_summarize.py").arg(&path));
+    assert!(ok, "{stdout}\n{stderr}");
+    assert!(
+        stdout.contains("| rp2350 | LMS-M32_H5-W8-L2 | 8500000 (tc 302, 32 B msg)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("| rp2350 | LMS-M24_H5-W8-L1 | 3000000 (tc 311, 32 B msg)"),
+        "{stdout}"
+    );
+}
