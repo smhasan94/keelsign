@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 
 use crate::algorithm::Algorithm;
 use crate::error::{Error, KeySetError};
+use crate::lms;
 use crate::tlv::KEY_ID_LEN;
 
 /// A key ID: the first [`KEY_ID_LEN`] bytes of the SHA-256 of the raw public key
@@ -51,8 +52,9 @@ impl<'a, const N: usize> TrustedKeys<'a, N> {
     /// for its algorithm, and [`KeySetError::DuplicateKeyId`] if two keys have the same
     /// ID.
     ///
-    /// Only ML-DSA keys have an exact length; an LMS/HSS key only has to be non-empty
-    /// here (its minimum length is checked by the LMS backend, SHA-65).
+    /// ML-DSA keys have one exact length each; an LMS/HSS key must be 52 or 60 bytes
+    /// ([`lms::PUBLIC_KEY_LENS`](crate::lms::PUBLIC_KEY_LENS): SHA-256/192 or SHA-256).
+    /// Whether its typecodes match that length is checked when it verifies a signature.
     pub fn new(keys: &[TrustedKey<'a>]) -> Result<Self, KeySetError> {
         if keys.len() > N {
             return Err(KeySetError::Capacity);
@@ -65,6 +67,11 @@ impl<'a, const N: usize> TrustedKeys<'a, N> {
             }
             if let Some(expected) = key.algorithm.public_key_len()
                 && key.public_key.len() != expected
+            {
+                return Err(KeySetError::InvalidPublicKeyLength(key.algorithm));
+            }
+            if key.algorithm == Algorithm::LmsHss
+                && !lms::PUBLIC_KEY_LENS.contains(&key.public_key.len())
             {
                 return Err(KeySetError::InvalidPublicKeyLength(key.algorithm));
             }
@@ -247,8 +254,28 @@ mod tests {
         ];
         assert_eq!(key_id_of(b"abc"), full[..KEY_ID_LEN]);
 
-        let keys = TrustedKeys::<1>::new(&[key(Algorithm::LmsHss, b"abc")]).unwrap();
-        assert!(keys.find(&full[..KEY_ID_LEN]).is_ok());
+        // The set finds a key by the truncated SHA-256 of its bytes.
+        let keys = TrustedKeys::<1>::new(&[key(Algorithm::LmsHss, &LMS_PK_A)]).unwrap();
+        let digest: [u8; 32] = Sha256::digest(LMS_PK_A).into();
+        assert!(keys.find(&digest[..KEY_ID_LEN]).is_ok());
+    }
+
+    #[test]
+    fn lms_public_key_must_be_52_or_60_bytes() {
+        let bytes = [0x4c; 64];
+        for len in 0..=bytes.len() {
+            let result = TrustedKeys::<1>::new(&[key(Algorithm::LmsHss, &bytes[..len])]);
+            if len == 52 || len == 60 {
+                assert_eq!(result.unwrap().len(), 1, "{len}");
+            } else {
+                assert_eq!(
+                    result.unwrap_err(),
+                    KeySetError::InvalidPublicKeyLength(Algorithm::LmsHss),
+                    "{len}"
+                );
+            }
+        }
+        assert_eq!(lms::PUBLIC_KEY_LENS, [52, 60]);
     }
 
     #[test]
