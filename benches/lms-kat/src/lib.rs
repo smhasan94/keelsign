@@ -22,9 +22,11 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub use keelsign_verify::Error;
+
 use keelsign_verify::lms::{self, ParameterPolicy};
 use keelsign_verify::tlv::{TLV_KEELSIGN_KEY_ID, TLV_LMS_HSS_SIG};
-use keelsign_verify::{Algorithm, Error, TrustedKey, TrustedKeys, key_id_of, verify_pq};
+use keelsign_verify::{Algorithm, TrustedKey, TrustedKeys, key_id_of, verify_pq};
 
 /// Fixture magic bytes.
 pub const MAGIC: [u8; 4] = *b"KSLM";
@@ -338,8 +340,18 @@ pub fn image_tlvs<'a>(key_id: &'a [u8], signature: &'a [u8]) -> [(u16, &'a [u8])
 #[inline(never)]
 pub fn verify_case(case: &Case<'_>) -> Result<(), Error> {
     let keys = trusted_lms_key(case.pk)?;
+    verify_with_keys(&keys, case)
+}
+
+/// [`verify_pq`] of `case`'s signature and message against `keys`, with TLVs carrying the
+/// key ID of `case.pk`.
+#[inline(never)]
+pub fn verify_with_keys<const N: usize>(
+    keys: &TrustedKeys<'_, N>,
+    case: &Case<'_>,
+) -> Result<(), Error> {
     let id = key_id_of(case.pk);
-    verify_pq(&keys, image_tlvs(&id, case.sig), case.msg).map(|_| ())
+    verify_pq(keys, image_tlvs(&id, case.sig), case.msg).map(|_| ())
 }
 
 /// Verifies `case` with [`lms::verify_with_policy`] under
@@ -438,6 +450,34 @@ pub struct KeyInfo {
 }
 
 impl KeyInfo {
+    /// Short name of the level-0 LMS parameter set, e.g. `M32_H5`.
+    pub const fn lms_name(&self) -> &'static str {
+        match self.lms_typecode {
+            0x05 => "M32_H5",
+            0x06 => "M32_H10",
+            0x07 => "M32_H15",
+            0x08 => "M32_H20",
+            0x09 => "M32_H25",
+            0x0A => "M24_H5",
+            0x0B => "M24_H10",
+            0x0C => "M24_H15",
+            0x0D => "M24_H20",
+            0x0E => "M24_H25",
+            _ => "unknown",
+        }
+    }
+
+    /// Short name of the level-0 LM-OTS parameter set, e.g. `W8`.
+    pub const fn lmots_name(&self) -> &'static str {
+        match self.lmots_typecode {
+            0x01 | 0x05 => "W1",
+            0x02 | 0x06 => "W2",
+            0x03 | 0x07 => "W4",
+            0x04 | 0x08 => "W8",
+            _ => "unknown",
+        }
+    }
+
     /// Reads `L` and the level-0 typecodes from an HSS public key.
     pub fn of(public_key: &[u8]) -> Option<Self> {
         let mut rest = public_key;

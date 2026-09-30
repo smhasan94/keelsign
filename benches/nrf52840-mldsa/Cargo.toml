@@ -1,6 +1,6 @@
 [package]
 name = "nrf52840-mldsa"
-description = "SHA-34 ML-DSA-44/65 verify KATs and benchmarks on the nRF52840-DK (embedded-test)."
+description = "SHA-34 ML-DSA-44/65 and SHA-65 LMS/HSS verify KATs and benchmarks on the nRF52840-DK (embedded-test)."
 version = "0.0.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 mldsa-kat = { path = "../mldsa-kat", features = ["cortex-m"] }
+lms-kat = { path = "../lms-kat" }
 stack-paint = { path = "../stack-paint" }
 embassy-nrf = { version = "=0.11.0", features = ["defmt", "nrf52840"] }
 # Synchronous tests, no embassy executor. embedded-test's panic handler replaces
@@ -25,6 +26,10 @@ cortex-m-rt = "=0.7.7"
 name = "kat"
 harness = false
 
+[[test]]
+name = "lms"
+harness = false
+
 [[bin]]
 name = "size_baseline"
 test = false
@@ -37,6 +42,16 @@ bench = false
 
 [[bin]]
 name = "size_mldsa65"
+test = false
+bench = false
+
+[[bin]]
+name = "size_lms_baseline"
+test = false
+bench = false
+
+[[bin]]
+name = "size_lms"
 test = false
 bench = false
 
