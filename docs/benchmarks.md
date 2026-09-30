@@ -286,7 +286,7 @@ re-measured for the in-house verifier from `size_lms` below:
 | SHA-256/192 | wrong typecodes (upstream issue #100) | no; no HSS either | yes |
 | ACVP M24 vectors | panics (`unwrap`, `signing.rs:174`) | n/a | pass (16 of 16) |
 | Extra dependencies | a second sha2/digest, sha3, tinyvec, zeroize | getrandom, rand_core, … | none |
-| Flash Δ, release / size | +15,116 / +8,056 B (raw verify) | — | +6,692 / +5,072 B (whole `verify_pq` path) |
+| Flash Δ, release / size | +15,116 / +8,056 B (raw verify) | — | +6,740 / +5,136 B (whole `verify_pq` path) |
 | Static frame | 17,544 B | — | 1,488 B call chain |
 | Lines to audit | 5,064 | 2,553 | ≈ 410 (`lms.rs` code, without comments and tests) |
 | Licence | Apache-2.0 only | MIT OR Apache-2.0 | MIT OR Apache-2.0 |
@@ -321,6 +321,11 @@ expectations, one for `verify_pq` (CNSA policy) and one for the RFC policy:
 - Negatives derived from Test Case 1: flipped last byte, C and both q values
   (`SignatureInvalid`), 28 truncations and a trailing byte (`MalformedSignature`), the key
   patched to L=3 (`UnsupportedParameterSet`).
+- Negatives derived from hsslms M32/W8 H5+H5: the bottom-level q set to exactly 2^h
+  (RFC 8554 Algorithm 6a step 2i), and only the bottom-level LM-OTS typecode inside the
+  signature changed from N32_W8 to N24_W8 (step 2c; every length still follows from the
+  public key and the gate covers public keys only, so only the typecode check rejects
+  it). Both are `SignatureInvalid` under both policies.
 
 AC1 evidence note: accepted-set SHA-256/192 and HSS-2/W8 coverage comes from RFC 8554
 Test Case 1 plus the fixtures signed by the pinned independent `hsslms 0.1.3`. No NIST
@@ -328,10 +333,10 @@ vectors exist for those sets (the ACVP LMS vectors are single-tree SHA-256/192 w
 and W2 only). Heights H15 and above are accepted but covered by the parameter-table
 tests only; no fixture is signed above H10.
 
-The host set (`lms-host.bin`, 64 cases) runs in `cargo test --workspace`; the on-target
-set (`lms-target.bin`, 12 cases: TC1, TC2, ACVP SP800-208 tc 6, hsslms M32 H5+H5,
-M24 H5 and H5+H5, rotation A and B, W4, L=3, the flipped last byte and the trailing
-byte) runs on each board in `lms_kat`, which checks both expectations of every case and
+The host set (`lms-host.bin`, 66 cases) runs in `cargo test --workspace`; the on-target
+set (`lms-target.bin`, 14 cases: TC1, TC2, ACVP SP800-208 tc 6, hsslms M32 H5+H5,
+M24 H5 and H5+H5, rotation A and B, W4, L=3, the flipped last byte, the trailing
+byte, q = 2^h and the LM-OTS typecode mismatch) runs on each board in `lms_kat`, which checks both expectations of every case and
 the key-rotation pair.
 
 ### LMS method
@@ -364,10 +369,10 @@ columns are the same for both sets.
 
 | Board | Set | Verify cycles (headline) | Verify time | Peak stack (measured) | Static frame (compiled) | Flash Δ release | Flash Δ size | LMS signature (H10) | HSS signature (H10+H10, L=2) |
 |---|---|---|---|---|---|---|---|---|---|
-| nrf52840 | LMS SHA-256 M32/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 6,692 B | 5,072 B | 1,452 B | 2,964 B |
-| nrf52840 | LMS SHA-256/192 M24/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 6,692 B | 5,072 B | 900 B | 1,852 B |
-| rp2350 | LMS SHA-256 M32/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 6,708 B | 5,096 B | 1,452 B | 2,964 B |
-| rp2350 | LMS SHA-256/192 M24/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 6,708 B | 5,096 B | 900 B | 1,852 B |
+| nrf52840 | LMS SHA-256 M32/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 6,740 B | 5,136 B | 1,452 B | 2,964 B |
+| nrf52840 | LMS SHA-256/192 M24/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 6,740 B | 5,136 B | 900 B | 1,852 B |
+| rp2350 | LMS SHA-256 M32/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 6,756 B | 5,144 B | 1,452 B | 2,964 B |
+| rp2350 | LMS SHA-256/192 M24/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 6,756 B | 5,144 B | 900 B | 1,852 B |
 
 An LMS signature is `4 + (4 + n * (p + 1)) + 4 + m * h` bytes (RFC 8554 §5.4) with
 p = 34 (N32/W8) or 26 (N24/W8); an HSS signature with L levels is
@@ -380,12 +385,12 @@ Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
 
 | Board / profile | `size_lms_baseline` flash | `size_lms` flash | Δ LMS/HSS |
 |---|---|---|---|
-| nrf52840 / release | 41,696 | 48,388 | 6,692 |
-| nrf52840 / size | 41,660 | 46,732 | 5,072 |
-| rp2350 / release | 42,832 | 49,540 | 6,708 |
-| rp2350 / size | 42,308 | 47,404 | 5,096 |
+| nrf52840 / release | 47,232 | 53,972 | 6,740 |
+| nrf52840 / size | 47,220 | 52,356 | 5,136 |
+| rp2350 / release | 48,368 | 55,124 | 6,756 |
+| rp2350 / size | 47,868 | 53,012 | 5,144 |
 
-Both baselines include the 30,151-byte LMS target fixture in `.rodata`.
+Both baselines include the 35,645-byte LMS target fixture in `.rodata`.
 
 The stack limit (AC4) is 32,768 B measured on both boards; the compiled call chain is
 1,488 B, so the limit holds with a wide margin unless the board measurement shows

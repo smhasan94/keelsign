@@ -268,6 +268,63 @@ fn wrong_tree_index_is_signature_invalid() {
 }
 
 #[test]
+fn q_equal_to_two_pow_h_is_signature_invalid() {
+    // RFC 8554 Algorithm 6a step 2i: q must be below 2^h. The bottom tree of hsslms case
+    // 302 is M32_H5, so q = 32 is the first out-of-range leaf index.
+    let case = host_case(ids::M32_H5H5_L2_Q_TWO_POW_H);
+    let base = host_case(ids::M32_H5H5_L2);
+    let bottom = 4 + 1292 + 56;
+    assert_eq!(case.source, Source::Hsslms);
+    assert_eq!(case.pk, base.pk);
+    assert_eq!(case.sig.len(), base.sig.len());
+    assert_eq!(case.sig[bottom..bottom + 4], 32u32.to_be_bytes());
+    assert_eq!(case.sig[..bottom], base.sig[..bottom]);
+    assert_eq!(case.sig[bottom + 4..], base.sig[bottom + 4..]);
+    assert_eq!(verify_case(&case), Err(Error::SignatureInvalid));
+    assert_eq!(
+        verify_case_rfc_all_sets(&case),
+        Err(Error::SignatureInvalid)
+    );
+    assert_case(&case);
+    // Also on the target fixture.
+    let target = Fixture::parse(LMS_TARGET).unwrap();
+    assert_eq!(target.case(ids::M32_H5H5_L2_Q_TWO_POW_H), Some(case));
+}
+
+#[test]
+fn lm_ots_typecode_mismatch_in_signature_is_rejected() {
+    // RFC 8554 Algorithm 6a step 2c: the LM-OTS typecode inside the signature must be the
+    // public key's. Only the bottom-level signature's typecode differs from hsslms case
+    // 302 (N32_W8 -> N24_W8, a valid W8 code of the other hash size); every length is
+    // taken from the public key and the parameter gate covers public keys only, so the
+    // case reaches the typecode check. The typecode bytes are not hashed, so it is that
+    // check alone that rejects it.
+    let case = host_case(ids::M32_H5H5_L2_LMOTS_TYPECODE_MISMATCH);
+    let base = host_case(ids::M32_H5H5_L2);
+    let ots = 4 + 1292 + 56 + 4;
+    assert_eq!(case.source, Source::Hsslms);
+    assert_eq!(case.pk, base.pk);
+    assert_eq!(case.sig.len(), base.sig.len());
+    assert_eq!(base.sig[ots..ots + 4], 0x04u32.to_be_bytes());
+    assert_eq!(case.sig[ots..ots + 4], 0x08u32.to_be_bytes());
+    assert_eq!(case.sig[..ots], base.sig[..ots]);
+    assert_eq!(case.sig[ots + 4..], base.sig[ots + 4..]);
+    assert!(ParameterPolicy::cnsa_2_0().allows(0x05, 0x04));
+    assert_eq!(verify_case(&case), Err(Error::SignatureInvalid));
+    assert_eq!(
+        verify_case_rfc_all_sets(&case),
+        Err(Error::SignatureInvalid)
+    );
+    assert_case(&case);
+    // Also on the target fixture.
+    let target = Fixture::parse(LMS_TARGET).unwrap();
+    assert_eq!(
+        target.case(ids::M32_H5H5_L2_LMOTS_TYPECODE_MISMATCH),
+        Some(case)
+    );
+}
+
+#[test]
 fn truncated_signature_is_malformed_signature() {
     let truncated: Vec<Case<'_>> = cases(LMS_HOST)
         .into_iter()
@@ -342,6 +399,8 @@ fn target_subset_is_subset_of_host_set() {
         ids::M32_W4,
         ids::HSS_L3,
         ids::TC1_LAST_BYTE_FLIPPED,
+        ids::M32_H5H5_L2_Q_TWO_POW_H,
+        ids::M32_H5H5_L2_LMOTS_TYPECODE_MISMATCH,
     ] {
         assert!(
             target_ids.contains(&id),

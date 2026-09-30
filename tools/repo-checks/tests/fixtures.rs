@@ -165,7 +165,7 @@ fn fixture_script_regenerates_identically() {
 // ---- SHA-65: LMS/HSS fixtures in benches/lms-kat/fixtures/ -----------------------------
 
 /// (file, case count) of the LMS/HSS fixtures.
-const LMS_FIXTURES: [(&str, u16); 2] = [("lms-host.bin", 64), ("lms-target.bin", 12)];
+const LMS_FIXTURES: [(&str, u16); 2] = [("lms-host.bin", 66), ("lms-target.bin", 14)];
 
 /// Upstream pins of scripts/gen_lms_vectors.py: (name in the manifest, pinned URL part,
 /// upstream sha256).

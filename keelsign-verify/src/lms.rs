@@ -67,8 +67,8 @@ const I_LEN: usize = 16;
 const MAX_HASH_LEN: usize = 32;
 
 /// Error for failures that the tabulated parameter sets make impossible (a
-/// coefficient index outside `Q || Cksm(Q)`, a checksum wider than 16 bits). Fails
-/// closed.
+/// coefficient index outside `Q || Cksm(Q)`, a checksum wider than 16 bits, `2^h` not
+/// fitting in a `u32`). Fails closed.
 const INTERNAL: Error = Error::SignatureInvalid;
 
 /// An LM-OTS parameter set (RFC 8554 Table 1, SP 800-208 Table 3).
@@ -216,6 +216,36 @@ impl ParameterPolicy {
             Sets::W8 if ots.w != 8 => None,
             Sets::W8 | Sets::All => Some((lms, ots)),
         }
+    }
+}
+
+/// Check the structure of an HSS public key without any parameter policy, as
+/// [`TrustedKeys::new`](crate::TrustedKeys::new) does for every LMS/HSS key.
+///
+/// - `L` (the first four bytes) must be in `1..=8`, the RFC 8554 §6 maximum; otherwise
+///   [`Error::UnsupportedParameterSet`].
+/// - The level-0 LMS typecode must be a tabulated SHA-256 or SHA-256/192 set (0x05–0x0E);
+///   otherwise [`Error::UnsupportedParameterSet`], since no length follows from it.
+/// - The key must be exactly `4 + 24 + m` bytes for that typecode's m (52 for m = 24, 60
+///   for m = 32); otherwise [`Error::InvalidPublicKey`].
+///
+/// The LM-OTS typecode, the keelsign policy ([`ParameterPolicy::cnsa_2_0`]: W8 only,
+/// `m == n`, at most [`MAX_HSS_LEVELS`] levels) and everything else are left to
+/// [`verify`], so a well-formed key outside the policy (a W2 key, say) is accepted here
+/// and refused with [`Error::UnsupportedParameterSet`] when it verifies a signature.
+pub fn check_public_key(public_key: &[u8]) -> Result<(), Error> {
+    let mut rest = public_key;
+    let levels = read_u32(&mut rest).ok_or(Error::InvalidPublicKey)?;
+    if levels == 0 || levels > RFC_8554_MAX_LEVELS {
+        return Err(Error::UnsupportedParameterSet);
+    }
+    let mut typecode = rest;
+    let lms_type = read_u32(&mut typecode).ok_or(Error::InvalidPublicKey)?;
+    let lms = lms_params(lms_type).ok_or(Error::UnsupportedParameterSet)?;
+    if Some(rest.len()) == lms_public_key_len(&lms) {
+        Ok(())
+    } else {
+        Err(Error::InvalidPublicKey)
     }
 }
 
@@ -433,9 +463,7 @@ fn lms_verify(key: &LmsPublicKey<'_>, sig: &LmsSignature<'_>, message: &[u8]) ->
         return Err(Error::SignatureInvalid);
     }
     // Step 2i: q < 2^h (h <= 25, so 2^h fits in a u32).
-    let leaves = 1u32
-        .checked_shl(u32::from(key.lms.h))
-        .ok_or(Error::UnsupportedParameterSet)?;
+    let leaves = 1u32.checked_shl(u32::from(key.lms.h)).ok_or(INTERNAL)?;
     if sig.q >= leaves {
         return Err(Error::SignatureInvalid);
     }
@@ -452,6 +480,7 @@ fn lms_verify(key: &LmsPublicKey<'_>, sig: &LmsSignature<'_>, message: &[u8]) ->
     )?;
     let mut path = sig.path;
     while node_num > 1 {
+        // Pass 1 checked that the path is exactly h * m bytes, so this is defensive.
         let sibling = take(&mut path, m).ok_or(Error::MalformedSignature)?;
         let parent = (node_num / 2).to_be_bytes();
         let current = tmp.get(..m).ok_or(INTERNAL)?;
@@ -470,6 +499,7 @@ fn lms_verify(key: &LmsPublicKey<'_>, sig: &LmsSignature<'_>, message: &[u8]) ->
         };
         node_num /= 2;
     }
+    // Pass 1 guarantees the path length, so this is defensive.
     if !path.is_empty() {
         return Err(Error::MalformedSignature);
     }
@@ -521,6 +551,7 @@ fn lmots_candidate(
     let top_digit = max_digit(ots.w)?;
     let mut rest = y;
     for i in 0..ots.p {
+        // Pass 1 checked that y is exactly p * n bytes, so this is defensive.
         let y_i = take(&mut rest, n).ok_or(Error::MalformedSignature)?;
         let a = coef(qa, usize::from(i), ots.w).ok_or(INTERNAL)?;
         let mut tmp = [0u8; MAX_HASH_LEN];
@@ -536,6 +567,7 @@ fn lmots_candidate(
         // z[i] = tmp
         kc.update(tmp.get(..n).ok_or(INTERNAL)?);
     }
+    // Pass 1 guarantees the length of y, so this is defensive.
     if !rest.is_empty() {
         return Err(Error::MalformedSignature);
     }
@@ -608,6 +640,21 @@ fn cksm(s: &[u8], ots: &LmotsParams) -> Result<[u8; 2], Error> {
     // "the value sum is a 16-bit unsigned integer"; every tabulated set fits.
     let sum = u16::try_from(shifted).map_err(|_| INTERNAL)?;
     Ok(sum.to_be_bytes())
+}
+
+/// A structurally valid HSS public key for tests that never verify with it: `L = 1`,
+/// LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, and `I || T[1]` all `fill`.
+#[cfg(test)]
+#[allow(clippy::indexing_slicing)] // Test-only const fn; the indices are in bounds.
+pub(crate) const fn test_public_key(fill: u8) -> [u8; 60] {
+    let mut key = [fill; 60];
+    let header: [u8; 12] = [0, 0, 0, 1, 0, 0, 0, 0x05, 0, 0, 0, 0x04];
+    let mut i = 0;
+    while i < header.len() {
+        key[i] = header[i];
+        i += 1;
+    }
+    key
 }
 
 #[cfg(test)]

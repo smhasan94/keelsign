@@ -40,7 +40,7 @@ pub const VERSION: u16 = 1;
 pub const LMS_TARGET: &[u8] = include_bytes!("../fixtures/lms-target.bin");
 
 /// Cases in [`LMS_TARGET`].
-pub const TARGET_CASES: u32 = 12;
+pub const TARGET_CASES: u32 = 14;
 
 /// Case IDs assigned by `scripts/gen_lms_vectors.py`.
 pub mod ids {
@@ -88,6 +88,11 @@ pub mod ids {
     pub const TC1_TRAILING_BYTE: u16 = 405;
     /// TC1 with its public key patched to L = 3.
     pub const TC1_KEY_L3: u16 = 406;
+    /// hsslms case 302 with its bottom-level leaf index q set to exactly `2^h` (32).
+    pub const M32_H5H5_L2_Q_TWO_POW_H: u16 = 407;
+    /// hsslms case 302 with only the bottom-level LM-OTS typecode inside the signature
+    /// changed from LMOTS_SHA256_N32_W8 to LMOTS_SHA256_N24_W8.
+    pub const M32_H5H5_L2_LMOTS_TYPECODE_MISMATCH: u16 = 408;
     /// TC1 truncated to `97 * k` bytes: `TC1_TRUNCATED + k`.
     pub const TC1_TRUNCATED: u16 = 500;
 }
@@ -310,8 +315,8 @@ fn take_array<const N: usize>(rest: &mut &[u8]) -> Result<[u8; N], ParseError> {
 
 /// A trusted-key set holding only `public_key` as an LMS/HSS key.
 ///
-/// A key the set refuses (wrong length for LMS/HSS) is reported as
-/// [`Error::InvalidPublicKey`].
+/// A key the set refuses (not 52 or 60 bytes, or failing
+/// [`keelsign_verify::lms::check_public_key`]) is reported as [`Error::InvalidPublicKey`].
 pub fn trusted_lms_key(public_key: &[u8]) -> Result<TrustedKeys<'_, 2>, Error> {
     TrustedKeys::new(&[TrustedKey {
         algorithm: Algorithm::LmsHss,

@@ -29,7 +29,13 @@ Signed cases (all over one fixed 32-byte message):
 
 Derived negatives (from RFC 8554 Test Case 1): last byte flipped, C of the bottom
 LM-OTS signature flipped, bottom and top q flipped, truncated at every 97th byte, one
-trailing byte, and the key patched to L = 3.
+trailing byte, and the key patched to L = 3. From hsslms case 302 (M32/W8 H5+H5, L=2):
+the bottom-level q set to exactly 2^h (RFC 8554 Algorithm 6a step 2i), and only the
+bottom-level LM-OTS typecode inside the signature changed from LMOTS_SHA256_N32_W8 to
+LMOTS_SHA256_N24_W8 (step 2c). The signature is parsed with the lengths of the public key
+it is checked against, never with its own typecodes, so that case keeps every length,
+passes the parameter gate (which covers public keys only) and reaches the typecode check;
+the typecode bytes are not hashed, so without the check it would verify.
 
 Outputs:
   * lms-host.bin: every case (host KATs).
@@ -47,7 +53,7 @@ Binary format "KSLM v1" (little-endian lengths):
             ParameterPolicy::rfc_8554_all_sets.
 
 Case IDs: 1-2 RFC 8554 Test Case 1-2; 100 + tcId ACVP SP800-208; 200 + tcId ACVP 1.0;
-3xx hsslms-signed; 4xx derived negatives; 500 + k TC1 truncated to 97 * k bytes.
+3xx hsslms-signed; 401-406 derived from TC1, 407-408 derived from hsslms case 302; 500 + k TC1 truncated to 97 * k bytes.
 
 Usage:
   python3 scripts/gen_lms_vectors.py            # write the fixtures
@@ -123,8 +129,9 @@ SOURCES = {
 MESSAGE = hashlib.sha256(b"keelsign SHA-65 LMS/HSS fixture message").digest()
 
 # On-target subset: TC1, TC2, one ACVP M24 case, M32 L2, M24 L1 and L2, rotation A and B,
-# one tampered and one trailing-byte case, W4 and L=3.
-TARGET_IDS = [1, 2, 106, 302, 311, 312, 321, 322, 331, 333, 401, 405]
+# one tampered and one trailing-byte case, W4 and L=3, q = 2^h and the LM-OTS typecode
+# mismatch.
+TARGET_IDS = [1, 2, 106, 302, 311, 312, 321, 322, 331, 333, 401, 405, 407, 408]
 
 TRUNCATION_STEP = 97
 
@@ -372,6 +379,44 @@ def derived_negatives(tc1):
     return cases
 
 
+def hsslms_derived_negatives(base):
+    """Negatives derived from hsslms case 302 (M32/W8 H5+H5, L=2)."""
+    pk, sig = base["pk"], base["sig"]
+    # Layout: Nspk (4) | level-0 LMS signature (1292) | level-1 public key (56) |
+    # level-1 LMS signature (1292): q (4) | LM-OTS type (4) | C | y | LMS type | path.
+    if base["id"] != 302 or len(pk) != 60 or len(sig) != 4 + 1292 + 56 + 1292:
+        sys.exit("hsslms case 302 does not have the expected M32/W8 H5+H5 layout")
+    bottom_q = 4 + 1292 + 56
+    bottom_ots = bottom_q + 4
+    h = 5
+    if sig[bottom_ots : bottom_ots + 4] != u32(0x04):
+        sys.exit("hsslms case 302: bottom LM-OTS typecode is not LMOTS_SHA256_N32_W8")
+
+    def patch(offset, value):
+        out = bytearray(sig)
+        out[offset : offset + 4] = u32(value)
+        return bytes(out)
+
+    def case(case_id, label, new_sig):
+        return {
+            "id": case_id,
+            "source": SOURCE_HSSLMS,
+            "label": f"hsslms m32w8-h5h5-l2 {label}",
+            "expect_cnsa": INVALID,
+            "expect_rfc": INVALID,
+            "pk": pk,
+            "sig": new_sig,
+            "msg": base["msg"],
+        }
+
+    return [
+        case(407, "bottom q = 2^h (step 2i)", patch(bottom_q, 1 << h)),
+        # LMOTS_SHA256_N24_W8 is a valid W8 code of the other hash size: every length is
+        # still taken from the public key, so only the step 2c typecode check rejects it.
+        case(408, "bottom LM-OTS typecode in signature N32_W8 -> N24_W8 (step 2c)", patch(bottom_ots, 0x08)),
+    ]
+
+
 # ---- Cross-check with the independent signer's verifier -------------------------------
 
 
@@ -461,7 +506,8 @@ def generate(out_dir):
     with tempfile.TemporaryDirectory() as tmp:
         hsslms = vendor_hsslms(fetch("hsslms"), Path(tmp))
         signed = hsslms_cases(hsslms)
-        cases = rfc_cases + acvp + signed + derived_negatives(rfc[1])
+        signed_by_id = {c["id"]: c for c in signed}
+        cases = rfc_cases + acvp + signed + derived_negatives(rfc[1]) + hsslms_derived_negatives(signed_by_id[302])
         cross_check(hsslms, cases)
 
     ids = [c["id"] for c in cases]

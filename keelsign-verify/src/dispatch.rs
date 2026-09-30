@@ -199,8 +199,8 @@ mod tests {
 
     static MLDSA44_PK: [u8; 1312] = [0x44; 1312];
     static MLDSA65_PK: [u8; 1952] = [0x65; 1952];
-    static LMS_PK_A: [u8; 60] = [0xA0; 60];
-    static LMS_PK_B: [u8; 60] = [0xB0; 60];
+    static LMS_PK_A: [u8; 60] = crate::lms::test_public_key(0xA0);
+    static LMS_PK_B: [u8; 60] = crate::lms::test_public_key(0xB0);
     const SIG: &[u8] = b"signature bytes";
     const MSG: &[u8] = b"image digest";
 
