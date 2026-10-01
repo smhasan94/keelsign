@@ -10,9 +10,11 @@ use crate::tlv::{TLV_LMS_HSS_SIG, TLV_MLDSA44_SIG, TLV_MLDSA65_SIG};
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Algorithm {
-    /// ML-DSA-44 (FIPS 204). Needs the `ml-dsa` feature.
+    /// ML-DSA-44 (FIPS 204). Needs the `ml-dsa` feature; verified by
+    /// [`mldsa`](crate::mldsa).
     MlDsa44,
-    /// ML-DSA-65 (FIPS 204). Needs the `ml-dsa` feature.
+    /// ML-DSA-65 (FIPS 204). Needs the `ml-dsa` feature; verified by
+    /// [`mldsa`](crate::mldsa).
     MlDsa65,
     /// LMS/HSS (RFC 8554, NIST SP 800-208). Always enabled.
     LmsHss,

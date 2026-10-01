@@ -71,7 +71,7 @@ pub const KEY_ID_LEN: usize = 16;
 /// HashML-DSA): `b"keelsign-mcuboot-image-v1"`.
 ///
 /// It separates keelsign image signatures from any other use of the same ML-DSA key.
-/// The ML-DSA backend (SHA-44) passes it to `verify_with_context`.
+/// [`mldsa::verify`](crate::mldsa::verify) (SHA-44) passes it to `verify_with_context`.
 ///
 /// See [docs/image-format.md, ML-DSA context][spec].
 ///
