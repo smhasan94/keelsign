@@ -65,6 +65,9 @@ built `no_std` without alloc (`default-features = false`).
   rustup target add --toolchain nightly thumbv7em-none-eabihf thumbv8m.main-none-eabihf
   ```
 
+- The recorded flash and frame figures need the exact compilers in
+  [Recorded figures](#recorded-figures-sha-275).
+
 ## Reproduce
 
 Every command block below starts from the repository root.
@@ -161,7 +164,7 @@ python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/relea
 ## Results
 
 Cycles and measured stack need the boards; flash is measured from the cross-built ELFs
-(stable Rust 1.91.1). Static frame: the compiled `verify_case` frame, see
+([stable Rust 1.91.1](#measurement-toolchains)). Static frame: the compiled `verify_case` frame, see
 [Static stack frame estimate](#static-stack-frame-estimate-provisional).
 
 | Board | Set | Verify cycles (headline) | Verify time | Peak stack (measured) | Static frame (compiled) | Flash Δ release | Flash Δ size | Peak RAM |
@@ -285,8 +288,8 @@ policies; no device path reaches it.
 
 ### Crate choice
 
-Measured on `thumbv7em-none-eabihf` during planning (hbs-lms, lms-signature) and
-re-measured for the in-house verifier from `size_lms` below:
+On `thumbv7em-none-eabihf`. hbs-lms and lms-signature: historical planning measurement
+(SHA-65), not rebuilt by any command here; in-house: from `size_lms` below.
 
 | | hbs-lms 0.1.1 | lms-signature 0.1.0-rc.2 | in-house (`keelsign_verify::lms`) |
 |---|---|---|---|
@@ -294,8 +297,8 @@ re-measured for the in-house verifier from `size_lms` below:
 | SHA-256/192 | wrong typecodes (upstream issue #100) | no; no HSS either | yes |
 | ACVP M24 vectors | panics (`unwrap`, `signing.rs:174`) | n/a | pass (16 of 16) |
 | Extra dependencies | a second sha2/digest, sha3, tinyvec, zeroize | getrandom, rand_core, … | none |
-| Flash Δ, release / size | +15,116 / +8,056 B (raw verify) | — | +7,224 / +5,348 B (whole `verify_pq` path) |
-| Static frame | 17,544 B | — | 1,488 B call chain |
+| Flash Δ, release / size | +15,116 / +8,056 B (raw verify) | — | +7,216 / +5,384 B (whole `verify_pq` path) |
+| Static frame | 17,544 B | — | 1,512 B call chain |
 | Lines to audit | 5,064 | 2,553 | ≈ 410 (`lms.rs` code, without comments and tests) |
 | Licence | Apache-2.0 only | MIT OR Apache-2.0 | MIT OR Apache-2.0 |
 
@@ -371,24 +374,25 @@ Same as for ML-DSA (see [Method](#method)), with these differences:
   and the parser cancel out); `size_lms` adds one black-boxed `verify_pq`.
 - **Static frame**: nightly `-Z emit-stack-sizes` own-frame sizes of `size_lms`, summed
   along the deepest call chain below `lms_kat::verify_with_keys`: `verify_with_keys`
-  72 + `DefaultBackend::verify` 88 + `lms::walk` 144 + `lms::lms_verify` 648 (Algorithm
+  80 + `DefaultBackend::verify` 112 + `lms::walk` 144 + `lms::lms_verify` 640 (Algorithm
   4b inlined) + `lms::hash` 256 + `finalize_fixed_core` 104 + `sha2::sha256::compress256`
-  176 = 1,488 B, identical on both boards. There is no recursion and no call through a
-  function pointer on this path.
+  176 = 1,512 B, identical on both boards (see
+  [Static frame detail](#static-frame-detail)). There is no recursion and no call through
+  a function pointer on this path.
 
 ### LMS results
 
 Cycles and measured stack need the boards; flash, static frame and signature sizes are
-measured without them (stable Rust 1.91.1, nightly `rustc 1.101.0-nightly (c1070d693
-2026-09-28)` for the frames). One verifier serves both hash sizes, so the flash and frame
-columns are the same for both sets.
+measured without them ([stable Rust 1.91.1, nightly `rustc 1.101.0-nightly (c1070d693
+2026-09-28)`](#measurement-toolchains) for the frames). One verifier serves both hash
+sizes, so the flash and frame columns are the same for both sets.
 
 | Board | Set | Verify cycles (headline) | Verify time | Peak stack (measured) | Static frame (compiled) | Flash Δ release | Flash Δ size | LMS signature (H10) | HSS signature (H10+H10, L=2) |
 |---|---|---|---|---|---|---|---|---|---|
-| nrf52840 | LMS SHA-256 M32/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 7,224 B | 5,348 B | 1,452 B | 2,964 B |
-| nrf52840 | LMS SHA-256/192 M24/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 7,224 B | 5,348 B | 900 B | 1,852 B |
-| rp2350 | LMS SHA-256 M32/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 7,228 B | 5,340 B | 1,452 B | 2,964 B |
-| rp2350 | LMS SHA-256/192 M24/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,488 B | 7,228 B | 5,340 B | 900 B | 1,852 B |
+| nrf52840 | LMS SHA-256 M32/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,512 B | 7,216 B | 5,384 B | 1,452 B | 2,964 B |
+| nrf52840 | LMS SHA-256/192 M24/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,512 B | 7,216 B | 5,384 B | 900 B | 1,852 B |
+| rp2350 | LMS SHA-256 M32/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,512 B | 7,224 B | 5,384 B | 1,452 B | 2,964 B |
+| rp2350 | LMS SHA-256/192 M24/W8 | pending (hardware) | pending (hardware) | pending (hardware) | 1,512 B | 7,224 B | 5,384 B | 900 B | 1,852 B |
 
 An LMS signature is `4 + (4 + n * (p + 1)) + 4 + m * h` bytes (RFC 8554 §5.4) with
 p = 34 (N32/W8) or 26 (N24/W8); an HSS signature with L levels is
@@ -401,20 +405,21 @@ Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
 
 | Board / profile | `size_lms_baseline` flash | `size_lms` flash | Δ LMS/HSS |
 |---|---|---|---|
-| nrf52840 / release | 47,272 | 54,496 | 7,224 |
-| nrf52840 / size | 47,260 | 52,608 | 5,348 |
-| rp2350 / release | 48,412 | 55,640 | 7,228 |
-| rp2350 / size | 47,908 | 53,248 | 5,340 |
+| nrf52840 / release | 47,276 | 54,492 | 7,216 |
+| nrf52840 / size | 47,288 | 52,672 | 5,384 |
+| rp2350 / release | 48,412 | 55,636 | 7,224 |
+| rp2350 / size | 47,932 | 53,316 | 5,384 |
 
 Both baselines include the 35,659-byte LMS target fixture (KSLM v2) in `.rodata`.
-Re-measured for SHA-240. At `2152d0c`, just before SHA-240, the same commands gave
-Δ 7,180 / 5,328 B (nrf52840 release / size) and 7,192 / 5,332 B (rp2350); the older
-6,740 / 5,136 and 6,756 / 5,144 B figures had drifted since SHA-65. SHA-240 itself adds
-the policy field read in `DefaultBackend::verify` and the third expectation byte (+14 B
-of fixture per baseline).
+Re-measured for SHA-275. Since SHA-46 (with `ml-dsa` off) `size_lms` grew by about 380 B:
+`DefaultBackend::verify` +120 B (the ML-DSA arm and the `cnsa_2_0()` refusal, SHA-44) and
+`keelsign_verify::lms::walk` +256 B, whose source is unchanged (a fat-LTO inlining and
+layout difference). The static chain grew by 24 B since SHA-240 (`DefaultBackend::verify`
++24, `verify_with_keys` +8, `lms_verify` −8). SHA-240 added the policy field read and
+14 B of fixture per baseline.
 
 The stack limit (AC4) is 32,768 B measured on both boards; the compiled call chain is
-1,488 B, so the limit holds with a wide margin unless the board measurement shows
+1,512 B, so the limit holds with a wide margin unless the board measurement shows
 otherwise.
 
 ### LMS reproduce
@@ -513,8 +518,8 @@ slot-relative offsets.
 ### Digest results
 
 Cycles and measured stack need the boards; flash and static frames are measured without
-them (stable Rust 1.91.1, nightly `rustc 1.101.0-nightly (c1070d693 2026-09-28)` for the
-frames).
+them ([stable Rust 1.91.1, nightly `rustc 1.101.0-nightly (c1070d693
+2026-09-28)`](#measurement-toolchains) for the frames).
 
 | Board | Digest cycles (200 KB, 256 B chunk) | Digest time | Peak stack (measured) | Static frame (compiled) | Peak RAM bound (256 B chunk) | Flash Δ release | Flash Δ size |
 |---|---|---|---|---|---|---|---|
@@ -531,9 +536,8 @@ Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
 | rp2350 / size | 5,308 | 15,512 | 10,204 |
 
 Both baselines include the 2,315-byte image in `.rodata`. The on-target stack limit is
-4,096 B; the compiled bound with a 256 B chunk is 776 B. Re-measured for SHA-46 (the
-SHA-42 figures were 10,200 / 9,964 / 10,240 / 10,004 B): hashing the protected TLV area
-from the parsed copy costs 160–204 B.
+4,096 B; the compiled bound with a 256 B chunk is 776 B. Re-measured for SHA-46: hashing
+the protected TLV area from the parsed copy added 160–204 B.
 
 ### Digest reproduce
 
@@ -598,11 +602,12 @@ The policies and the matrix are specified in [docs/policy.md](policy.md).
 - **Static frame**: nightly `-Z emit-stack-sizes` own-frame sizes of `size_verify`, in
   which `verify` sits in an `#[inline(never)]` wrapper (`size_verify::verify_hybrid`)
   together with the 4 KiB TLV buffer and the 256 B chunk. The deepest chain is the
-  Ed25519 half: `size_verify::verify_hybrid` 4,896 B (`verify_with`, `read_from` and the
+  Ed25519 half: `size_verify::verify_hybrid` 4,904 B (`verify_with`, `read_from` and the
   digest inlined, the two buffers included) + `keelsign_verify::ed25519::verify_signature`
   4,912 B (the NAF lookup tables) + `NafLookupTable5::from` 2,096 B +
-  `FieldElement2625::pow22501` 848 B ≈ 12.8 KB, identical on both boards; the LMS half
-  adds `lms_verify` 640 B + `lms::hash` 256 B + `compress256` 176 B to the wrapper. These
+  `FieldElement2625::pow22501` 848 B ≈ 12.8 KB (12,760 B), identical on both boards (see
+  [Static frame detail](#static-frame-detail)); the LMS half adds `lms_verify` 640 B +
+  `lms::hash` 256 B + `compress256` 176 B to the wrapper. These
   are own-frame sizes without a call graph, so the chain is an estimate, far under the
   32,768 B limit of the LMS tests.
 - **On target** (`tests/policy.rs`, needs the board): `policy_matrix_from_flash` runs
@@ -620,28 +625,37 @@ The policies and the matrix are specified in [docs/policy.md](policy.md).
 ### Hybrid results
 
 Cycles and the measured peak stack of a hybrid verify are SHA-69; flash and static frames
-are measured without the boards (stable Rust 1.91.1, nightly
-`rustc 1.101.0-nightly (c1070d693 2026-09-28)` for the frames).
+are measured without the boards ([stable Rust 1.91.1, nightly
+`rustc 1.101.0-nightly (c1070d693 2026-09-28)`](#measurement-toolchains) for the frames).
 
 | Board | Flash Δ release | Flash Δ size | Static frame (compiled, deepest chain) | Cycles | Peak stack |
 |---|---|---|---|---|---|
-| nrf52840 | 74,376 B | 59,144 B | 12,752 B | pending (SHA-69) | pending (SHA-69) |
-| rp2350 | 74,264 B | 59,152 B | 12,752 B | pending (SHA-69) | pending (SHA-69) |
+| nrf52840 | 74,736 B | 59,380 B | 12,760 B | pending (SHA-69) | pending (SHA-69) |
+| rp2350 | 74,656 B | 59,372 B | 12,760 B | pending (SHA-69) | pending (SHA-69) |
 
 Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
 
 | Board / profile | `size_verify_baseline` flash | `size_verify` flash | Δ verify |
 |---|---|---|---|
-| nrf52840 / release | 14,940 | 89,316 | 74,376 |
-| nrf52840 / size | 14,132 | 73,276 | 59,144 |
-| rp2350 / release | 16,092 | 90,356 | 74,264 |
-| rp2350 / size | 14,772 | 73,924 | 59,152 |
+| nrf52840 / release | 45,372 | 120,108 | 74,736 |
+| nrf52840 / size | 44,572 | 103,952 | 59,380 |
+| rp2350 / release | 46,532 | 121,188 | 74,656 |
+| rp2350 / size | 45,232 | 104,604 | 59,372 |
 
-Both baselines include the 3,512-byte image and the 7,295-byte `policy-matrix.bin` in
-`.rodata`. The delta is roughly the digest (about 10.4 KB, above), the LMS/HSS verifier
-(see [LMS results](#lms-results)) and Ed25519, which the planning measurement put at
-43 KB (`opt-level = "s"`) to 57 KB (`opt-level = 3`) on its own. A `PqOnly` build
-without the `ed25519` feature carries none of the Ed25519 code.
+Both baselines include the 3,512-byte image and the 37,633-byte `policy-matrix.bin` (KSPM
+v2, SHA-44) in `.rodata`. The delta is roughly the digest (about 10.4 KB, above), the
+LMS/HSS verifier (see [LMS results](#lms-results)) and Ed25519, which a historical
+planning measurement (SHA-46) put at 43 KB (`opt-level = "s"`) to 57 KB
+(`opt-level = 3`) on its own. A `PqOnly` build without the `ed25519` feature carries none
+of the Ed25519 code.
+
+Re-measured for SHA-275. With `ml-dsa` off the delta grew by 360 B (nrf52840 release; the
+other builds move by 220–392 B) since SHA-46: `DefaultBackend::verify` +120 B,
+`verify_pq_with` +16 B, `lms::walk` +236 B (fat-LTO layout, source unchanged),
+`size_verify::verify_hybrid` −24 B, 14 B net in the two `main`s, 2 B taken back by
+alignment; no `mldsa`/`ml_dsa` symbol is in the feature-off ELFs. Both absolute sizes grew
+by about 30 KB, nearly all of it `policy-matrix.bin` (+30,338 B), which cancels out of the
+delta. The `verify_hybrid` frame grew by 8 B.
 
 ### Hybrid reproduce
 
@@ -680,7 +694,7 @@ Static frames (nightly only, not run in CI):
 ```sh
 cd benches/nrf52840-mldsa
 cargo +nightly rustc --release --locked --bin size_verify --target-dir target/nightly -- -Z emit-stack-sizes
-python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/release/size_verify --top 16
+python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/release/size_verify --top 20 --match size_verify::
 ```
 
 ## ML-DSA verify (SHA-44)
@@ -704,8 +718,8 @@ stands: the stack is far over the 32 KB device budget, and
   `#[inline(never)]` frame, `keelsign_verify::mldsa::verify_param<P>`, so the
   `verify_with` chain (`size_verify::verify_hybrid`, with the 4 KiB TLV buffer and the
   256 B chunk) stays within 8 B of its feature-off size and an LMS/HSS or Ed25519 verify does not
-  reserve the ML-DSA stack. (Inlined, the planning measurement put the merged dispatcher
-  frame at 156,448 B for every verify.)
+  reserve the ML-DSA stack. (Inlined, a historical planning measurement put the merged
+  dispatcher frame at 156,448 B for every verify.)
 - **Flash Δ**: `size_verify` built `--features ml-dsa` minus the same bin without it
   (`elf_sizes.py --baseline`): the ML-DSA verifier and everything it pulls in.
 - **On target** (`tests/mldsa_verify.rs`, needs the board and `--features ml-dsa`):
@@ -729,8 +743,9 @@ the `mldsa::verify_param` frame alone (release), on top of the `verify_with` cha
 They are the prologues of the two `verify_param` instances in the stable release
 `size_verify --features ml-dsa`, identical on both boards: ML-DSA-44 reserves
 `sub.w sp, sp, #0x17c00` + `sub sp, #0xe4` after pushing nine registers (36 B), ML-DSA-65
-`#0x26800` + `#0x1cc` + 36 B (disassembled with `objdump -d`; the instance is identified by
-its key-length compare, `cmp.w r1, #0x520` = 1,312 or `#0x7a0` = 1,952). The nightly
+`#0x26800` + `#0x1cc` + 36 B (disassembled with the `objdump -d` command in
+[ML-DSA verify reproduce](#ml-dsa-verify-reproduce); the instance is identified by its
+key-length compare, `cmp.w r1, #0x520` = 1,312 or `#0x7a0` = 1,952). The nightly
 `-Z emit-stack-sizes` frames of the same code (`rustc 1.101.0-nightly (c1070d693
 2026-09-28)`) are 93,456 / 153,080 B in release and 73,872 / 118,952 B at
 `opt-level = "s"`; the results table below records those, as SHA-34 did. Either way that is
@@ -745,8 +760,9 @@ enable `ml-dsa` on a device must budget that stack themselves until
 
 ### ML-DSA verify results
 
-Static frames and flash are measured without the boards (stable Rust 1.91.1 for flash,
-nightly `rustc 1.101.0-nightly (c1070d693 2026-09-28)` for the frames: the "Static frame"
+Static frames and flash are measured without the boards ([stable Rust 1.91.1 for flash,
+nightly `rustc 1.101.0-nightly (c1070d693 2026-09-28)`](#measurement-toolchains) for the
+frames: the "Static frame"
 columns are nightly `-Z emit-stack-sizes` figures; the stable release prologues, the
 figures to budget with, are 97,544 / 158,192 B, see
 [Stack the feature needs](#stack-the-feature-needs)); peak stack and cycles need
@@ -770,33 +786,8 @@ both arms. Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every r
 | rp2350 / release | 121,188 | 176,364 | 55,176 |
 | rp2350 / size | 104,604 | 118,432 | 13,828 |
 
-Feature-off drift. The SHA-46 hybrid and SHA-65 LMS/HSS tables above keep the figures of
-their tickets, and they no longer reproduce at this commit. With the feature off, the same
-commands now give a SHA-46 hybrid delta of 74,736 / 59,380 B (nrf52840 release / size) and
-74,656 / 59,372 B (rp2350), against 74,376 / 59,144 and 74,264 / 59,152 B at `861abce`
-(the SHA-46 tip). The LMS/HSS delta is now 7,216 / 5,384 B (nrf52840) and 7,224 / 5,384 B
-(rp2350), against 6,836 / 5,236 and 6,844 / 5,236 B at `861abce`. (The
-[LMS results](#lms-results) table still shows the SHA-240 figures, which had already
-drifted by `861abce`.) The `verify_hybrid` frame in the [Hybrid method](#hybrid-method)
-text, 4,896 B, is now 4,904 B with the feature off.
-
-There are two causes:
-
-- **Code drift of about 360–380 B.** A symbol comparison (`nm -S`) of the feature-off
-  nrf52840 release ELFs between `861abce` and this commit attributes it as follows:
-  - `size_lms`, +380 B: `DefaultBackend::verify` +120 B (the ML-DSA arm and the
-    `cnsa_2_0()` refusal), `keelsign_verify::lms::walk` +256 B (its source is unchanged:
-    a fat-LTO inlining and layout difference) and `lms_kat::verify_with_keys` +4 B.
-  - `size_verify`, +360 B in its delta: `DefaultBackend::verify` +120 B,
-    `verify_pq_with` +16 B, `lms::walk` +236 B, `size_verify::verify_hybrid` −24 B, and
-    14 B net in the two bins' `main` (362 B in all; alignment padding takes back 2 B).
-  - No `mldsa` or `ml_dsa` symbol is in either feature-off ELF.
-- **Bigger absolute sizes.** `size_verify` and `size_verify_baseline` both grow because
-  `policy-matrix.bin`, which both carry in `.rodata`, went from 7,295 B to 37,633 B (KSPM
-  v2: 19 more images and the off-cells). This cancels out of the deltas.
-
-The digest and the SHA-34 ML-DSA bins are unchanged.
-[SHA-275](https://linear.app/shakooky/issue/SHA-275) refreshes those tables.
+The `ml-dsa off` column is the same `size_verify` build as in
+[Hybrid results](#hybrid-results); a repo-check keeps the two equal.
 
 ### ML-DSA verify reproduce
 
@@ -847,3 +838,126 @@ python3 ../../scripts/stack_frames.py target/nightly-mldsa/thumbv7em-none-eabihf
 cargo +nightly rustc --release --locked --bin size_verify --target-dir target/nightly -- -Z emit-stack-sizes
 python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/release/size_verify --top 8 --match keelsign_verify
 ```
+
+Stable release prologues of the two `verify_param` instances (the figures in
+[Stack the feature needs](#stack-the-feature-needs)), from the stable
+`--features ml-dsa` release build above. Needs LLVM objdump: macOS `/usr/bin/objdump`, or
+`llvm-objdump` (the repo-check reads `OBJDUMP`); GNU objdump cannot disassemble these
+ELFs:
+
+```sh
+cd benches/nrf52840-mldsa
+objdump -d --no-show-raw-insn target/mldsa/thumbv7em-none-eabihf/release/size_verify | grep -A6 '^[0-9a-f]* <_ZN15keelsign_verify5mldsa12verify_param' | grep -E 'verify_param|push|sub|cmp'
+```
+
+The frame is `sub.w sp, sp, #…` + `sub sp, #…` + 4 B per pushed register; the instance
+is the one with `cmp.w r1, #0x520` (ML-DSA-44) or `#0x7a0` (ML-DSA-65).
+
+## Recorded figures (SHA-275)
+
+Every flash and static-frame figure in this document was measured at one commit with the
+two compilers below, and an ignored repo-check rebuilds them and compares exactly.
+
+### Measurement toolchains
+
+- Flash (`elf_sizes.py`) and the stable ML-DSA prologues: stable
+  `rustc 1.91.1 (ed61e7d7e 2025-11-07)`, the `stable` channel of the bench projects'
+  `rust-toolchain.toml` at the time of measurement.
+- Static frames (`-Z emit-stack-sizes`, `stack_frames.py`): nightly
+  `rustc 1.101.0-nightly (c1070d693 2026-09-28)`, installed with
+  `rustup toolchain install nightly-2026-09-29` (plus both thumb targets).
+
+Other compilers give different figures: fat LTO moves code between functions, so one
+compiler update can change any table by tens of bytes. The repo-check uses the bench
+projects' toolchain file for stable and `nightly` for frames; set
+`KEELSIGN_BENCH_STABLE` (for example `1.91.1`) or `KEELSIGN_BENCH_NIGHTLY` (for example
+`nightly-2026-09-29`) to select the recorded compilers when the default channels have
+moved on. The sizes do not depend on the checkout path or the target directory.
+
+### Checking the recorded figures
+
+```sh
+cargo test -p repo-checks --locked --test benchmarks_doc -- --ignored recorded_
+```
+
+This runs three ignored checks, which need both compilers above with the thumb targets,
+flip-link, `python3` and LLVM objdump:
+
+- `recorded_flash_tables_match_a_fresh_build`: builds both bench projects (release and
+  size, with and without `--features ml-dsa`) with the documented commands, compares every
+  flash cell of every "Flash detail" table with `elf_sizes.py` and checks that each
+  table's static RAM delta is 0. The Δ cells are not measured: the CI check
+  `flash_tables_are_consistent` checks that they are the differences of the flash cells.
+- `recorded_static_frames_match_a_fresh_nightly_build`: runs the documented nightly
+  builds and compares every row of [Static frame detail](#static-frame-detail) with
+  `stack_frames.py`, on both boards.
+- `recorded_stable_mldsa_prologues_match_objdump`: disassembles the stable
+  `--features ml-dsa` release `size_verify` and compares both `verify_param` prologues.
+
+Every figure must match exactly. A failing check lists each mismatch (section, row,
+column, recorded and measured value) or a toolchain that differs from the recorded one.
+The checks run in each ticket's verification, not in CI. When they fail, re-run the
+documented commands with the recorded compilers (or re-measure everything with new ones
+and update [Measurement toolchains](#measurement-toolchains)) and update every table the
+report lists. The recorded `rustc --version` strings and `nightly-2026-09-29` are also
+asserted by `measurement_toolchains_are_recorded` in
+`tools/repo-checks/tests/benchmarks_doc.rs`, so re-measuring with a new compiler means
+updating them in both this document and that test. Non-ignored repo-checks keep the
+results tables, the prose and the detail tables consistent with each other in CI.
+
+### Historical figures
+
+These are not rebuilt by any command here and are not checked:
+
+- [Crate choice](#crate-choice): the hbs-lms 0.1.1 and lms-signature 0.1.0-rc.2 columns
+  (+15,116 / +8,056 B, 17,544 B frame) are a historical planning measurement (SHA-65).
+- [Hybrid results](#hybrid-results): Ed25519 at 43 KB (`opt-level = "s"`) to 57 KB
+  (`opt-level = 3`) on its own is a historical planning measurement (SHA-46).
+- [ML-DSA verify method](#ml-dsa-verify-method): the 156,448 B merged dispatcher frame is
+  a historical planning measurement (SHA-44).
+- [pqm4 comparison](#pqm4-comparison): upstream figures, cited at a pinned commit.
+- The "Re-measured for …" notes (LMS, digest and hybrid results) explain how figures
+  changed between tickets; their deltas are not recorded figures and no command here
+  rebuilds them.
+
+Hardware cells (`pending (hardware)`, `pending (SHA-69)`) are not recorded figures.
+
+### Static frame detail
+
+Own-frame sizes in bytes from `stack_frames.py` (nightly), except the two stable-prologue
+rows (`objdump`, see [ML-DSA verify reproduce](#ml-dsa-verify-reproduce)). "Function" is a
+substring of exactly one demangled function name in that ELF; `(largest other frame)` is
+the largest frame of the ELF not named by another row of the same bin and build. Every
+frame figure elsewhere in this document is one of these rows or a sum of them.
+
+| Bin | Build | Function | nrf52840 | rp2350 |
+|---|---|---|---|---|
+| `size_mldsa44` | release | `mldsa_kat::verify_case<ml_dsa::MlDsa44>` | 93,448 | 93,448 |
+| `size_mldsa44` | release | (largest other frame) | 4,168 | 4,168 |
+| `size_mldsa65` | release | `mldsa_kat::verify_case<ml_dsa::MlDsa65>` | 153,072 | 153,072 |
+| `size_mldsa65` | release | (largest other frame) | 4,168 | 4,168 |
+| `size_lms` | release | `lms_kat::verify_with_keys<2>` | 80 | 80 |
+| `size_lms` | release | `<keelsign_verify::backend::DefaultBackend as keelsign_verify::dispatch::Backend>::verify` | 112 | 112 |
+| `size_lms` | release | `keelsign_verify::lms::walk` | 144 | 144 |
+| `size_lms` | release | `keelsign_verify::lms::lms_verify` | 640 | 640 |
+| `size_lms` | release | `keelsign_verify::lms::hash` | 256 | 256 |
+| `size_lms` | release | `finalize_fixed_core` | 104 | 104 |
+| `size_lms` | release | `sha2::sha256::compress256` | 176 | 176 |
+| `size_digest` | release | `size_digest::digest<` | 344 | 344 |
+| `size_digest` | release | `sha2::sha256::compress256` | 176 | 176 |
+| `size_digest` | release | `size_digest::read_image<` | 248 | 248 |
+| `size_digest` | release | `<keelsign_verify::image::Image>::parse_parts` | 64 | 64 |
+| `size_verify` | release | `size_verify::verify_hybrid<` | 4,904 | 4,904 |
+| `size_verify` | release | `keelsign_verify::ed25519::verify_signature` | 4,912 | 4,912 |
+| `size_verify` | release | `NafLookupTable5<curve25519_dalek::backend::serial::curve_models::ProjectiveNielsPoint> as core::convert::From` | 2,096 | 2,096 |
+| `size_verify` | release | `FieldElement2625>::pow22501` | 848 | 848 |
+| `size_verify` | release | `keelsign_verify::lms::lms_verify` | 640 | 640 |
+| `size_verify` | release | `keelsign_verify::lms::hash` | 256 | 256 |
+| `size_verify` | release | `sha2::sha256::compress256` | 176 | 176 |
+| `size_verify` | release, `ml-dsa` | `keelsign_verify::mldsa::verify_param<ml_dsa::MlDsa44>` | 93,456 | 93,456 |
+| `size_verify` | release, `ml-dsa` | `keelsign_verify::mldsa::verify_param<ml_dsa::MlDsa65>` | 153,080 | 153,080 |
+| `size_verify` | release, `ml-dsa` | `size_verify::verify_hybrid<` | 4,912 | 4,912 |
+| `size_verify` | size, `ml-dsa` | `keelsign_verify::mldsa::verify_param<ml_dsa::MlDsa44>` | 73,872 | 73,872 |
+| `size_verify` | size, `ml-dsa` | `keelsign_verify::mldsa::verify_param<ml_dsa::MlDsa65>` | 118,952 | 118,952 |
+| `size_verify` | release, `ml-dsa`, stable prologue | `verify_param` ML-DSA-44 (`cmp.w r1, #0x520`) | 97,544 | 97,544 |
+| `size_verify` | release, `ml-dsa`, stable prologue | `verify_param` ML-DSA-65 (`cmp.w r1, #0x7a0`) | 158,192 | 158,192 |
