@@ -3,11 +3,13 @@
 use core::fmt;
 
 use crate::algorithm::Algorithm;
+use crate::ed25519::Ed25519Error;
 use crate::image::ParseError;
 use crate::reader::ReadError;
 
-/// Why an image was rejected: it could not be read or parsed, or its post-quantum
-/// signature does not verify.
+/// Why an image was rejected: it could not be read or parsed, its post-quantum
+/// signature does not verify (the flat variants), or its classical half does not
+/// ([`Error::Ed25519`]).
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -54,11 +56,19 @@ pub enum Error {
     TlvAreaTooLarge,
     /// [`image_digest`](crate::digest::image_digest) was given an empty chunk buffer.
     ChunkBufferEmpty,
+    /// The Ed25519 (classical) half of the image was rejected (SHA-46).
+    Ed25519(Ed25519Error),
 }
 
 impl From<ParseError> for Error {
     fn from(e: ParseError) -> Self {
         Error::Parse(e)
+    }
+}
+
+impl From<Ed25519Error> for Error {
+    fn from(e: Ed25519Error) -> Self {
+        Error::Ed25519(e)
     }
 }
 
@@ -91,6 +101,7 @@ impl fmt::Display for Error {
             Error::Read(e) => write!(f, "image read failed: {e}"),
             Error::TlvAreaTooLarge => f.write_str("TLV areas are larger than the TLV buffer"),
             Error::ChunkBufferEmpty => f.write_str("the digest chunk buffer is empty"),
+            Error::Ed25519(e) => write!(f, "Ed25519 half rejected: {e}"),
         }
     }
 }
@@ -101,9 +112,10 @@ impl core::error::Error for Error {}
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeySetError {
-    /// More keys than the set's capacity `N`.
+    /// More post-quantum keys than the set's capacity `N`, or more Ed25519 keys than `E`.
     Capacity,
-    /// Two keys have the same key ID (the same public-key bytes).
+    /// Two keys have the same key ID (the same public-key bytes), or two Ed25519 keys
+    /// the same KEYHASH.
     DuplicateKeyId,
     /// A public key does not have the length its algorithm requires.
     InvalidPublicKeyLength(Algorithm),

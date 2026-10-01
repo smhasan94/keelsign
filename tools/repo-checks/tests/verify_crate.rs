@@ -1,12 +1,13 @@
 //! `keelsign-verify` crate rules (SHA-171): `no_std`, no heap, no `unsafe`, and CI
-//! cross-builds for both Cortex-M targets with the `ml-dsa` feature off and on.
+//! cross-builds for both Cortex-M targets with the `ml-dsa` and (SHA-46) `ed25519`
+//! features off and on.
 
 use repo_checks::{EXAMPLES, ScratchDir, cargo_in, run_ok, workspace_root};
 use std::fs;
 use std::path::Path;
 
 /// The feature states CI builds `keelsign-verify` with.
-const FEATURE_STATES: [&str; 2] = ["", "ml-dsa"];
+const FEATURE_STATES: [&str; 4] = ["", "ml-dsa", "ed25519", "ed25519,ml-dsa"];
 
 fn read(rel: &str) -> String {
     let path = workspace_root().join(rel);
@@ -80,8 +81,9 @@ fn keelsign_verify_is_no_std_no_alloc_forbid_unsafe() {
     assert_eq!(lib.matches("extern crate").count(), 1);
 
     let sources = sources();
-    // SHA-65: the LMS/HSS verifier and the default backend are covered by these rules.
-    for required in ["lms.rs", "backend.rs"] {
+    // SHA-65: the LMS/HSS verifier and the default backend are covered by these rules;
+    // SHA-46: the Ed25519 half and the policy entry point too.
+    for required in ["lms.rs", "backend.rs", "ed25519.rs"] {
         assert!(
             sources.iter().any(|(name, _)| name == required),
             "keelsign-verify/src/{required} must exist"
@@ -132,6 +134,11 @@ fn keelsign_verify_is_no_std_no_alloc_forbid_unsafe() {
         "keelsign-verify has no default features"
     );
     assert!(manifest.contains("ml-dsa = []"), "empty `ml-dsa` feature");
+    // SHA-46: the Ed25519 half is an optional, off-by-default feature.
+    assert!(
+        manifest.contains("ed25519 = [\"dep:ed25519-dalek\"]"),
+        "`ed25519` feature enabling only `dep:ed25519-dalek`"
+    );
     // Every dependency has its default features (and so `alloc`/`std`) turned off.
     let deps = manifest
         .split("[dependencies]")
@@ -157,6 +164,13 @@ fn keelsign_verify_is_no_std_no_alloc_forbid_unsafe() {
     assert!(
         deps.contains("embedded-storage = { version = \"=0.3.2\", default-features = false }"),
         "embedded-storage pinned to =0.3.2 without default features"
+    );
+    // SHA-46: the Ed25519 verifier, pinned, optional, without default features.
+    assert!(
+        deps.contains(
+            "ed25519-dalek = { version = \"=3.0.0\", default-features = false, optional = true }"
+        ),
+        "ed25519-dalek pinned to =3.0.0, optional, without default features"
     );
 }
 
@@ -190,13 +204,19 @@ fn ci_cross_builds_keelsign_verify_for_both_targets() {
         assert!(job.contains(needle), "verify-cross job must run `{needle}`");
     }
 
-    // The host job tests and clippies keelsign-verify with the feature off and on.
+    // The host job tests and clippies keelsign-verify with the features off and on
+    // (`-p keelsign-verify` alone, so no workspace member unifies a feature in).
     let host = ci_job(&ci, "ci");
     for needle in [
         "cargo clippy --workspace --all-targets --locked -- -D warnings",
         "cargo clippy --workspace --all-targets --locked --features keelsign-verify/ml-dsa -- -D warnings",
+        "cargo clippy --workspace --all-targets --locked --features keelsign-verify/ed25519 -- -D warnings",
+        "cargo clippy --workspace --all-targets --locked --features \"keelsign-verify/ed25519 keelsign-verify/ml-dsa\" -- -D warnings",
         "cargo test --workspace --locked",
+        "cargo test -p keelsign-verify --locked\n",
         "cargo test -p keelsign-verify --locked --features ml-dsa",
+        "cargo test -p keelsign-verify --locked --features ed25519\n",
+        "cargo test -p keelsign-verify --locked --features ed25519,ml-dsa",
     ] {
         assert!(host.contains(needle), "ci job must run `{needle}`");
     }

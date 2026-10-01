@@ -104,9 +104,9 @@ where
 ///
 /// The returned key is a copy borrowing the key material (`'a`), not the key set, so it
 /// outlives the borrow of `keys`.
-pub fn verify_pq_with<'a, 't, B, I, const N: usize>(
+pub fn verify_pq_with<'a, 't, B, I, const N: usize, const E: usize>(
     backend: &B,
-    keys: &TrustedKeys<'a, N>,
+    keys: &TrustedKeys<'a, N, E>,
     tlvs: I,
     message: &[u8],
 ) -> Result<TrustedKey<'a>, Error>
