@@ -6,8 +6,8 @@ format so MCUboot and embassy-boot users keep their existing update pipeline.
 
 **Status: placeholder / name reservation on crates.io.** The published `0.0.1` crates
 contain no functionality. The verifier described below is unreleased and its API is
-unstable. The host CLI, the embassy-boot adapter and the MCUboot C bindings are not
-written yet.
+unstable. The host CLI has `keygen` and `pubkey` ([docs/keys.md](docs/keys.md));
+signing, the embassy-boot adapter and the MCUboot C bindings are not written yet.
 
 ## What works today
 
@@ -44,7 +44,7 @@ need the boards.
 
 | Crate | Kind | Purpose |
 |---|---|---|
-| `keelsign` | host CLI (placeholder) | `keygen` / `sign` / `verify` / `inspect` MCUboot-format images |
+| `keelsign` | host CLI (pre-release) | `keygen` / `pubkey` today; `sign` / `verify` / `inspect` to come |
 | `keelsign-verify` | `no_std`, no heap | Parses the header and TLV area, hashes the image in chunks, verifies LMS/HSS, Ed25519 and ML-DSA-44/65 under a policy; typed errors |
 | `keelsign-embassy` (planned) | `no_std` | Adapter for embassy-boot |
 | `keelsign-ffi` (planned) | staticlib | C ABI and cbindgen header for MCUboot's `MCUBOOT_USE_CUSTOM_CRYPTO` hook (`libkeelsign`) |
@@ -66,6 +66,8 @@ A Raspberry Pi Debug Probe drives the Pico 2 W. See [docs/hardware.md](docs/hard
   sizes, CNSA 2.0 and MCUboot compatibility.
 - [docs/policy.md](docs/policy.md): the three policies, key sets, image rules, error
   precedence, the policy matrix and anti-rollback.
+- [docs/keys.md](docs/keys.md): `keelsign keygen` and `pubkey`, the key file formats
+  and OIDs, passphrase encryption, key IDs and KEYHASH, and the exit codes.
 - [docs/benchmarks.md](docs/benchmarks.md): on-target known-answer tests, stack and flash
   per algorithm, and the toolchains every figure was measured with.
 - [docs/setup.md](docs/setup.md): toolchain, probes, flashing the example boards and
