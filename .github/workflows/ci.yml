@@ -70,11 +70,11 @@ jobs:
       - name: repo checks (network)
         run: cargo test -p repo-checks --locked --test packaging -- --ignored
 
-      - name: publish dry-run keelsign-verify
-        run: cargo publish --dry-run --locked -p keelsign-verify
-
-      - name: publish dry-run keelsign
-        run: cargo publish --dry-run --locked -p keelsign
+      # SHA-49: keelsign depends on keelsign-verify (path + version), which is not on
+      # crates.io; a multi-package dry-run verifies keelsign against the locally packaged
+      # keelsign-verify (cargo >= 1.90).
+      - name: publish dry-run keelsign-verify + keelsign
+        run: cargo publish --dry-run --locked -p keelsign-verify -p keelsign
 
   # keelsign-verify (no_std, no heap) for both Cortex-M targets, with the `ml-dsa` and
   # `ed25519` features off and on.

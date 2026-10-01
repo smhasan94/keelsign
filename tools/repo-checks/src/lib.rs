@@ -6,8 +6,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Crates that are published to crates.io as name-reservation placeholders.
-pub const PLACEHOLDER_CRATES: [&str; 1] = ["keelsign"];
+/// Crates published to crates.io, in publish order; keelsign depends on keelsign-verify.
+pub const PUBLISHABLE_CRATES: [&str; 2] = ["keelsign-verify", "keelsign"];
 
 /// Published crates that carry their own copies of the root licence files.
 pub const LICENSED_CRATES: [&str; 2] = ["keelsign", "keelsign-verify"];
