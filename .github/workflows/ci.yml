@@ -95,8 +95,9 @@ jobs:
           - project: examples/rp2350-hello
             target: thumbv8m.main-none-eabihf
             bench: false
-          # SHA-34 on-target KATs and benchmarks: build the embedded-test binary and the
-          # flash-footprint bins (docs/benchmarks.md). Running them needs the boards.
+          # SHA-34 (ML-DSA) and SHA-65 (LMS/HSS) on-target KATs and benchmarks: build the
+          # embedded-test binaries and the flash-footprint bins (docs/benchmarks.md).
+          # Running them needs the boards.
           - project: benches/nrf52840-mldsa
             target: thumbv7em-none-eabihf
             bench: true

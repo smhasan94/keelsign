@@ -29,9 +29,17 @@ pub enum Error {
     UnsupportedAlgorithm(Algorithm),
     /// The public key or signature uses a parameter set the backend does not support.
     ///
-    /// Reserved for the real backends (SHA-65, SHA-44); nothing in this crate returns it
-    /// yet.
+    /// The LMS/HSS backend ([`lms`](crate::lms)) returns it for a typecode pair outside its
+    /// [`ParameterPolicy`](crate::lms::ParameterPolicy) at any level, or an unsupported
+    /// number of HSS levels, before hashing anything.
     UnsupportedParameterSet,
+    /// The signature is shorter or longer than its parameter sets dictate (truncated, or
+    /// with trailing bytes), or its structure does not match the public key (for HSS,
+    /// a level count other than the key's).
+    MalformedSignature,
+    /// The trusted public key is not a valid encoding for its parameter set (for LMS/HSS,
+    /// too short or not exactly `4 + 24 + m` bytes).
+    InvalidPublicKey,
     /// The signature does not verify under the selected key.
     SignatureInvalid,
 }
@@ -52,6 +60,8 @@ impl fmt::Display for Error {
                 write!(f, "algorithm {alg:?} is not enabled in this build")
             }
             Error::UnsupportedParameterSet => f.write_str("unsupported parameter set"),
+            Error::MalformedSignature => f.write_str("signature is malformed"),
+            Error::InvalidPublicKey => f.write_str("public key is malformed"),
             Error::SignatureInvalid => f.write_str("signature is invalid"),
         }
     }

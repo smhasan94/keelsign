@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Summarise the `BENCH …` lines of saved on-target benchmark logs (SHA-34).
+"""Summarise the `BENCH …` lines of saved on-target benchmark logs (SHA-34, SHA-65).
 
-The `*_bench` tests in benches/<board>-mldsa/tests/kat.rs log one line per case:
+The `*_bench` tests in benches/<board>-mldsa/tests/{kat,lms}.rs log one line per case:
 
   BENCH board=nrf52840 set=ML-DSA-44 src=wycheproof tc=147 msg_len=11 expect_valid=true
         ok=true cycles=… us=… peak_stack=… saturated=false
@@ -12,7 +12,9 @@ of each run as docs/bench-logs/<board>-run{1,2,3}.txt (docs/benchmarks.md).
 Usage:
   python3 scripts/bench_summarize.py LOG [LOG ...]
       Prints one markdown results row per (board, set): the headline case is the
-      shortest-message Wycheproof valid case; also the slowest case and the deepest stack.
+      shortest-message Wycheproof valid case, or for a set without Wycheproof cases
+      (LMS/HSS) the shortest-message valid case; also the slowest case and the deepest
+      stack.
   python3 scripts/bench_summarize.py --check-consistency 0.05 LOG1 LOG2 LOG3
       Checks that every case appears in every log and that its cycles and peak_stack
       vary by at most the given fraction (max / min - 1) across the logs. Exits 1 if not.
@@ -64,10 +66,13 @@ def summary_rows(records):
         groups.setdefault((board, pset), []).append(rec)
     rows = []
     for (board, pset), recs in sorted(groups.items()):
-        valid_wp = [r for r in recs if r["src"] == "wycheproof" and r["expect_valid"]]
-        if not valid_wp:
-            raise ValueError(f"{board} {pset}: no Wycheproof valid case for the headline")
-        head = min(valid_wp, key=lambda r: (r["msg_len"], r["tc"]))
+        # Headline: the shortest-message Wycheproof valid case (ML-DSA, SHA-34); a set
+        # without Wycheproof cases (LMS/HSS, SHA-65) uses its shortest-message valid case.
+        valid = [r for r in recs if r["expect_valid"]]
+        candidates = [r for r in valid if r["src"] == "wycheproof"] or valid
+        if not candidates:
+            raise ValueError(f"{board} {pset}: no valid case for the headline")
+        head = min(candidates, key=lambda r: (r["msg_len"], r["tc"]))
         slowest = max(recs, key=lambda r: r["cycles"])
         deepest = max(r["peak_stack"] for r in recs)
         rows.append(

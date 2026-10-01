@@ -4,6 +4,7 @@ members = [
     "keelsign-verify",
     "tools/repo-checks",
     "benches/mldsa-kat",
+    "benches/lms-kat",
     "benches/stack-paint",
 ]
 # Standalone embedded projects with their own Cargo.lock and target (see docs/setup.md

@@ -57,6 +57,27 @@ pub const BENCHES: [Example; 2] = [
     },
 ];
 
+/// Files the SHA-65 LMS/HSS additions put in every bench project, relative to its
+/// directory.
+pub const LMS_BENCH_FILES: [&str; 3] = [
+    "tests/lms.rs",
+    "src/bin/size_lms_baseline.rs",
+    "src/bin/size_lms.rs",
+];
+
+/// The on-target LMS/HSS tests in `tests/lms.rs` named in the SHA-65 plan.
+pub const LMS_ON_TARGET_TESTS: [&str; 3] = [
+    "lms_kat",
+    "lms_bench",
+    "lms_rotation_key_b_verifies_against_a_b_and_fails_against_a",
+];
+
+/// The LMS/HSS flash-footprint bins (baseline first).
+pub const LMS_SIZE_BINS: [&str; 2] = ["size_lms_baseline", "size_lms"];
+
+/// Peak-stack limit for LMS/HSS verify asserted by `lms_bench` (SHA-65 AC4).
+pub const LMS_STACK_LIMIT: u32 = 32_768;
+
 /// Crates that ship (published or linked into user firmware). None of them may depend on
 /// the measurement-only `stack-paint` crate.
 pub const SHIPPED_CRATES: [&str; 4] = [

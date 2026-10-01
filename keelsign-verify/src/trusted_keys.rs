@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 
 use crate::algorithm::Algorithm;
 use crate::error::{Error, KeySetError};
+use crate::lms;
 use crate::tlv::KEY_ID_LEN;
 
 /// A key ID: the first [`KEY_ID_LEN`] bytes of the SHA-256 of the raw public key
@@ -51,8 +52,13 @@ impl<'a, const N: usize> TrustedKeys<'a, N> {
     /// for its algorithm, and [`KeySetError::DuplicateKeyId`] if two keys have the same
     /// ID.
     ///
-    /// Only ML-DSA keys have an exact length; an LMS/HSS key only has to be non-empty
-    /// here (its minimum length is checked by the LMS backend, SHA-65).
+    /// ML-DSA keys have one exact length each. An LMS/HSS key must be 52 or 60 bytes
+    /// ([`lms::PUBLIC_KEY_LENS`](crate::lms::PUBLIC_KEY_LENS): SHA-256/192 or SHA-256)
+    /// and pass [`lms::check_public_key`]: `L` in `1..=8` and a known LMS typecode whose m
+    /// gives exactly its length (52 for m = 24, 60 for m = 32). The keelsign parameter
+    /// policy is not applied here: a well-formed key outside it (an LM-OTS W2 key, say)
+    /// is accepted and refused with [`Error::UnsupportedParameterSet`] when it verifies a
+    /// signature.
     pub fn new(keys: &[TrustedKey<'a>]) -> Result<Self, KeySetError> {
         if keys.len() > N {
             return Err(KeySetError::Capacity);
@@ -65,6 +71,13 @@ impl<'a, const N: usize> TrustedKeys<'a, N> {
             }
             if let Some(expected) = key.algorithm.public_key_len()
                 && key.public_key.len() != expected
+            {
+                return Err(KeySetError::InvalidPublicKeyLength(key.algorithm));
+            }
+            // The 52 / 60 rule first as a fast pre-check, then the key's own typecode.
+            if key.algorithm == Algorithm::LmsHss
+                && (!lms::PUBLIC_KEY_LENS.contains(&key.public_key.len())
+                    || lms::check_public_key(key.public_key).is_err())
             {
                 return Err(KeySetError::InvalidPublicKeyLength(key.algorithm));
             }
@@ -122,8 +135,8 @@ mod tests {
 
     static MLDSA44_PK: [u8; 1312] = [0x44; 1312];
     static MLDSA65_PK: [u8; 1952] = [0x65; 1952];
-    static LMS_PK_A: [u8; 60] = [0xA0; 60];
-    static LMS_PK_B: [u8; 60] = [0xB0; 60];
+    static LMS_PK_A: [u8; 60] = lms::test_public_key(0xA0);
+    static LMS_PK_B: [u8; 60] = lms::test_public_key(0xB0);
 
     fn key(algorithm: Algorithm, public_key: &[u8]) -> TrustedKey<'_> {
         TrustedKey {
@@ -247,8 +260,102 @@ mod tests {
         ];
         assert_eq!(key_id_of(b"abc"), full[..KEY_ID_LEN]);
 
-        let keys = TrustedKeys::<1>::new(&[key(Algorithm::LmsHss, b"abc")]).unwrap();
-        assert!(keys.find(&full[..KEY_ID_LEN]).is_ok());
+        // The set finds a key by the truncated SHA-256 of its bytes.
+        let keys = TrustedKeys::<1>::new(&[key(Algorithm::LmsHss, &LMS_PK_A)]).unwrap();
+        let digest: [u8; 32] = Sha256::digest(LMS_PK_A).into();
+        assert!(keys.find(&digest[..KEY_ID_LEN]).is_ok());
+    }
+
+    /// An HSS public key header: `L`, LMS typecode, LM-OTS typecode.
+    fn lms_header(levels: u32, lms_type: u32, ots_type: u32) -> [u8; 12] {
+        let mut header = [0u8; 12];
+        header[..4].copy_from_slice(&levels.to_be_bytes());
+        header[4..8].copy_from_slice(&lms_type.to_be_bytes());
+        header[8..].copy_from_slice(&ots_type.to_be_bytes());
+        header
+    }
+
+    #[test]
+    fn lms_public_key_must_be_52_or_60_bytes() {
+        for (lms_type, ots_type, valid_len) in [(0x0Au32, 0x08u32, 52usize), (0x05, 0x04, 60)] {
+            let mut bytes = [0x4c; 64];
+            bytes[..12].copy_from_slice(&lms_header(1, lms_type, ots_type));
+            for len in 0..=bytes.len() {
+                let result = TrustedKeys::<1>::new(&[key(Algorithm::LmsHss, &bytes[..len])]);
+                if len == valid_len {
+                    assert_eq!(result.unwrap().len(), 1, "{len}");
+                } else {
+                    assert_eq!(
+                        result.unwrap_err(),
+                        KeySetError::InvalidPublicKeyLength(Algorithm::LmsHss),
+                        "{len}"
+                    );
+                }
+            }
+        }
+        // Without a valid header, no length is accepted.
+        let bytes = [0x4c; 64];
+        for len in 0..=bytes.len() {
+            let result = TrustedKeys::<1>::new(&[key(Algorithm::LmsHss, &bytes[..len])]);
+            assert_eq!(
+                result.unwrap_err(),
+                KeySetError::InvalidPublicKeyLength(Algorithm::LmsHss),
+                "{len}"
+            );
+        }
+        assert_eq!(lms::PUBLIC_KEY_LENS, [52, 60]);
+    }
+
+    #[test]
+    fn lms_key_length_must_match_its_typecode() {
+        // 60 bytes with an M24 typecode (LMS_SHA256_M24_H5 0x0A / LMOTS_SHA256_N24_W8 0x08)
+        // and 52 bytes with an M32 typecode (LMS_SHA256_M32_H5 0x05 / LMOTS_SHA256_N32_W8
+        // 0x04): each length is one of the two accepted ones, but not its typecode's.
+        for (lms_type, ots_type, len) in [(0x0Au32, 0x08u32, 60usize), (0x05, 0x04, 52)] {
+            let mut pk = [0x11u8; 60];
+            pk[..12].copy_from_slice(&lms_header(1, lms_type, ots_type));
+            let pk = &pk[..len];
+            assert_eq!(
+                TrustedKeys::<1>::new(&[key(Algorithm::LmsHss, pk)]).unwrap_err(),
+                KeySetError::InvalidPublicKeyLength(Algorithm::LmsHss),
+                "LMS typecode {lms_type:#x}, {len} bytes"
+            );
+            assert_eq!(lms::check_public_key(pk), Err(Error::InvalidPublicKey));
+        }
+        // The matching lengths are accepted.
+        for (lms_type, ots_type, len) in [(0x0Au32, 0x08u32, 52usize), (0x05, 0x04, 60)] {
+            let mut pk = [0x11u8; 60];
+            pk[..12].copy_from_slice(&lms_header(1, lms_type, ots_type));
+            assert_eq!(
+                TrustedKeys::<1>::new(&[key(Algorithm::LmsHss, &pk[..len])])
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+        // L outside 1..=8 or an unknown LMS typecode are refused too; the keelsign policy
+        // is not: W2 (outside it), L = 3..=8 (above MAX_HSS_LEVELS) and m != n pass here
+        // and are refused when verifying.
+        for (levels, lms_type, ots_type, ok) in [
+            (0u32, 0x05u32, 0x04u32, false),
+            (9, 0x05, 0x04, false),
+            (u32::MAX, 0x05, 0x04, false),
+            (1, 0x04, 0x04, false),
+            (1, 0x0F, 0x04, false),
+            (1, 0x05, 0x02, true),
+            (3, 0x05, 0x04, true),
+            (8, 0x05, 0x04, true),
+            (1, 0x05, 0x08, true),
+        ] {
+            let mut pk = [0x11u8; 60];
+            pk[..12].copy_from_slice(&lms_header(levels, lms_type, ots_type));
+            let result = TrustedKeys::<1>::new(&[key(Algorithm::LmsHss, &pk)]);
+            assert_eq!(
+                result.is_ok(),
+                ok,
+                "L {levels}, LMS {lms_type:#x}, OTS {ots_type:#x}"
+            );
+        }
     }
 
     #[test]

@@ -1,22 +1,27 @@
 //! `no_std`, heap-free on-device verifier for keelsign-signed MCUboot images.
 //!
 //! **Pre-release: the API is unstable** and the TLV IDs in [`tlv`] are provisional
-//! (SHA-37). This version holds the trusted-key set and the post-quantum signature
-//! dispatch; TLV-area parsing, image hashing, the ML-DSA and LMS/HSS backends and the
+//! (SHA-37). This version holds the trusted-key set, the post-quantum signature dispatch
+//! and the LMS/HSS verifier; TLV-area parsing, image hashing, the ML-DSA backend and the
 //! hybrid Ed25519 policy land in later releases.
 //!
 //! - [`TrustedKeys`] holds up to `N` borrowed public keys and finds one by key ID
 //!   ([`key_id_of`]).
-//! - [`verify_pq_with`] picks the single post-quantum signature TLV and the key-ID TLV
-//!   out of an image's TLVs, looks up the trusted key, checks that its [`Algorithm`]
-//!   matches and is compiled in, and calls a [`Backend`] to verify the signature.
+//! - [`verify_pq`] picks the single post-quantum signature TLV and the key-ID TLV out of
+//!   an image's TLVs, looks up the trusted key, checks that its [`Algorithm`] matches and
+//!   is compiled in, and verifies the signature with the built-in [`DefaultBackend`].
+//!   [`verify_pq_with`] does the same with any [`Backend`].
+//! - [`lms`] verifies LMS/HSS signatures (RFC 8554, SP 800-208) over SHA-256 and
+//!   SHA-256/192 under the keelsign parameter policy.
 //!
 //! Every failure is a distinct [`Error`] variant.
 //!
 //! # Features
 //!
-//! - `ml-dsa` (off by default): enables ML-DSA-44/65. Without it, ML-DSA signatures
-//!   fail with [`Error::UnsupportedAlgorithm`]. LMS/HSS is always enabled.
+//! - `ml-dsa` (off by default): enables ML-DSA-44/65 in the dispatcher. Without it,
+//!   ML-DSA signatures fail with [`Error::UnsupportedAlgorithm`]; until SHA-44 lands,
+//!   [`DefaultBackend`] also answers ML-DSA with that error when the feature is on.
+//!   LMS/HSS is always enabled.
 #![no_std]
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -25,12 +30,15 @@
 extern crate std;
 
 mod algorithm;
+mod backend;
 mod dispatch;
 mod error;
+pub mod lms;
 pub mod tlv;
 mod trusted_keys;
 
 pub use algorithm::Algorithm;
+pub use backend::{DefaultBackend, verify_pq};
 pub use dispatch::{Backend, SelectedSignature, select_pq_signature, verify_pq_with};
 pub use error::{Error, KeySetError};
 pub use trusted_keys::{KeyId, TrustedKey, TrustedKeys, key_id_of};

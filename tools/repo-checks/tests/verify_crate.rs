@@ -79,7 +79,15 @@ fn keelsign_verify_is_no_std_no_alloc_forbid_unsafe() {
     );
     assert_eq!(lib.matches("extern crate").count(), 1);
 
-    for (name, text) in sources() {
+    let sources = sources();
+    // SHA-65: the LMS/HSS verifier and the default backend are covered by these rules.
+    for required in ["lms.rs", "backend.rs"] {
+        assert!(
+            sources.iter().any(|(name, _)| name == required),
+            "keelsign-verify/src/{required} must exist"
+        );
+    }
+    for (name, text) in sources {
         for forbidden in [
             "extern crate alloc",
             "alloc::",

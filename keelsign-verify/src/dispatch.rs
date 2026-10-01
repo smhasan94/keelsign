@@ -82,7 +82,8 @@ where
 }
 
 /// Verify the post-quantum signature in `tlvs` over `message` with `backend`, and return
-/// the trusted key that verified it.
+/// the trusted key that verified it. [`verify_pq`](crate::verify_pq) is this function with
+/// the built-in [`DefaultBackend`](crate::DefaultBackend).
 ///
 /// It first scans `tlvs` (see [`select_pq_signature`]), failing as soon as it sees a
 /// second key-ID TLV ([`Error::MultipleKeyIds`]) or a second post-quantum signature TLV
@@ -198,8 +199,8 @@ mod tests {
 
     static MLDSA44_PK: [u8; 1312] = [0x44; 1312];
     static MLDSA65_PK: [u8; 1952] = [0x65; 1952];
-    static LMS_PK_A: [u8; 60] = [0xA0; 60];
-    static LMS_PK_B: [u8; 60] = [0xB0; 60];
+    static LMS_PK_A: [u8; 60] = crate::lms::test_public_key(0xA0);
+    static LMS_PK_B: [u8; 60] = crate::lms::test_public_key(0xB0);
     const SIG: &[u8] = b"signature bytes";
     const MSG: &[u8] = b"image digest";
 
@@ -518,6 +519,24 @@ mod tests {
                 Err(Error::SignatureInvalid),
                 Error::SignatureInvalid,
             ),
+            (
+                "backend refuses parameter set",
+                Vec::from([id_tlv(&LMS_PK_A), lms_sig.clone()]),
+                Err(Error::UnsupportedParameterSet),
+                Error::UnsupportedParameterSet,
+            ),
+            (
+                "backend finds signature malformed",
+                Vec::from([id_tlv(&LMS_PK_A), lms_sig.clone()]),
+                Err(Error::MalformedSignature),
+                Error::MalformedSignature,
+            ),
+            (
+                "backend finds public key malformed",
+                Vec::from([id_tlv(&LMS_PK_A), lms_sig.clone()]),
+                Err(Error::InvalidPublicKey),
+                Error::InvalidPublicKey,
+            ),
         ]);
         // Compiled-out only exists while some algorithm is disabled (`ml-dsa` off).
         if let Some(&disabled) = Algorithm::ALL.iter().find(|a| !a.is_enabled()) {
@@ -528,7 +547,7 @@ mod tests {
                 Error::UnsupportedAlgorithm(disabled),
             ));
         }
-        assert_eq!(cases.len(), if cfg!(feature = "ml-dsa") { 8 } else { 9 });
+        assert_eq!(cases.len(), if cfg!(feature = "ml-dsa") { 11 } else { 12 });
 
         for (name, tlvs, backend_result, expected) in &cases {
             let backend = RecordingBackend::returning(*backend_result);
@@ -560,7 +579,9 @@ mod tests {
     }
 
     /// Supporting evidence for SHA-171 TP3 only; the end-to-end rotation test with real
-    /// signatures is SHA-65 / SHA-53.
+    /// signatures through `verify_pq` is
+    /// `lms_kat::host_kat::image_signed_with_key_b_verifies_against_a_b_and_fails_against_a`
+    /// (SHA-65).
     #[test]
     fn rotation_with_mock_backend_selects_key_b_from_a_b_and_fails_with_a_only() {
         let a = key(Algorithm::LmsHss, &LMS_PK_A);
