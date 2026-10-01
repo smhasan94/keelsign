@@ -2,6 +2,7 @@
 //! and the go/no-go decision, and that the benchmark log tooling works.
 
 use repo_checks::{BENCHES, ScratchDir, python_script, run_capture, workspace_root};
+use std::collections::BTreeMap;
 use std::fs;
 
 const REQUIRED_HEADINGS: [&str; 15] = [
@@ -906,4 +907,1028 @@ fn mldsa_verify_section_records_stack() {
     }
     // The SHA-34 decision points at this section.
     assert!(section(&doc, "## Decision").contains("(#ml-dsa-verify-sha-44)"));
+}
+
+// ---- SHA-275: recorded flash and frame figures -----------------------------------------
+
+const FRAME_DETAIL: &str = "### Static frame detail";
+const LARGEST_OTHER: &str = "(largest other frame)";
+
+/// The sections holding a "Flash detail" table (`| Board / profile | …`).
+const FLASH_DETAIL_SECTIONS: [&str; 5] = [
+    "## Results",
+    "### LMS results",
+    "### Digest results",
+    "### Hybrid results",
+    "### ML-DSA verify results",
+];
+
+/// Collapses every run of whitespace (line breaks and indentation included) to one space,
+/// so prose wrapped over several lines can be searched for a phrase.
+fn normalized(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A plain byte count cell such as `47,276` (or `47,276 B`).
+fn parse_count(cell: &str) -> Option<u64> {
+    parse_bytes(cell.trim())
+}
+
+/// Header and body rows of the markdown table in `text` whose header line starts with
+/// `header_prefix`: element 0 is the header's cells.
+fn table_with_header(text: &str, header_prefix: &str) -> Option<Vec<Vec<String>>> {
+    let lines: Vec<&str> = text
+        .lines()
+        .skip_while(|l| !l.starts_with(header_prefix))
+        .take_while(|l| l.starts_with('|'))
+        .collect();
+    let header = lines.first()?;
+    let cells = |l: &str| -> Vec<String> {
+        l.trim_matches('|')
+            .split('|')
+            .map(|c| c.trim().to_owned())
+            .collect()
+    };
+    let mut table = vec![cells(header)];
+    table.extend(
+        lines
+            .iter()
+            .skip(1)
+            .filter(|l| !l.starts_with("|---"))
+            .map(|l| cells(l)),
+    );
+    Some(table)
+}
+
+/// The first backticked span of `text`.
+fn backticked(text: &str) -> Option<&str> {
+    let start = text.find('`')? + 1;
+    let len = text[start..].find('`')?;
+    Some(&text[start..start + len])
+}
+
+/// One flash cell of a "Flash detail" table: the `flash` of `bin` in the row
+/// `board / profile`, built with or without the bench `ml-dsa` feature.
+#[derive(Clone, Debug, PartialEq)]
+struct FlashCell {
+    section: String,
+    /// The row label, `nrf52840 / release`.
+    row: String,
+    bin: String,
+    ml_dsa: bool,
+    bytes: u64,
+}
+
+impl FlashCell {
+    fn board(&self) -> &str {
+        self.row.split(" / ").next().unwrap_or_default()
+    }
+
+    fn profile(&self) -> &str {
+        self.row.split(" / ").nth(1).unwrap_or_default()
+    }
+
+    fn key(&self) -> FlashKey {
+        (
+            self.board().to_owned(),
+            self.profile().to_owned(),
+            self.ml_dsa,
+            self.bin.clone(),
+        )
+    }
+}
+
+/// (board, profile, `ml-dsa` feature, bin) of a measured ELF.
+type FlashKey = (String, String, bool, String);
+
+/// A "Flash detail" table: its section, header and rows.
+struct FlashTable {
+    section: &'static str,
+    header: Vec<String>,
+    rows: Vec<Vec<String>>,
+}
+
+impl FlashTable {
+    /// Indices of the `… flash` columns (the first is the baseline) and of the `Δ …`
+    /// columns, in table order.
+    fn columns(&self) -> (Vec<usize>, Vec<usize>) {
+        let flash = (0..self.header.len())
+            .filter(|&i| self.header[i].contains(" flash"))
+            .collect();
+        let delta = (0..self.header.len())
+            .filter(|&i| self.header[i].starts_with('Δ'))
+            .collect();
+        (flash, delta)
+    }
+
+    fn row(&self, label: &str) -> &[String] {
+        self.rows
+            .iter()
+            .find(|r| r[0] == label)
+            .unwrap_or_else(|| panic!("{}: no flash detail row `{label}`", self.section))
+    }
+
+    /// The `Δ` cells of row `label`, in table order.
+    fn deltas(&self, label: &str) -> Vec<u64> {
+        let row = self.row(label);
+        self.columns()
+            .1
+            .iter()
+            .map(|&i| {
+                parse_count(&row[i]).unwrap_or_else(|| panic!("{}: `{}`", self.section, row[i]))
+            })
+            .collect()
+    }
+}
+
+fn flash_tables(doc: &str) -> Vec<FlashTable> {
+    FLASH_DETAIL_SECTIONS
+        .iter()
+        .map(|&heading| {
+            let mut table = table_with_header(section(doc, heading), "| Board / profile |")
+                .unwrap_or_else(|| panic!("{heading} has no `| Board / profile |` table"));
+            let header = table.remove(0);
+            FlashTable {
+                section: heading,
+                header,
+                rows: table,
+            }
+        })
+        .collect()
+}
+
+/// Every flash cell (not the Δ cells, which `flash_tables_are_consistent` checks) of the
+/// five "Flash detail" tables.
+fn flash_detail_cells(doc: &str) -> Vec<FlashCell> {
+    let mut cells = Vec::new();
+    for table in flash_tables(doc) {
+        for &i in &table.columns().0 {
+            let column = &table.header[i];
+            let bin = backticked(column)
+                .unwrap_or_else(|| panic!("{}: column `{column}` names no bin", table.section));
+            for row in &table.rows {
+                cells.push(FlashCell {
+                    section: table.section.to_owned(),
+                    row: row[0].clone(),
+                    bin: bin.to_owned(),
+                    ml_dsa: column.contains("(ml-dsa on)"),
+                    bytes: parse_count(&row[i]).unwrap_or_else(|| {
+                        panic!("{}: `{}` is not a byte count", table.section, row[i])
+                    }),
+                });
+            }
+        }
+    }
+    cells
+}
+
+/// One line per flash cell that differs from (or is missing in) `measured`.
+fn compare_flash(cells: &[FlashCell], measured: &BTreeMap<FlashKey, u64>) -> Vec<String> {
+    let mut report = Vec::new();
+    for cell in cells {
+        let column = format!(
+            "`{}` flash{}",
+            cell.bin,
+            if cell.ml_dsa { " (ml-dsa on)" } else { "" }
+        );
+        match measured.get(&cell.key()) {
+            Some(&m) if m == cell.bytes => {}
+            Some(&m) => report.push(format!(
+                "{}: row `{}`, column {column}: doc {}, measured {m}",
+                cell.section, cell.row, cell.bytes
+            )),
+            None => report.push(format!(
+                "{}: row `{}`, column {column}: doc {}, not measured",
+                cell.section, cell.row, cell.bytes
+            )),
+        }
+    }
+    report
+}
+
+/// One row of the `### Static frame detail` table.
+#[derive(Clone, Debug, PartialEq)]
+struct FrameRow {
+    bin: String,
+    /// The raw "Build" cell, for messages.
+    build: String,
+    profile: String,
+    ml_dsa: bool,
+    stable_prologue: bool,
+    /// A substring of exactly one demangled function name, or `(largest other frame)`;
+    /// for a stable-prologue row, the description of the `verify_param` instance.
+    function: String,
+    /// The frame on each board, in `BOARDS` order.
+    frames: [u64; 2],
+}
+
+impl FrameRow {
+    fn key(&self, board: &str) -> FrameKey {
+        (
+            board.to_owned(),
+            self.bin.clone(),
+            self.profile.clone(),
+            self.ml_dsa,
+        )
+    }
+
+    fn same_build(&self, other: &FrameRow) -> bool {
+        self.bin == other.bin
+            && self.profile == other.profile
+            && self.ml_dsa == other.ml_dsa
+            && self.stable_prologue == other.stable_prologue
+    }
+}
+
+/// (board, bin, profile, `ml-dsa` feature) of a nightly-built ELF.
+type FrameKey = (String, String, String, bool);
+
+fn frame_rows(doc: &str) -> Vec<FrameRow> {
+    let mut table = table_with_header(section(doc, FRAME_DETAIL), "| Bin | Build | Function |")
+        .unwrap_or_else(|| panic!("{FRAME_DETAIL} needs the `| Bin | Build | Function |` table"));
+    let header = table.remove(0);
+    assert_eq!(
+        header[3..],
+        BOARDS.map(String::from),
+        "{FRAME_DETAIL}: one column per board"
+    );
+    table
+        .iter()
+        .map(|r| {
+            assert_eq!(r.len(), 5, "{FRAME_DETAIL}: {r:?}");
+            let frame = |cell: &str| {
+                parse_count(cell)
+                    .unwrap_or_else(|| panic!("{FRAME_DETAIL}: `{cell}` is not a byte count"))
+            };
+            let function = if r[2] == LARGEST_OTHER || r[1].contains("stable prologue") {
+                r[2].clone()
+            } else {
+                backticked(&r[2])
+                    .unwrap_or_else(|| panic!("{FRAME_DETAIL}: `{}` is not backticked", r[2]))
+                    .to_owned()
+            };
+            FrameRow {
+                bin: backticked(&r[0])
+                    .unwrap_or_else(|| panic!("{FRAME_DETAIL}: bin `{}`", r[0]))
+                    .to_owned(),
+                build: r[1].clone(),
+                profile: r[1].split(',').next().unwrap_or_default().trim().to_owned(),
+                ml_dsa: r[1].contains("ml-dsa"),
+                stable_prologue: r[1].contains("stable prologue"),
+                function,
+                frames: [frame(&r[3]), frame(&r[4])],
+            }
+        })
+        .collect()
+}
+
+/// One line per nightly frame row (not the stable prologues) that differs from
+/// `measured` (own-frame sizes and demangled names per ELF), or whose function cell does
+/// not name exactly one function.
+fn compare_frames(
+    rows: &[FrameRow],
+    measured: &BTreeMap<FrameKey, Vec<(u64, String)>>,
+) -> Vec<String> {
+    let mut report = Vec::new();
+    for row in rows.iter().filter(|r| !r.stable_prologue) {
+        for (b, board) in BOARDS.iter().enumerate() {
+            let at = format!(
+                "{FRAME_DETAIL}: `{}` {}, `{}`, {board}",
+                row.bin, row.build, row.function
+            );
+            let Some(frames) = measured.get(&row.key(board)) else {
+                report.push(format!("{at}: doc {}, not measured", row.frames[b]));
+                continue;
+            };
+            let value = if row.function == LARGEST_OTHER {
+                let named: Vec<&str> = rows
+                    .iter()
+                    .filter(|o| o.same_build(row) && o.function != LARGEST_OTHER)
+                    .map(|o| o.function.as_str())
+                    .collect();
+                frames
+                    .iter()
+                    .filter(|(_, name)| !named.iter().any(|n| name.contains(n)))
+                    .map(|&(size, _)| size)
+                    .max()
+            } else {
+                let matching: Vec<&(u64, String)> = frames
+                    .iter()
+                    .filter(|(_, name)| name.contains(&row.function))
+                    .collect();
+                match matching.as_slice() {
+                    [(size, _)] => Some(*size),
+                    [] => {
+                        report.push(format!("{at}: matches no function"));
+                        continue;
+                    }
+                    many => {
+                        let names: Vec<&str> = many.iter().map(|(_, n)| n.as_str()).collect();
+                        report.push(format!(
+                            "{at}: matches {} functions, lengthen it: {names:?}",
+                            many.len()
+                        ));
+                        continue;
+                    }
+                }
+            };
+            match value {
+                Some(m) if m == row.frames[b] => {}
+                Some(m) => report.push(format!("{at}: doc {}, measured {m}", row.frames[b])),
+                None => report.push(format!("{at}: no other frame")),
+            }
+        }
+    }
+    report
+}
+
+/// The frame row of `bin`, `build` (the raw cell) whose function cell is `function`.
+fn frame_row<'a>(rows: &'a [FrameRow], bin: &str, build: &str, function: &str) -> &'a FrameRow {
+    rows.iter()
+        .find(|r| r.bin == bin && r.build == build && r.function == function)
+        .unwrap_or_else(|| panic!("{FRAME_DETAIL} has no row `{bin}` {build} `{function}`"))
+}
+
+/// The figure of a row that the prose quotes once for both boards.
+fn both_boards(row: &FrameRow) -> u64 {
+    assert_eq!(
+        row.frames[0], row.frames[1],
+        "{FRAME_DETAIL}: `{}` differs between the boards, but the prose quotes one figure",
+        row.function
+    );
+    row.frames[0]
+}
+
+/// `93448` as the document writes it, `93,448`.
+fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// The cell of the results-table row whose first cells are `key`.
+fn results_cell<'a>(rows: &'a [Vec<String>], key: &[&str], column: usize) -> &'a str {
+    rows.iter()
+        .find(|r| r.len() > column && key.iter().zip(r.iter()).all(|(k, c)| k == c))
+        .map(|r| r[column].as_str())
+        .unwrap_or_else(|| panic!("no results row {key:?}"))
+}
+
+/// The bytes of a results-table cell, or of one half (`at`) of an `a / b` cell.
+fn cell_part(cell: &str, at: usize) -> u64 {
+    cell.split(" / ")
+        .nth(at)
+        .and_then(parse_bytes)
+        .unwrap_or_else(|| panic!("`{cell}`: no byte count at {at}"))
+}
+
+/// AC1/AC2 (CI): every "Flash detail" row adds up, the results tables quote their detail
+/// table, the crate-choice in-house figure is the nrf52840 LMS delta, and the SHA-44
+/// `ml-dsa off` column is the same build as the SHA-46 `size_verify` column.
+#[test]
+fn flash_tables_are_consistent() {
+    let doc = doc();
+    let tables = flash_tables(&doc);
+    let table = |heading: &str| tables.iter().find(|t| t.section == heading).unwrap();
+    for t in &tables {
+        let (flash, delta) = t.columns();
+        assert!(
+            flash.len() >= 2 && delta.len() == flash.len() - 1,
+            "{}: one Δ column per non-baseline flash column: {:?}",
+            t.section,
+            t.header
+        );
+        assert_eq!(
+            t.rows.len(),
+            4,
+            "{}: one row per board × profile",
+            t.section
+        );
+        for board in BOARDS {
+            for profile in ["release", "size"] {
+                let label = format!("{board} / {profile}");
+                let row = t.row(&label);
+                let n: Vec<u64> = flash
+                    .iter()
+                    .map(|&i| parse_count(&row[i]).unwrap())
+                    .collect();
+                for (k, d) in t.deltas(&label).into_iter().enumerate() {
+                    assert_eq!(
+                        n[k + 1] - n[0],
+                        d,
+                        "{}: `{label}` {} − {} ≠ {d}",
+                        t.section,
+                        t.header[flash[k + 1]],
+                        t.header[flash[0]]
+                    );
+                }
+            }
+        }
+        assert!(
+            normalized(section(&doc, t.section)).contains("static RAM delta is 0 in every row"),
+            "{}: the flash detail must state that the static RAM delta is 0",
+            t.section
+        );
+    }
+
+    // SHA-34 and LMS results quote their detail Δ.
+    let results = table_rows(section(&doc, "## Results"));
+    let lms_results = table_rows(section(&doc, "### LMS results"));
+    for board in BOARDS {
+        for (profile, column) in [("release", 6), ("size", 7)] {
+            let label = format!("{board} / {profile}");
+            let d = table("## Results").deltas(&label);
+            for (k, set) in SETS.iter().enumerate() {
+                assert_eq!(
+                    parse_bytes(results_cell(&results, &[board, set], column)),
+                    Some(d[k]),
+                    "## Results {board} {set} {profile} ≠ flash detail Δ"
+                );
+            }
+            let d = table("### LMS results").deltas(&label)[0];
+            for (set, _, _) in LMS_SETS {
+                assert_eq!(
+                    parse_bytes(results_cell(&lms_results, &[board, set], column)),
+                    Some(d),
+                    "### LMS results {board} {set} {profile} ≠ flash detail Δ"
+                );
+            }
+        }
+    }
+
+    // The crate choice quotes the nrf52840 LMS delta.
+    let lms = table("### LMS results");
+    let expected = format!(
+        "+{} / +{} B (whole `verify_pq` path)",
+        grouped(lms.deltas("nrf52840 / release")[0]),
+        grouped(lms.deltas("nrf52840 / size")[0])
+    );
+    assert!(
+        section(&doc, "### Crate choice").contains(&expected),
+        "### Crate choice must quote the in-house delta as `{expected}`"
+    );
+
+    // SHA-44's `ml-dsa off` column is SHA-46's `size_verify` build.
+    let cells = flash_detail_cells(&doc);
+    for board in BOARDS {
+        for profile in ["release", "size"] {
+            let row = format!("{board} / {profile}");
+            let find = |section: &str| {
+                cells
+                    .iter()
+                    .find(|c| {
+                        c.section == section && c.row == row && c.bin == "size_verify" && !c.ml_dsa
+                    })
+                    .unwrap_or_else(|| panic!("{section}: no `size_verify` cell for `{row}`"))
+                    .bytes
+            };
+            assert_eq!(
+                find("### ML-DSA verify results"),
+                find("### Hybrid results"),
+                "`{row}`: the SHA-44 `ml-dsa off` size_verify must equal the SHA-46 size_verify"
+            );
+        }
+    }
+}
+
+/// AC1/AC2 (CI): every frame figure in the results tables and the prose is a row of
+/// `### Static frame detail` or a sum of rows.
+#[test]
+fn static_frames_match_the_frame_detail_table() {
+    let doc = doc();
+    let rows = frame_rows(&doc);
+    assert!(!rows.is_empty(), "{FRAME_DETAIL} has no rows");
+    let f = |bin: &str, build: &str, function: &str| frame_row(&rows, bin, build, function);
+    let sum = |chain: &[&FrameRow], b: usize| chain.iter().map(|r| r.frames[b]).sum::<u64>();
+
+    // LMS: the deepest chain below `verify_with_keys`.
+    let lms_chain: Vec<(&str, &FrameRow)> = [
+        ("`verify_with_keys`", "lms_kat::verify_with_keys<2>"),
+        (
+            "`DefaultBackend::verify`",
+            "<keelsign_verify::backend::DefaultBackend as keelsign_verify::dispatch::Backend>::verify",
+        ),
+        ("`lms::walk`", "keelsign_verify::lms::walk"),
+        ("`lms::lms_verify`", "keelsign_verify::lms::lms_verify"),
+        ("`lms::hash`", "keelsign_verify::lms::hash"),
+        ("`finalize_fixed_core`", "finalize_fixed_core"),
+        ("`sha2::sha256::compress256`", "sha2::sha256::compress256"),
+    ]
+    .map(|(label, needle)| (label, f("size_lms", "release", needle)))
+    .to_vec();
+    let lms_rows: Vec<&FrameRow> = lms_chain.iter().map(|&(_, r)| r).collect();
+    let lms_results = table_rows(section(&doc, "### LMS results"));
+    for (b, board) in BOARDS.iter().enumerate() {
+        for (set, _, _) in LMS_SETS {
+            assert_eq!(
+                parse_bytes(results_cell(&lms_results, &[board, set], 5)),
+                Some(sum(&lms_rows, b)),
+                "### LMS results {board} {set}: static frame ≠ the chain in {FRAME_DETAIL}"
+            );
+        }
+    }
+    let lms_total = grouped(sum(&lms_rows, 0));
+    assert_eq!(
+        sum(&lms_rows, 0),
+        sum(&lms_rows, 1),
+        "LMS chain differs by board"
+    );
+    let method = normalized(section(&doc, "### LMS method"));
+    for (label, row) in &lms_chain {
+        let quoted = format!("{label} {}", grouped(both_boards(row)));
+        assert!(
+            method.contains(&quoted),
+            "### LMS method must quote `{quoted}`"
+        );
+    }
+    for (heading, phrase) in [
+        ("### LMS method", format!("= {lms_total} B")),
+        ("### Crate choice", format!("{lms_total} B call chain")),
+        (
+            "### LMS results",
+            format!("compiled call chain is {lms_total} B"),
+        ),
+    ] {
+        assert!(
+            normalized(section(&doc, heading)).contains(&phrase),
+            "{heading} must quote `{phrase}`"
+        );
+    }
+
+    // Hybrid: the Ed25519 chain, and the LMS half on top of the wrapper.
+    let hybrid_chain: Vec<(&str, &FrameRow)> = [
+        ("`size_verify::verify_hybrid`", "size_verify::verify_hybrid<"),
+        (
+            "`keelsign_verify::ed25519::verify_signature`",
+            "keelsign_verify::ed25519::verify_signature",
+        ),
+        (
+            "`NafLookupTable5::from`",
+            "NafLookupTable5<curve25519_dalek::backend::serial::curve_models::ProjectiveNielsPoint> as core::convert::From",
+        ),
+        ("`FieldElement2625::pow22501`", "FieldElement2625>::pow22501"),
+    ]
+    .map(|(label, needle)| (label, f("size_verify", "release", needle)))
+    .to_vec();
+    let hybrid_rows: Vec<&FrameRow> = hybrid_chain.iter().map(|&(_, r)| r).collect();
+    let hybrid_results = table_rows(section(&doc, "### Hybrid results"));
+    for (b, board) in BOARDS.iter().enumerate() {
+        assert_eq!(
+            parse_bytes(results_cell(&hybrid_results, &[board], 3)),
+            Some(sum(&hybrid_rows, b)),
+            "### Hybrid results {board}: static frame ≠ the chain in {FRAME_DETAIL}"
+        );
+    }
+    let method = normalized(section(&doc, "### Hybrid method"));
+    for (label, row) in &hybrid_chain {
+        let quoted = format!("{label} {} B", grouped(both_boards(row)));
+        assert!(
+            method.contains(&quoted),
+            "### Hybrid method must quote `{quoted}`"
+        );
+    }
+    let total = format!("({} B)", grouped(sum(&hybrid_rows, 0)));
+    assert!(
+        method.contains(&total),
+        "### Hybrid method must quote `{total}`"
+    );
+    for (label, needle) in [
+        ("`lms_verify`", "keelsign_verify::lms::lms_verify"),
+        ("`lms::hash`", "keelsign_verify::lms::hash"),
+        ("`compress256`", "sha2::sha256::compress256"),
+    ] {
+        let quoted = format!(
+            "{label} {} B",
+            grouped(both_boards(f("size_verify", "release", needle)))
+        );
+        assert!(
+            method.contains(&quoted),
+            "### Hybrid method must quote `{quoted}`"
+        );
+    }
+
+    // Digest: `image_digest` and `Image::read_from`.
+    let digest = f("size_digest", "release", "size_digest::digest<");
+    let compress = f("size_digest", "release", "sha2::sha256::compress256");
+    let read_image = f("size_digest", "release", "size_digest::read_image<");
+    let parse_parts = f(
+        "size_digest",
+        "release",
+        "<keelsign_verify::image::Image>::parse_parts",
+    );
+    let digest_results = table_rows(section(&doc, "### Digest results"));
+    for (b, board) in BOARDS.iter().enumerate() {
+        assert_eq!(
+            parse_bytes(results_cell(&digest_results, &[board], 4)),
+            Some(digest.frames[b] + compress.frames[b]),
+            "### Digest results {board}: static frame ≠ digest + compress256"
+        );
+    }
+    let method = normalized(section(&doc, "### Digest method"));
+    let digest_frame = both_boards(digest) + both_boards(compress);
+    for phrase in [
+        format!("{} B (`image_digest`", both_boards(digest)),
+        format!(
+            "`sha2::sha256::compress256` {} B = {digest_frame} B",
+            both_boards(compress)
+        ),
+        format!("256 + {digest_frame} = {} B", 256 + digest_frame),
+        format!(
+            "`size_digest::read_image<…>` {} B + `Image::parse_parts` {} B = {} B",
+            both_boards(read_image),
+            both_boards(parse_parts),
+            both_boards(read_image) + both_boards(parse_parts)
+        ),
+    ] {
+        assert!(
+            method.contains(&phrase),
+            "### Digest method must quote `{phrase}`"
+        );
+    }
+
+    // SHA-34: `verify_case` and the largest other frame.
+    let results = table_rows(section(&doc, "## Results"));
+    let frame_table = table_rows(section(
+        &doc,
+        "## Static stack frame estimate (provisional)",
+    ));
+    for (set, bin, needle) in [
+        (
+            "ML-DSA-44",
+            "size_mldsa44",
+            "mldsa_kat::verify_case<ml_dsa::MlDsa44>",
+        ),
+        (
+            "ML-DSA-65",
+            "size_mldsa65",
+            "mldsa_kat::verify_case<ml_dsa::MlDsa65>",
+        ),
+    ] {
+        let case = f(bin, "release", needle);
+        let other = f(bin, "release", LARGEST_OTHER);
+        for (b, board) in BOARDS.iter().enumerate() {
+            let key = [*board, set];
+            assert_eq!(
+                parse_bytes(results_cell(&results, &key, 5)),
+                Some(case.frames[b]),
+                "## Results {board} {set}: static frame"
+            );
+            assert_eq!(
+                parse_bytes(results_cell(&frame_table, &key, 2)),
+                Some(case.frames[b]),
+                "## Static stack frame estimate {board} {set}: `verify_case` frame"
+            );
+            assert_eq!(
+                parse_bytes(results_cell(&frame_table, &key, 3)),
+                Some(other.frames[b]),
+                "## Static stack frame estimate {board} {set}: largest other frame"
+            );
+        }
+    }
+    let quoted = format!(
+        "`verify_case<MlDsa44>` frame is {} B",
+        grouped(both_boards(f(
+            "size_mldsa44",
+            "release",
+            "mldsa_kat::verify_case<ml_dsa::MlDsa44>"
+        )))
+    );
+    assert!(
+        normalized(section(&doc, "## Decision")).contains(&quoted),
+        "## Decision must quote `{quoted}`"
+    );
+
+    // SHA-44: `verify_param` per set and profile, `verify_with` on / off.
+    let mldsa_results = table_rows(section(&doc, "### ML-DSA verify results"));
+    let hybrid_on = f(
+        "size_verify",
+        "release, `ml-dsa`",
+        "size_verify::verify_hybrid<",
+    );
+    let hybrid_off = f("size_verify", "release", "size_verify::verify_hybrid<");
+    for (set, param) in [("ML-DSA-44", "MlDsa44"), ("ML-DSA-65", "MlDsa65")] {
+        let needle = format!("keelsign_verify::mldsa::verify_param<ml_dsa::{param}>");
+        let release = f("size_verify", "release, `ml-dsa`", &needle);
+        let size = f("size_verify", "size, `ml-dsa`", &needle);
+        for (b, board) in BOARDS.iter().enumerate() {
+            let key = [*board, set];
+            assert_eq!(
+                parse_bytes(results_cell(&mldsa_results, &key, 2)),
+                Some(release.frames[b]),
+                "### ML-DSA verify results {board} {set}: static frame release"
+            );
+            assert_eq!(
+                parse_bytes(results_cell(&mldsa_results, &key, 3)),
+                Some(size.frames[b]),
+                "### ML-DSA verify results {board} {set}: static frame size"
+            );
+            let with = results_cell(&mldsa_results, &key, 4);
+            assert_eq!(
+                [cell_part(with, 0), cell_part(with, 1)],
+                [hybrid_on.frames[b], hybrid_off.frames[b]],
+                "### ML-DSA verify results {board} {set}: `verify_with` frame on / off"
+            );
+        }
+    }
+
+    // The stable prologues are the figures "### Stack the feature needs" tells to budget.
+    let stack = normalized(section(&doc, "### Stack the feature needs"));
+    for set in SETS {
+        let row = rows
+            .iter()
+            .find(|r| r.stable_prologue && r.function.contains(set))
+            .unwrap_or_else(|| panic!("{FRAME_DETAIL} has no stable-prologue row for {set}"));
+        let quoted = format!("{} B ({set})", grouped(both_boards(row)));
+        assert!(
+            stack.contains(&quoted),
+            "### Stack the feature needs must quote `{quoted}`"
+        );
+    }
+}
+
+/// The two `rustc --version` strings recorded under `### Measurement toolchains`:
+/// (stable, nightly).
+fn recorded_toolchains(doc: &str) -> (String, String) {
+    let text = normalized(section(doc, "### Measurement toolchains"));
+    let spans: Vec<&str> = text
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .filter(|s| s.starts_with("rustc 1."))
+        .collect();
+    let stable: Vec<&str> = spans
+        .iter()
+        .copied()
+        .filter(|s| !s.contains("-nightly"))
+        .collect();
+    let nightly: Vec<&str> = spans
+        .iter()
+        .copied()
+        .filter(|s| s.contains("-nightly"))
+        .collect();
+    assert!(
+        stable.len() == 1 && nightly.len() == 1,
+        "### Measurement toolchains must record one stable and one nightly `rustc 1.…` \
+         string, found {spans:?}"
+    );
+    (stable[0].to_owned(), nightly[0].to_owned())
+}
+
+/// AC2 (CI): the compilers the figures were measured with are recorded once, and every
+/// compiler named in the document is one of them.
+#[test]
+fn measurement_toolchains_are_recorded() {
+    let doc = doc();
+    let (stable, nightly) = recorded_toolchains(&doc);
+    assert_eq!(stable, "rustc 1.91.1 (ed61e7d7e 2025-11-07)");
+    assert_eq!(nightly, "rustc 1.101.0-nightly (c1070d693 2026-09-28)");
+    assert!(
+        section(&doc, "### Measurement toolchains").contains("nightly-2026-09-29"),
+        "### Measurement toolchains must name the installable `nightly-2026-09-29`"
+    );
+    let text = normalized(&doc);
+    for (at, _) in text.match_indices("rustc 1.") {
+        let named = &text[at..];
+        let end = named.find(')').map_or(named.len(), |e| e + 1);
+        let named = &named[..end];
+        assert!(
+            named == stable || named == nightly,
+            "docs/benchmarks.md names `{named}`, which is not a recorded toolchain"
+        );
+    }
+    let version = stable.split(' ').nth(1).unwrap();
+    for (at, _) in text.match_indices("Rust 1.") {
+        let named = text[at + "Rust ".len()..]
+            .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+            .next()
+            .unwrap()
+            .trim_end_matches('.');
+        assert_eq!(
+            named, version,
+            "docs/benchmarks.md names stable Rust {named}; the recorded stable is {version}"
+        );
+    }
+}
+
+/// Whether `text` contains the number `n` (as written, `1,488`) not as part of a longer
+/// number.
+fn contains_number(text: &str, n: &str) -> bool {
+    text.match_indices(n).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + n.len()..].chars().next();
+        !before.is_some_and(|c| c.is_ascii_digit() || c == ',' || c == '.')
+            && !after.is_some_and(|c| {
+                c.is_ascii_digit()
+                    || (c == ','
+                        && text[at + n.len() + 1..].starts_with(|d: char| d.is_ascii_digit()))
+            })
+    })
+}
+
+/// AC2 (CI): the figures SHA-275 replaced, the drift paragraph and the commit hashes that
+/// dangle after a rebase are gone, and the figures no command rebuilds are labelled
+/// historical.
+#[test]
+fn superseded_figures_are_gone() {
+    let doc = doc();
+    for text in ["Feature-off drift", "861abce", "2152d0c"] {
+        assert!(
+            !doc.contains(text),
+            "docs/benchmarks.md still contains `{text}`"
+        );
+    }
+    // 7,224, 48,412 and 14,772 were replaced too, but are current figures elsewhere
+    // (rp2350 LMS Δ release, rp2350 LMS baseline, nrf52840 `size_digest` size).
+    for n in [
+        "1,488", "4,896", "12,752", "74,376", "74,264", "59,144", "59,152", "14,940", "89,316",
+        "14,132", "73,276", "16,092", "90,356", "73,924", "7,295", "7,228", "5,348", "5,340",
+        "47,272", "54,496", "47,260", "52,608", "55,640", "47,908", "53,248", "7,180", "5,328",
+        "7,192", "5,332", "6,740", "5,136", "6,756", "5,144", "10,200", "9,964", "10,240",
+        "10,004",
+    ] {
+        assert!(
+            !contains_number(&doc, n),
+            "docs/benchmarks.md still quotes the superseded figure {n}"
+        );
+    }
+
+    let historical = normalized(section(&doc, "### Historical figures"));
+    for needle in [
+        "hbs-lms 0.1.1",
+        "lms-signature 0.1.0-rc.2",
+        "43 KB",
+        "57 KB",
+        "156,448 B",
+        "pqm4",
+    ] {
+        assert!(
+            historical.contains(needle),
+            "### Historical figures must name `{needle}`"
+        );
+    }
+    // Each passage quoting a historical figure says so.
+    assert!(
+        normalized(section(&doc, "### Crate choice")).contains("historical planning measurement"),
+        "### Crate choice must label the hbs-lms / lms-signature columns historical"
+    );
+    for (heading, figure) in [
+        ("### Hybrid results", "43 KB"),
+        ("### ML-DSA verify method", "156,448 B"),
+    ] {
+        let passage = section(&doc, heading)
+            .split("\n\n")
+            .flat_map(|p| p.split("\n- "))
+            .find(|p| normalized(p).contains(figure))
+            .unwrap_or_else(|| panic!("{heading} no longer quotes {figure}"));
+        assert!(
+            passage.contains("historical"),
+            "{heading}: the passage quoting {figure} must call it historical"
+        );
+    }
+}
+
+/// AC2: the drift reports name every mismatch (section, row or function, recorded and
+/// measured value) and nothing else.
+#[test]
+fn drift_reports_name_every_mismatch() {
+    let doc = "\n### LMS results\n\nFlash detail:\n\n\
+        | Board / profile | `size_lms_baseline` flash | `size_lms` flash | Δ LMS/HSS |\n\
+        |---|---|---|---|\n\
+        | nrf52840 / release | 47,276 | 54,492 | 7,216 |\n\
+        \n### Static frame detail\n\n\
+        | Bin | Build | Function | nrf52840 | rp2350 |\n\
+        |---|---|---|---|---|\n\
+        | `size_lms` | release | `keelsign_verify::lms::walk` | 144 | 144 |\n\
+        | `size_lms` | release | `sha2::sha256::compress256` | 176 | 176 |\n\
+        | `size_lms` | release | (largest other frame) | 640 | 640 |\n\
+        | `size_verify` | release, `ml-dsa`, stable prologue | `verify_param` ML-DSA-44 (`cmp.w r1, #0x520`) | 97,544 | 97,544 |\n";
+    let section_of = |heading: &str| section(doc, heading).to_owned();
+
+    // Flash: one table, two cells.
+    let table = table_with_header(&section_of("### LMS results"), "| Board / profile |").unwrap();
+    let cells: Vec<FlashCell> = [(1, "size_lms_baseline"), (2, "size_lms")]
+        .map(|(i, bin)| FlashCell {
+            section: "### LMS results".into(),
+            row: table[1][0].clone(),
+            bin: bin.into(),
+            ml_dsa: false,
+            bytes: parse_count(&table[1][i]).unwrap(),
+        })
+        .to_vec();
+    let key = |bin: &str| {
+        (
+            "nrf52840".to_owned(),
+            "release".to_owned(),
+            false,
+            bin.to_owned(),
+        )
+    };
+    let mut measured = BTreeMap::from([
+        (key("size_lms_baseline"), 47_276),
+        (key("size_lms"), 54_492),
+    ]);
+    assert_eq!(compare_flash(&cells, &measured), Vec::<String>::new());
+    measured.insert(key("size_lms"), 54_500);
+    assert_eq!(
+        compare_flash(&cells, &measured),
+        [
+            "### LMS results: row `nrf52840 / release`, column `size_lms` flash: doc 54492, measured 54500"
+        ]
+    );
+    measured.remove(&key("size_lms_baseline"));
+    assert_eq!(
+        compare_flash(&cells, &measured).len(),
+        2,
+        "a missing ELF is reported"
+    );
+
+    // Frames: two named rows and the largest other frame, on both boards.
+    let rows = frame_rows(doc);
+    assert_eq!(rows.len(), 4);
+    assert!(rows[3].stable_prologue && rows[3].frames == [97_544, 97_544]);
+    let frames = |walk: u64, extra: Vec<(u64, String)>| {
+        let mut list = vec![
+            (walk, "keelsign_verify::lms::walk".to_owned()),
+            (176, "sha2::sha256::compress256".to_owned()),
+            (640, "keelsign_verify::lms::lms_verify".to_owned()),
+            (32, "_defmt_acquire".to_owned()),
+        ];
+        list.extend(extra);
+        list
+    };
+    let measured_frames = |nrf: Vec<(u64, String)>, rp: Vec<(u64, String)>| {
+        BTreeMap::from([
+            (
+                (
+                    "nrf52840".to_owned(),
+                    "size_lms".to_owned(),
+                    "release".to_owned(),
+                    false,
+                ),
+                nrf,
+            ),
+            (
+                (
+                    "rp2350".to_owned(),
+                    "size_lms".to_owned(),
+                    "release".to_owned(),
+                    false,
+                ),
+                rp,
+            ),
+        ])
+    };
+    let same = measured_frames(frames(144, vec![]), frames(144, vec![]));
+    assert_eq!(compare_frames(&rows, &same), Vec::<String>::new());
+    let one_off = measured_frames(frames(144, vec![]), frames(152, vec![]));
+    assert_eq!(
+        compare_frames(&rows, &one_off),
+        [
+            "### Static frame detail: `size_lms` release, `keelsign_verify::lms::walk`, rp2350: doc 144, measured 152"
+        ]
+    );
+    // A bigger unnamed frame changes the largest other frame.
+    let bigger = measured_frames(
+        frames(144, vec![(700, "size_lms::__cortex_m_rt_main".to_owned())]),
+        frames(144, vec![]),
+    );
+    assert_eq!(
+        compare_frames(&rows, &bigger),
+        [
+            "### Static frame detail: `size_lms` release, `(largest other frame)`, nrf52840: doc 640, measured 700"
+        ]
+    );
+    // A function cell matching zero or two functions is an error, not a figure.
+    let none = measured_frames(
+        frames(144, vec![])
+            .into_iter()
+            .filter(|(_, n)| !n.contains("walk"))
+            .collect(),
+        frames(144, vec![]),
+    );
+    let report = compare_frames(&rows, &none);
+    assert_eq!(report.len(), 1, "{report:?}");
+    assert!(
+        report[0].contains("`keelsign_verify::lms::walk`, nrf52840: matches no function"),
+        "{report:?}"
+    );
+    let two = measured_frames(
+        frames(
+            144,
+            vec![(96, "keelsign_verify::lms::walk_inner".to_owned())],
+        ),
+        frames(144, vec![]),
+    );
+    let report = compare_frames(&rows, &two);
+    assert_eq!(report.len(), 1, "{report:?}");
+    assert!(
+        report[0].contains("nrf52840: matches 2 functions, lengthen it"),
+        "{report:?}"
+    );
 }
