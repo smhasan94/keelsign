@@ -5,5 +5,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod cli;
 pub mod error;
+pub mod keyfile;
 pub mod keys;

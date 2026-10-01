@@ -27,6 +27,15 @@ const REQUIRED_FILES: [&str; 5] = [
     "src/lib.rs",
 ];
 
+/// Extra files a crate's package must contain: keelsign ships the CLI binary.
+fn extra_required(krate: &str) -> &'static [&'static str] {
+    if krate == "keelsign" {
+        &["src/main.rs"]
+    } else {
+        &[]
+    }
+}
+
 fn read(rel: &str) -> String {
     let path = workspace_root().join(rel);
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
@@ -54,7 +63,7 @@ fn package_contents_have_readme_licences_and_sources() {
                 "{krate}: unexpected file `{file}` in package"
             );
         }
-        for required in &REQUIRED_FILES {
+        for required in REQUIRED_FILES.iter().chain(extra_required(krate)) {
             assert!(
                 files.contains(required),
                 "{krate}: package is missing `{required}`"
