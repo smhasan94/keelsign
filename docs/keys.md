@@ -148,8 +148,10 @@ use unbounded memory and time):
   other KDFs or ciphers are refused: "unsupported encryption scheme; keelsign reads
   PBES2 (scrypt or PBKDF2 with AES-CBC)" (exit code 5).
 - scrypt: N must be a power of two from 2 to 2^20 (1,048,576), 1 ≤ r ≤ 32 and
-  1 ≤ p ≤ 16. keelsign itself writes N = 2^14, r = 8, p = 1.
-- PBKDF2: 1 to 10,000,000 iterations.
+  1 ≤ p ≤ 16, and 128·r·N ≤ 256 MiB (the memory scrypt needs). keelsign itself writes
+  N = 2^14, r = 8, p = 1 (16 MiB), as does `openssl pkcs8 -topk8 -scrypt`.
+- PBKDF2: HMAC-SHA-256 as the PRF (what OpenSSL writes) and 1 to 10,000,000
+  iterations.
 - A parameter outside these ranges is refused with exit code 5, naming the parameter.
 
 The seed, the passphrase and the decoded key documents are held in zeroizing buffers

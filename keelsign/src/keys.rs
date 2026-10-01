@@ -408,6 +408,9 @@ pub const MAX_SCRYPT_R: u16 = 32;
 pub const MAX_SCRYPT_P: u16 = 16;
 /// Largest PBKDF2 iteration count accepted when decrypting.
 pub const MAX_PBKDF2_ITERATIONS: u32 = 10_000_000;
+/// Largest scrypt memory, 128 * r * N bytes, accepted when decrypting (256 MiB; keelsign
+/// writes 16 MiB).
+pub const MAX_SCRYPT_MEMORY: u64 = 256 << 20;
 
 /// The `encryptionAlgorithm` OID and parameters of a DER `EncryptedPrivateKeyInfo`
 /// (`SEQUENCE { AlgorithmIdentifier, OCTET STRING }`), whatever the scheme.
@@ -477,12 +480,26 @@ fn check_kdf_limits(kdf: &pkcs8::pkcs5::pbes2::Kdf) -> Result<(), KeyFileError> 
         if u32::from(r).checked_mul(u32::from(p)).is_none() {
             return Err(out_of_range(format!("scrypt r * p = {r} * {p}")));
         }
+        // N <= 2^20 and r <= 32 here, so this cannot overflow.
+        let memory = 128 * u64::from(r) * n;
+        if memory > MAX_SCRYPT_MEMORY {
+            return Err(KeyFileError::Unsupported(format!(
+                "scrypt needs 128·r·N = {} MiB of memory (r = {r}, N = {n}), more than the \
+                 256 MiB keelsign accepts",
+                memory >> 20
+            )));
+        }
     } else if let Some(pbkdf2) = kdf.pbkdf2() {
         let i = pbkdf2.iteration_count;
         if !(1..=MAX_PBKDF2_ITERATIONS).contains(&i) {
             return Err(out_of_range(format!(
                 "PBKDF2 iteration count {i} (1 to 10,000,000)"
             )));
+        }
+        if pbkdf2.prf != pkcs8::pkcs5::pbes2::Pbkdf2Prf::HmacWithSha256 {
+            return Err(KeyFileError::Unsupported(
+                "unsupported PBKDF2 PRF; keelsign reads HMAC-SHA-256".into(),
+            ));
         }
     } else {
         return Err(KeyFileError::Unsupported(UNSUPPORTED_SCHEME.into()));

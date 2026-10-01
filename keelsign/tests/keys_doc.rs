@@ -73,6 +73,7 @@ fn docs_keys_md_lists_the_oids_and_formats() {
         "--passphrase-file",
         "--passphrase-env",
         "2^20",
+        "128·r·N ≤ 256 MiB",
         "10,000,000",
         "unsupported encryption scheme",
         "zeroizing buffers",

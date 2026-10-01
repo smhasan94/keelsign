@@ -167,7 +167,14 @@ enum ReadError {
 fn read_capped(path: &Path) -> Result<Zeroizing<Vec<u8>>, ReadError> {
     use std::io::Read as _;
     let file = File::open(path).map_err(ReadError::Io)?;
-    let mut contents = Zeroizing::new(Vec::new());
+    // Allocate once (the size plus one byte to detect EOF or an oversized file), so
+    // growing the buffer leaves no unwiped copies of the bytes behind.
+    let len = file
+        .metadata()
+        .map(|m| m.len().min(MAX_INPUT_LEN))
+        .unwrap_or(0);
+    let capacity = usize::try_from(len).unwrap_or(0).saturating_add(1);
+    let mut contents = Zeroizing::new(Vec::with_capacity(capacity));
     file.take(MAX_INPUT_LEN + 1)
         .read_to_end(&mut contents)
         .map_err(ReadError::Io)?;

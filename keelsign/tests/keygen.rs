@@ -660,6 +660,17 @@ fn corrupt_key_file_is_a_clear_error() {
             prf: pkcs8::pkcs5::pbes2::Pbkdf2Prf::HmacWithSha256,
         });
     });
+    let pbkdf2_sha1 = reencode_encrypted(&encrypted_der, |params| {
+        let pkcs8::pkcs5::pbes2::Kdf::Scrypt(scrypt) = &params.kdf else {
+            panic!("keygen writes scrypt");
+        };
+        params.kdf = pkcs8::pkcs5::pbes2::Kdf::Pbkdf2(pkcs8::pkcs5::pbes2::Pbkdf2Params {
+            salt: scrypt.salt,
+            iteration_count: 2048,
+            key_length: None,
+            prf: pkcs8::pkcs5::pbes2::Pbkdf2Prf::HmacWithSha1,
+        });
+    });
     // PBES1 (pbeWithSHA1AndDES-CBC, 1.2.840.113549.1.5.10): patch the last byte of the
     // PBES2 OID (1.2.840.113549.1.5.13).
     let pbes2_oid = [
@@ -741,6 +752,18 @@ fn corrupt_key_file_is_a_clear_error() {
             scrypt(1 << 14, u16::MAX, u16::MAX),
             true,
             "scrypt block size r = 65535",
+        ),
+        (
+            "scrypt-1gib.der",
+            scrypt(1 << 20, 8, 1),
+            true,
+            "scrypt needs 128·r·N = 1024 MiB",
+        ),
+        (
+            "pbkdf2-sha1.der",
+            pbkdf2_sha1,
+            true,
+            "unsupported PBKDF2 PRF; keelsign reads HMAC-SHA-256",
         ),
         (
             "scrypt-p-over-cap.der",
@@ -936,4 +959,35 @@ fn conflicting_passphrase_sources_are_a_usage_error() {
         stderr(&out)
     );
     assert!(!key_path.exists());
+}
+
+#[test]
+fn mldsa_v2_key_with_matching_public_key_loads() {
+    // ML-DSA-44 seed key (seed 0x07 * 32) as PKCS#8 v2 with its own public key.
+    let mut v1 = vec![
+        0x30, 0x34, 0x02, 0x01, 0x00, 0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03,
+        0x04, 0x03, 0x11, 0x04, 0x22, 0x80, 0x20,
+    ];
+    v1.extend_from_slice(&[7u8; 32]);
+    let public = PrivateKey::from_bytes(&v1, None)
+        .expect("v1 seed key")
+        .raw_public_key();
+    assert_eq!(public.len(), 1312);
+    // SEQUENCE (1369) { INTEGER 1, AlgorithmIdentifier, OCTET STRING { [0] seed },
+    // [1] IMPLICIT BIT STRING (1313) { 0 unused bits, public key } }.
+    let mut v2 = vec![0x30, 0x82, 0x05, 0x59, 0x02, 0x01, 0x01];
+    v2.extend_from_slice(&v1[5..]);
+    v2.extend_from_slice(&[0x81, 0x82, 0x05, 0x21, 0x00]);
+    v2.extend_from_slice(&public);
+    assert_eq!(v2.len(), 4 + 0x0559);
+
+    let key = PrivateKey::from_bytes(&v2, None).expect("v2 key with matching public key");
+    assert_eq!(key.raw_public_key(), public);
+
+    let dir = scratch("mldsa_v2_matching");
+    let path = dir.join("v2.der");
+    std::fs::write(&path, &v2).expect("write");
+    let out = keelsign(&[&"pubkey", &"--key", &path, &"--alg", &"ml-dsa-44"]);
+    assert_exit(&out, 0);
+    assert!(stdout(&out).starts_with("-----BEGIN PUBLIC KEY-----\n"));
 }
