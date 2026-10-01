@@ -64,6 +64,8 @@ enum Class {
     NoStd,
     /// The measurement-only `stack-paint` crate: four clippy denies, unsafe at deny.
     NoStdException,
+    /// Host crate: forbid unsafe only.
+    Host,
 }
 
 /// A workspace member probed by these tests.
@@ -104,6 +106,29 @@ const STACK_PAINT: Crate = Crate {
     dir: "benches/stack-paint",
     class: Class::NoStdException,
 };
+
+const KEELSIGN: Crate = Crate {
+    package: "keelsign",
+    dir: "keelsign",
+    class: Class::Host,
+};
+
+const REPO_CHECKS: Crate = Crate {
+    package: "repo-checks",
+    dir: "tools/repo-checks",
+    class: Class::Host,
+};
+
+/// Every workspace member, classified.
+const CRATES: [Crate; 7] = [
+    KEELSIGN_VERIFY,
+    LMS_KAT,
+    POLICY_KAT,
+    MLDSA_KAT,
+    STACK_PAINT,
+    KEELSIGN,
+    REPO_CHECKS,
+];
 
 /// One snippet of code appended to a crate root.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -559,6 +584,10 @@ fn check_case(case: &str, krate: &Crate, probe: Probe) {
     let applicable = match krate.class {
         Class::NoStd => true,
         Class::NoStdException => probe != Probe::UnsafeUnderAllow,
+        Class::Host => matches!(
+            probe,
+            Probe::Control | Probe::Unsafe | Probe::UnsafeUnderAllow
+        ),
     };
     assert!(
         applicable,
@@ -628,6 +657,66 @@ probe_cases! { STACK_PAINT;
     stack_paint_rejects_expect => Expect,
     stack_paint_rejects_slice_indexing => SliceIndexing,
     stack_paint_rejects_unsafe => Unsafe,
+}
+
+probe_cases! { KEELSIGN;
+    keelsign_probe_control_is_clean => Control,
+    keelsign_rejects_unsafe => Unsafe,
+    keelsign_forbids_unsafe_even_with_allow => UnsafeUnderAllow,
+}
+
+probe_cases! { REPO_CHECKS;
+    repo_checks_probe_control_is_clean => Control,
+    repo_checks_rejects_unsafe => Unsafe,
+    repo_checks_forbids_unsafe_even_with_allow => UnsafeUnderAllow,
+}
+
+/// Every workspace member has a class (so it gets probed), and every `no_std` member is
+/// probed as `NoStd` or is the single `stack-paint` exception.
+#[test]
+fn every_workspace_member_is_classified() {
+    let root = workspace_root();
+    let mut members = workspace_members(&read(&root.join("Cargo.toml")));
+    for member in &members {
+        assert!(
+            CRATES.iter().any(|c| c.dir == member),
+            "workspace member `{member}` is not classified in tests/lints.rs `CRATES`; \
+             add it with its class so its lint rules are probed"
+        );
+    }
+    let mut classified: Vec<String> = CRATES.iter().map(|c| c.dir.to_owned()).collect();
+    members.sort();
+    classified.sort();
+    assert_eq!(
+        classified, members,
+        "tests/lints.rs `CRATES` must list exactly the workspace members"
+    );
+
+    let exceptions: Vec<&str> = CRATES
+        .iter()
+        .filter(|c| c.class == Class::NoStdException)
+        .map(|c| c.dir)
+        .collect();
+    assert_eq!(
+        exceptions,
+        ["benches/stack-paint"],
+        "stack-paint is the only no_std crate allowed to deny rather than forbid unsafe_code"
+    );
+
+    for krate in &CRATES {
+        let dir = root.join(krate.dir);
+        let (root_file, _) = crate_root(&dir);
+        let is_no_std = read(&dir.join(root_file))
+            .lines()
+            .any(|l| l.trim() == "#![no_std]");
+        assert!(
+            !is_no_std || matches!(krate.class, Class::NoStd | Class::NoStdException),
+            "{} is `#![no_std]` but classified {:?}; classify it NoStd so the no_std lint \
+             probes run against it",
+            krate.dir,
+            krate.class
+        );
+    }
 }
 
 /// AC1, automated half of TP2: without `[lints] workspace = true` (and with the source
