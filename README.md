@@ -21,6 +21,9 @@ functionality.
 Toolchain, probe setup and flashing the example boards: see [docs/setup.md](docs/setup.md).
 ML-DSA verify benchmarks on the boards (on-target KATs, cycles, stack, flash) and the
 go/no-go decision: see [docs/benchmarks.md](docs/benchmarks.md).
+The image format (keelsign TLVs in the MCUboot TLV area, signing mode, key IDs, hybrid
+Ed25519 layout, sizes and MCUboot compatibility): see
+[docs/image-format.md](docs/image-format.md).
 
 ## Licence
 

@@ -3,9 +3,12 @@
 **Status: pre-release, API unstable.** Not yet usable to verify images. The current
 code holds the trusted-key set (lookup by key ID), the post-quantum signature dispatch
 with typed errors, and the built-in LMS/HSS verifier (RFC 8554, SP 800-208; SHA-256
-and SHA-256/192 with W8, up to two HSS levels) behind `verify_pq`. The keelsign TLV IDs
-are provisional. The ML-DSA backend, TLV-area parsing and image hashing come in later
-releases. The `ml-dsa` feature is off by default.
+and SHA-256/192 with W8, up to two HSS levels) behind `verify_pq`. The image format
+(keelsign TLV IDs `0x4BA0`–`0x4BA3`, the signing mode, key IDs and the hybrid Ed25519
+layout) is specified in
+[docs/image-format.md](https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md).
+The ML-DSA backend, TLV-area parsing and image hashing come in later releases. The
+`ml-dsa` feature is off by default.
 
 `keelsign-verify` will be the `no_std`, heap-free on-device verifier of the keelsign
 post-quantum firmware signing kit: it parses the MCUboot header and TLV area, hashes
