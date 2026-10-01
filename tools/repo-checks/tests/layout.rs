@@ -1,6 +1,6 @@
 //! Filesystem layout checks: licence files, README and CI workflow.
 
-use repo_checks::{PLACEHOLDER_CRATES, workspace_root};
+use repo_checks::{LICENSED_CRATES, workspace_root};
 use std::fs;
 
 fn read(rel: &str) -> String {
@@ -59,7 +59,7 @@ fn ci_workflow_runs_fmt_clippy_test() {
 #[test]
 fn crate_license_copies_match_root() {
     let root = workspace_root();
-    for krate in PLACEHOLDER_CRATES {
+    for krate in LICENSED_CRATES {
         for file in ["LICENSE-APACHE", "LICENSE-MIT"] {
             let root_bytes = fs::read(root.join(file)).expect("read root licence");
             let copy_path = root.join(krate).join(file);

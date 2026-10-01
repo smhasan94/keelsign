@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Crates that are published to crates.io as name-reservation placeholders.
-pub const PLACEHOLDER_CRATES: [&str; 2] = ["keelsign", "keelsign-verify"];
+pub const PLACEHOLDER_CRATES: [&str; 1] = ["keelsign"];
+
+/// Published crates that carry their own copies of the root licence files.
+pub const LICENSED_CRATES: [&str; 2] = ["keelsign", "keelsign-verify"];
 
 /// A standalone embedded example project under `examples/`.
 pub struct Example {
