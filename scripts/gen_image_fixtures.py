@@ -13,13 +13,23 @@ on PATH. Install it into a virtual environment, for example:
   python3 -m venv .venv-imgtool && .venv-imgtool/bin/pip install imgtool==2.4.0
   python3 scripts/gen_image_fixtures.py --imgtool .venv-imgtool/bin/imgtool
 
-The script itself uses the standard library only. The resolved imgtool and cryptography
+The script itself uses the standard library only. It downloads the hsslms sdist and the
+dilithium-py wheel (both pinned by sha256). The resolved imgtool and cryptography
 versions are recorded in MANIFEST.json.
 
 LMS/HSS signatures come from the independent signer hsslms 0.1.3, vendored at run time
 by scripts/gen_lms_vectors.py (pinned sdist sha256, nothing pip-installed) with its
 random source replaced by a per-key SHA-256 counter DRBG, so every run is deterministic.
 Each LMS/HSS image has its own key and uses leaf 0 of it once.
+
+ML-DSA signatures (SHA-44) come from the independent signer dilithium-py 1.4.0, vendored
+at run time from its pinned wheel (sha256 in SOURCES, nothing pip-installed), signing
+pure ML-DSA (FIPS 204 ML-DSA.Sign) over M with the context b"keelsign-mcuboot-image-v1"
+in the deterministic variant (rnd = 0), and verifying each signature it makes. Two TEST
+KEYS, one per parameter set, are derived from fixed public seeds (MLDSA_TEST_KEYS) and
+shared by every image of that set; keelsign-verify/tests/mldsa_images.rs checks every
+committed key and signature byte-for-byte against RustCrypto ml-dsa's deterministic
+signer from the same seed.
 
 The Ed25519 key in keys/ed25519-test-key.pem is a TEST KEY derived from a fixed public
 seed (anyone can recompute it); it must never sign a real image.
@@ -31,13 +41,15 @@ Images (all: header size 0x200, version 1.2.3+4, the same 1,536-byte body):
     TLV 0x10A0, so the digest covers a protected TLV area.
   * keelsign-hybrid-ed25519-lms.bin: imgtool Ed25519 (KEYHASH + ED25519 over the same
     digest) plus the keelsign key ID and an LMS M32_H5 signature.
-  * keelsign-mldsa44.bin, keelsign-mldsa65.bin: length-correct ML-DSA filler signatures
-    (2,420 and 3,309 bytes) and filler public keys: they select and walk correctly but
-    do not verify (`verifiable: false`) until a real ML-DSA signer is pinned.
+  * keelsign-mldsa44.bin, keelsign-mldsa65.bin: ML-DSA-44 / ML-DSA-65 signatures
+    (2,420 and 3,309 bytes) under the ML-DSA test keys (SHA-44).
+  * keelsign-mldsa44-protected-tlvs.bin, keelsign-mldsa65-protected-tlvs.bin (SHA-44):
+    as the two above, plus protected SEC_CNT and vendor TLV 0x10A0, so their M differs
+    (the source of the "signature from another image" mutations).
   * keelsign-dual-pq-invalid.bin: one key ID and two PQ signature TLVs (LMS, then
-    ML-DSA-44 filler); must fail with MultiplePqSignatures.
+    ML-DSA-44); must fail with MultiplePqSignatures.
   * keelsign-hybrid-ed25519-mldsa44.bin (SHA-46): imgtool Ed25519 plus an ML-DSA-44
-    filler half (real Ed25519, `verifiable: false`).
+    half.
   * keelsign-hybrid-protected-tlvs.bin (SHA-46): the hybrid layout with protected
     SEC_CNT 7 and vendor TLV 0x10A0.
   * keelsign-hybrid-reserved-tlv-protected.bin (SHA-46): the hybrid layout plus imgtool
@@ -46,22 +58,29 @@ Images (all: header size 0x200, version 1.2.3+4, the same 1,536-byte body):
 
 Policy mutations (SHA-46): deterministic edits of keelsign-hybrid-ed25519-lms.bin (and
 one of keelsign-hybrid-protected-tlvs.bin) as regenerated in the same run, listed in
-MUTATIONS with what they change. They are not re-signed: imgtool would reject most of
+MUTATIONS with what they change. SHA-44 adds the ML-DSA mutations (tampered body and
+protected TLV, with and without the SHA256 TLV recomputed, tampered, malformed and
+truncated signatures, an untrusted key ID, a signature from another image, and the PQ
+half stripped from the ML-DSA hybrid image). They are not re-signed: imgtool would reject most of
 them (`imgtool_verify: false`), and the manifest records `derived_from` and `mutation`.
 The key fields are copied from the base so tests can build its trusted key.
 
 Policy expectations (SHA-46): every output's MANIFEST.json entry has a `policy` object,
 the verdict of `keelsign_verify::verify` under each policy (`classical_only`,
 `pq_only`, `hybrid`), with `DefaultBackend::new()`, the image's own PQ key (if any) and
-the Ed25519 test key trusted, and the `ed25519` feature on. The strings are the table
+the Ed25519 test key trusted, and the `ed25519` and `ml-dsa` features on. Where the
+verdict differs without the `ml-dsa` feature (SHA-44: every cell whose PQ half reaches
+the ML-DSA backend becomes UnsupportedAlgorithm), the entry also has a
+`policy_without_ml_dsa` object (all three cells). The strings are the table
 POLICY_CODES; docs/policy.md's matrix, keelsign-verify/tests/policy_matrix.rs and
 benches/policy-kat are checked against them.
 
-policy-matrix.bin ("KSPM v1", little-endian) is the index benches/policy-kat runs on
-the boards: b"KSPM", u16 version (1), u16 count, then per case u8 name_len, name (UTF-8,
+policy-matrix.bin ("KSPM v2", little-endian) is the index benches/policy-kat runs on
+the boards: b"KSPM", u16 version (2), u16 count, then per case u8 name_len, name (UTF-8,
 the manifest name), u8 pq_alg (0 none, 1 MlDsa44, 2 MlDsa65, 3 LmsHss), u16 pk_len,
-the PQ public key, and one u8 expectation code per policy (ClassicalOnly, PqOnly,
-Hybrid): the index of the verdict string in POLICY_CODES. It holds every output with
+the PQ public key, three u8 expectation codes with the `ml-dsa` feature on and three
+with it off (ClassicalOnly, PqOnly, Hybrid each): the index of the verdict string in
+POLICY_CODES. It holds every output with
 `in_policy_matrix_bin: true` (all but the 200 KB image), sorted by name, and no image
 bytes.
 
@@ -112,6 +131,7 @@ import argparse
 import base64
 import hashlib
 import importlib.util
+import io
 import json
 import math
 import re
@@ -120,6 +140,8 @@ import struct
 import subprocess
 import sys
 import tempfile
+import urllib.request
+import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -154,6 +176,43 @@ PROTECTED_VENDOR_VALUE = b"keelsign-protected-vendor-tlv"
 
 MLDSA44_PK_LEN, MLDSA44_SIG_LEN = 1312, 2420
 MLDSA65_PK_LEN, MLDSA65_SIG_LEN = 1952, 3309
+
+# The FIPS 204 context string of every keelsign ML-DSA signature (keelsign-verify
+# src/tlv.rs MLDSA_CONTEXT; checked against it in keelsign_tlv_ids()).
+MLDSA_CONTEXT = b"keelsign-mcuboot-image-v1"
+
+# The independent ML-DSA signer (SHA-44): extracted from the pinned wheel into a temp dir
+# and imported; nothing is installed.
+DILITHIUM_SOURCE = {
+    "package": "dilithium-py==1.4.0",
+    "url": "https://files.pythonhosted.org/packages/68/92/"
+    "3e242ff1e2d9e459c599caef9127708b1f92606f38a9031a4b45549b427c/dilithium_py-1.4.0-py3-none-any.whl",
+    "sha256": "dda3ae43e6e3d212ae1fe1b30d5b6dffe5e25a1f389d1fea26faad4afdc33ff8",
+    "files": [
+        "dilithium_py/__init__.py",
+        "dilithium_py/ml_dsa/__init__.py",
+        "dilithium_py/ml_dsa/ml_dsa.py",
+        "dilithium_py/ml_dsa/default_parameters.py",
+        "dilithium_py/ml_dsa/hash_ml_dsa.py",
+        "dilithium_py/modules/__init__.py",
+        "dilithium_py/modules/modules.py",
+        "dilithium_py/modules/modules_generic.py",
+        "dilithium_py/polynomials/__init__.py",
+        "dilithium_py/polynomials/polynomials.py",
+        "dilithium_py/polynomials/polynomials_generic.py",
+        "dilithium_py/shake/shake_wrapper.py",
+        "dilithium_py/utilities/__init__.py",
+        "dilithium_py/utilities/utils.py",
+    ],
+}
+
+# The ML-DSA TEST KEYS (SHA-44): the FIPS 204 seed xi of each is SHA-256 of a fixed public
+# label, so anyone can recompute them. They must never sign a real image.
+MLDSA_TEST_KEYS = {
+    "mldsa44": "keelsign-image-fixture-mldsa44-test-key",
+    "mldsa65": "keelsign-image-fixture-mldsa65-test-key",
+}
+MLDSA_ALGORITHMS = {"mldsa44": "MlDsa44", "mldsa65": "MlDsa65"}
 
 # PKCS #8 / SubjectPublicKeyInfo prefixes for Ed25519 (RFC 8410).
 ED25519_PKCS8_PREFIX = bytes.fromhex("302e020100300506032b657004220420")
@@ -224,23 +283,30 @@ IMAGES = [
     ("keelsign-hybrid-ed25519-lms.bin",
      "hybrid: imgtool Ed25519 (KEYHASH + ED25519) plus LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, HSS L=1",
      ["lms"], LMS_M32_H5, False, True, "Ok"),
-    ("keelsign-mldsa44.bin", "ML-DSA-44 filler signature and public key (length-correct, does not verify)",
-     ["mldsa44"], None, False, False, "UnsupportedAlgorithm"),
-    ("keelsign-mldsa65.bin", "ML-DSA-65 filler signature and public key (length-correct, does not verify)",
-     ["mldsa65"], None, False, False, "UnsupportedAlgorithm"),
+    ("keelsign-mldsa44.bin", "ML-DSA-44 signature (pure, keelsign context) under the ML-DSA-44 test key",
+     ["mldsa44"], None, False, False, "Ok"),
+    ("keelsign-mldsa65.bin", "ML-DSA-65 signature (pure, keelsign context) under the ML-DSA-65 test key",
+     ["mldsa65"], None, False, False, "Ok"),
     ("keelsign-dual-pq-invalid.bin",
-     "invalid: one key ID and two PQ signature TLVs (LMS M32_H5, then ML-DSA-44 filler)",
+     "invalid: one key ID and two PQ signature TLVs (LMS M32_H5, then ML-DSA-44)",
      ["lms", "mldsa44"], LMS_M32_H5, False, False, "MultiplePqSignatures"),
     # SHA-46 policy matrix.
     ("keelsign-hybrid-ed25519-mldsa44.bin",
-     "hybrid: imgtool Ed25519 (KEYHASH + ED25519) plus an ML-DSA-44 filler signature (does not verify)",
-     ["mldsa44"], None, False, True, "UnsupportedAlgorithm"),
+     "hybrid: imgtool Ed25519 (KEYHASH + ED25519) plus an ML-DSA-44 signature under the ML-DSA-44 test key",
+     ["mldsa44"], None, False, True, "Ok"),
     ("keelsign-hybrid-protected-tlvs.bin",
      "hybrid Ed25519 + LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, HSS L=1, with protected SEC_CNT and vendor TLV 0x10A0",
      ["lms"], LMS_M32_H5, True, True, "Ok"),
     ("keelsign-hybrid-reserved-tlv-protected.bin",
      "invalid: hybrid Ed25519 + LMS M32_H5 with a keelsign key-ID-typed TLV 0x4BA0 in the protected area (imgtool --custom-tlv)",
      ["lms"], LMS_M32_H5, False, True, "Ok"),
+    # SHA-44: ML-DSA over a different M (protected TLVs), the foreign-signature source.
+    ("keelsign-mldsa44-protected-tlvs.bin",
+     "ML-DSA-44 under the ML-DSA-44 test key, with protected SEC_CNT and vendor TLV 0x10A0",
+     ["mldsa44"], None, True, False, "Ok"),
+    ("keelsign-mldsa65-protected-tlvs.bin",
+     "ML-DSA-65 under the ML-DSA-65 test key, with protected SEC_CNT and vendor TLV 0x10A0",
+     ["mldsa65"], None, True, False, "Ok"),
 ]
 
 # Extra imgtool `--custom-tlv` TLVs (protected area) per image (SHA-46).
@@ -340,8 +406,73 @@ def _duplicate_protected_sec_cnt(image):
     image["prot_size"] = size
 
 
-# name, base, mutation, description (SHA-46). Deterministic edits of the base image as
-# regenerated in the same run; nothing is re-signed.
+def _flip_protected_value(kind, at):
+    def mutate(image):
+        tlvs = image["protected"]
+        i = _tlv_index(tlvs, kind)
+        value = bytearray(tlvs[i][1])
+        value[at] ^= 0x01
+        tlvs[i] = (kind, bytes(value))
+    return mutate
+
+
+def _set_last_byte(kind, byte):
+    def mutate(image):
+        tlvs = image["unprotected"]
+        i = _tlv_index(tlvs, kind)
+        value = bytearray(tlvs[i][1])
+        if value[-1] == byte:
+            sys.exit(f"mutation: TLV {kind:#06x} already ends in {byte:#04x}")
+        value[-1] = byte
+        tlvs[i] = (kind, bytes(value))
+    return mutate
+
+
+def _remove_all(*kinds):
+    def mutate(image):
+        for kind in kinds:
+            _remove(kind)(image)
+    return mutate
+
+
+def _rehash(image):
+    """Recompute the SHA256 TLV over the (mutated) header, body and protected area."""
+    data = encode_image(image)
+    tlvs = image["unprotected"]
+    tlvs[_tlv_index(tlvs, TLV_SHA256)] = (TLV_SHA256, digest_of(data, image))
+
+
+def _then(*mutations):
+    def mutate(image, outputs):
+        for m in mutations:
+            m(image, outputs) if getattr(m, "needs_outputs", False) else m(image)
+    mutate.needs_outputs = True
+    return mutate
+
+
+def _replace_value_from(source, kind):
+    """The TLV `kind` replaced by the same TLV of `source` (a signature from another image
+    under the same key, over another M)."""
+    def mutate(image, outputs):
+        tlvs = image["unprotected"]
+        theirs = decode_image(outputs[source])["unprotected"]
+        value = theirs[_tlv_index(theirs, kind)][1]
+        i = _tlv_index(tlvs, kind)
+        if tlvs[i][1] == value:
+            sys.exit(f"mutation: {source} has the same TLV {kind:#06x}")
+        tlvs[i] = (kind, value)
+    mutate.needs_outputs = True
+    return mutate
+
+
+MLDSA44_BASE = "keelsign-mldsa44.bin"
+MLDSA65_BASE = "keelsign-mldsa65.bin"
+MLDSA44_PROTECTED_BASE = "keelsign-mldsa44-protected-tlvs.bin"
+MLDSA65_PROTECTED_BASE = "keelsign-mldsa65-protected-tlvs.bin"
+MLDSA_HYBRID_BASE = "keelsign-hybrid-ed25519-mldsa44.bin"
+
+# name, base, mutation, description (SHA-46, SHA-44). Deterministic edits of the base
+# image as regenerated in the same run; nothing is re-signed.
 MUTATIONS = [
     ("keelsign-hybrid-bad-ed25519.bin", HYBRID_BASE, _flip_value(TLV_ED25519, 0),
      "ED25519 TLV value byte 0 ^= 0x01"),
@@ -379,6 +510,43 @@ MUTATIONS = [
      "ih_flags |= IMAGE_F_NON_BOOTABLE (0x10)"),
     ("keelsign-hybrid-two-sec-cnt.bin", HYBRID_PROTECTED_BASE, _duplicate_protected_sec_cnt,
      "protected SEC_CNT duplicated (ih_protect_tlv_size and it_tlv_tot re-encoded)"),
+    # SHA-44: ML-DSA negatives (TP2) and the stripped hybrid (TP3).
+    ("keelsign-mldsa44-bad-body.bin", MLDSA44_BASE, _flip_body,
+     "body byte 0 ^= 0x01"),
+    ("keelsign-mldsa44-bad-body-rehashed.bin", MLDSA44_BASE, _then(_flip_body, _rehash),
+     "body byte 0 ^= 0x01, SHA256 TLV recomputed"),
+    ("keelsign-mldsa44-bad-protected.bin", MLDSA44_PROTECTED_BASE, _flip_protected_value(TLV_SEC_CNT, 0),
+     "protected SEC_CNT value byte 0 ^= 0x01"),
+    ("keelsign-mldsa44-bad-protected-rehashed.bin", MLDSA44_PROTECTED_BASE,
+     _then(_flip_protected_value(TLV_SEC_CNT, 0), _rehash),
+     "protected SEC_CNT value byte 0 ^= 0x01, SHA256 TLV recomputed"),
+    ("keelsign-mldsa44-bad-sig.bin", MLDSA44_BASE, _flip_value(0x4BA1, 0),
+     "ML-DSA-44 signature TLV (0x4BA1) byte 0 (c~) ^= 0x01"),
+    ("keelsign-mldsa44-bad-hint.bin", MLDSA44_BASE, _set_last_byte(0x4BA1, 0xFF),
+     "ML-DSA-44 signature TLV (0x4BA1) last byte := 0xFF (hint count > omega)"),
+    ("keelsign-mldsa44-short-sig.bin", MLDSA44_BASE, _truncate(0x4BA1, MLDSA44_SIG_LEN - 1),
+     "ML-DSA-44 signature TLV (0x4BA1) truncated to 2,419 bytes"),
+    ("keelsign-mldsa44-bad-key-id.bin", MLDSA44_BASE, _flip_value(0x4BA0, 0),
+     "key-ID TLV (0x4BA0) byte 0 ^= 0x01"),
+    ("keelsign-mldsa44-foreign-sig.bin", MLDSA44_BASE, _replace_value_from(MLDSA44_PROTECTED_BASE, 0x4BA1),
+     f"ML-DSA-44 signature TLV (0x4BA1) replaced by the one of {MLDSA44_PROTECTED_BASE} (same key, other M)"),
+    ("keelsign-mldsa65-bad-body-rehashed.bin", MLDSA65_BASE, _then(_flip_body, _rehash),
+     "body byte 0 ^= 0x01, SHA256 TLV recomputed"),
+    ("keelsign-mldsa65-bad-protected-rehashed.bin", MLDSA65_PROTECTED_BASE,
+     _then(_flip_protected_value(TLV_SEC_CNT, 0), _rehash),
+     "protected SEC_CNT value byte 0 ^= 0x01, SHA256 TLV recomputed"),
+    ("keelsign-mldsa65-bad-sig.bin", MLDSA65_BASE, _flip_value(0x4BA2, 0),
+     "ML-DSA-65 signature TLV (0x4BA2) byte 0 (c~) ^= 0x01"),
+    ("keelsign-mldsa65-bad-hint.bin", MLDSA65_BASE, _set_last_byte(0x4BA2, 0xFF),
+     "ML-DSA-65 signature TLV (0x4BA2) last byte := 0xFF (hint count > omega)"),
+    ("keelsign-mldsa65-short-sig.bin", MLDSA65_BASE, _truncate(0x4BA2, MLDSA65_SIG_LEN - 1),
+     "ML-DSA-65 signature TLV (0x4BA2) truncated to 3,308 bytes"),
+    ("keelsign-mldsa65-foreign-sig.bin", MLDSA65_BASE, _replace_value_from(MLDSA65_PROTECTED_BASE, 0x4BA2),
+     f"ML-DSA-65 signature TLV (0x4BA2) replaced by the one of {MLDSA65_PROTECTED_BASE} (same key, other M)"),
+    ("keelsign-hybrid-mldsa44-missing-pq.bin", MLDSA_HYBRID_BASE, _remove(0x4BA1),
+     "ML-DSA-44 signature TLV (0x4BA1) removed"),
+    ("keelsign-hybrid-mldsa44-stripped-pq.bin", MLDSA_HYBRID_BASE, _remove_all(0x4BA0, 0x4BA1),
+     "key-ID TLV (0x4BA0) and ML-DSA-44 signature TLV (0x4BA1) removed: a plain imgtool Ed25519 image"),
 ]
 
 # The verdict strings of the policy matrix, numbered: the expectation codes of
@@ -408,6 +576,9 @@ POLICY_CODES = [
     "Image(MultipleSha256Tlvs)",
     "Image(MultipleSecurityCounters)",
     "Image(DigestMismatch)",
+    # SHA-44 (appended, so the codes above keep their numbers).
+    "MalformedSignature",
+    "KeyNotTrusted",
 ]
 
 POLICIES = ("classical_only", "pq_only", "hybrid")
@@ -427,23 +598,26 @@ _ED_ONLY_GOLDEN = _cells("Ok", "MissingPqSignature", "MissingPqSignature")
 _OTHER_GOLDEN = _cells("Ed25519(Missing)", "MissingPqSignature", "Ed25519(Missing)")
 _PQ_ONLY_LMS = _cells("Ed25519(Missing)", "Ok", "Ed25519(Missing)")
 
+_PQ_ONLY_OK = _PQ_ONLY_LMS
+
+
+def _pq_only(verdict):
+    return _cells("Ed25519(Missing)", verdict, "Ed25519(Missing)")
+
+
 # The expected verify verdicts of every output under (ClassicalOnly, PqOnly, Hybrid):
 # DefaultBackend::new(), the image's own PQ key (if any) and the Ed25519 test key
-# trusted, the `ed25519` feature on. The ML-DSA halves are fillers until SHA-44, and
-# DefaultBackend answers ML-DSA with UnsupportedAlgorithm whether or not `ml-dsa` is on.
+# trusted, the `ed25519` and `ml-dsa` features on (the host test configuration).
 POLICY = {
     "keelsign-lms-m32-h5.bin": _PQ_ONLY_LMS,
     "keelsign-hss2-m32-h5h5.bin": _PQ_ONLY_LMS,
     "keelsign-lms-protected-tlvs.bin": _PQ_ONLY_LMS,
     "keelsign-hybrid-ed25519-lms.bin": _all("Ok"),
-    "keelsign-mldsa44.bin": _cells("Ed25519(Missing)", "UnsupportedAlgorithm(MlDsa44)",
-                                   "Ed25519(Missing)"),
-    "keelsign-mldsa65.bin": _cells("Ed25519(Missing)", "UnsupportedAlgorithm(MlDsa65)",
-                                   "Ed25519(Missing)"),
+    "keelsign-mldsa44.bin": _PQ_ONLY_OK,
+    "keelsign-mldsa65.bin": _PQ_ONLY_OK,
     "keelsign-dual-pq-invalid.bin": _cells("Ed25519(Missing)", "MultiplePqSignatures",
                                            "Ed25519(Missing)"),
-    "keelsign-hybrid-ed25519-mldsa44.bin": _cells("Ok", "UnsupportedAlgorithm(MlDsa44)",
-                                                  "UnsupportedAlgorithm(MlDsa44)"),
+    "keelsign-hybrid-ed25519-mldsa44.bin": _all("Ok"),
     "keelsign-hybrid-protected-tlvs.bin": _all("Ok"),
     "keelsign-hybrid-reserved-tlv-protected.bin": _all("Image(KeelsignTlvProtected(0x4BA0))"),
     "keelsign-hybrid-bad-ed25519.bin": _cells("Ed25519(SignatureInvalid)", "Ok",
@@ -472,7 +646,57 @@ POLICY = {
     "mcuboot-ed25519-padded.bin": _ED_ONLY_GOLDEN,
     "rejected/mcuboot-ed25519-bigendian.bin": _all("Parse(BadMagic)"),
     "mcuboot-ed25519-200k.bin": _ED_ONLY_GOLDEN,
+    # SHA-44.
+    "keelsign-mldsa44-protected-tlvs.bin": _PQ_ONLY_OK,
+    "keelsign-mldsa65-protected-tlvs.bin": _PQ_ONLY_OK,
+    "keelsign-mldsa44-bad-body.bin": _all("Image(DigestMismatch)"),
+    "keelsign-mldsa44-bad-body-rehashed.bin": _pq_only("SignatureInvalid"),
+    "keelsign-mldsa44-bad-protected.bin": _all("Image(DigestMismatch)"),
+    "keelsign-mldsa44-bad-protected-rehashed.bin": _pq_only("SignatureInvalid"),
+    "keelsign-mldsa44-bad-sig.bin": _pq_only("SignatureInvalid"),
+    "keelsign-mldsa44-bad-hint.bin": _pq_only("MalformedSignature"),
+    "keelsign-mldsa44-short-sig.bin": _pq_only("MalformedSignature"),
+    "keelsign-mldsa44-bad-key-id.bin": _pq_only("KeyNotTrusted"),
+    "keelsign-mldsa44-foreign-sig.bin": _pq_only("SignatureInvalid"),
+    "keelsign-mldsa65-bad-body-rehashed.bin": _pq_only("SignatureInvalid"),
+    "keelsign-mldsa65-bad-protected-rehashed.bin": _pq_only("SignatureInvalid"),
+    "keelsign-mldsa65-bad-sig.bin": _pq_only("SignatureInvalid"),
+    "keelsign-mldsa65-bad-hint.bin": _pq_only("MalformedSignature"),
+    "keelsign-mldsa65-short-sig.bin": _pq_only("MalformedSignature"),
+    "keelsign-mldsa65-foreign-sig.bin": _pq_only("SignatureInvalid"),
+    "keelsign-hybrid-mldsa44-missing-pq.bin": _cells("Ok", "MissingPqSignature", "MissingPqSignature"),
+    "keelsign-hybrid-mldsa44-stripped-pq.bin": _cells("Ok", "MissingPqSignature", "MissingPqSignature"),
 }
+
+_UA44 = "UnsupportedAlgorithm(MlDsa44)"
+_UA65 = "UnsupportedAlgorithm(MlDsa65)"
+
+# The cells that differ without the `ml-dsa` feature (SHA-44): the dispatcher answers
+# UnsupportedAlgorithm before any backend runs, so every cell whose PQ half reaches the
+# ML-DSA backend changes; every other cell is the same as in POLICY. Checked against that
+# rule by check_policy_without_ml_dsa().
+POLICY_WITHOUT_ML_DSA = {
+    "keelsign-mldsa44.bin": _pq_only(_UA44),
+    "keelsign-mldsa65.bin": _pq_only(_UA65),
+    "keelsign-mldsa44-protected-tlvs.bin": _pq_only(_UA44),
+    "keelsign-mldsa65-protected-tlvs.bin": _pq_only(_UA65),
+    "keelsign-hybrid-ed25519-mldsa44.bin": _cells("Ok", _UA44, _UA44),
+    "keelsign-mldsa44-bad-body-rehashed.bin": _pq_only(_UA44),
+    "keelsign-mldsa44-bad-protected-rehashed.bin": _pq_only(_UA44),
+    "keelsign-mldsa44-bad-sig.bin": _pq_only(_UA44),
+    "keelsign-mldsa44-bad-hint.bin": _pq_only(_UA44),
+    "keelsign-mldsa44-short-sig.bin": _pq_only(_UA44),
+    "keelsign-mldsa44-foreign-sig.bin": _pq_only(_UA44),
+    "keelsign-mldsa65-bad-body-rehashed.bin": _pq_only(_UA65),
+    "keelsign-mldsa65-bad-protected-rehashed.bin": _pq_only(_UA65),
+    "keelsign-mldsa65-bad-sig.bin": _pq_only(_UA65),
+    "keelsign-mldsa65-bad-hint.bin": _pq_only(_UA65),
+    "keelsign-mldsa65-short-sig.bin": _pq_only(_UA65),
+    "keelsign-mldsa65-foreign-sig.bin": _pq_only(_UA65),
+}
+
+# The verdicts only the ML-DSA backend gives (with the dispatcher's checks passed).
+ML_DSA_BACKEND_VERDICTS = {"Ok", "SignatureInvalid", "MalformedSignature"}
 
 # Outputs left out of policy-matrix.bin (the on-target index): the 200 KB image, which
 # the SHA-42 board test already reads from flash.
@@ -498,6 +722,9 @@ def keelsign_tlv_ids():
     key_id_len = re.search(r"pub const KEY_ID_LEN: usize = (\d+);", text)
     if not key_id_len:
         sys.exit(f"{TLV_RS}: no KEY_ID_LEN")
+    context = re.search(r'pub const MLDSA_CONTEXT: &\[u8\] = b"([^"]*)";', text)
+    if not context or context.group(1).encode() != MLDSA_CONTEXT:
+        sys.exit(f"{TLV_RS}: MLDSA_CONTEXT is not {MLDSA_CONTEXT!r}")
     return ids, int(key_id_len.group(1))
 
 
@@ -721,8 +948,51 @@ def write_ed25519_key(out_dir):
     return path
 
 
-def filler(lms, label, n):
-    return lms.Drbg("image-fixture-filler:" + label)(n)
+def fetch_dilithium():
+    url = DILITHIUM_SOURCE["url"]
+    with urllib.request.urlopen(url, timeout=120) as response:
+        data = response.read()
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != DILITHIUM_SOURCE["sha256"]:
+        sys.exit(f"sha256 mismatch for {url}: got {digest}, expected {DILITHIUM_SOURCE['sha256']}")
+    return data
+
+
+def vendor_dilithium(wheel, tmp_dir):
+    """Extracts the ML-DSA modules of the dilithium-py wheel into tmp_dir/dilithium-py and
+    imports them (the optional `xoflib` is not needed: hashlib SHAKE gives the same output)."""
+    root = tmp_dir / "dilithium-py"
+    with zipfile.ZipFile(io.BytesIO(wheel)) as wheel_zip:
+        for rel in DILITHIUM_SOURCE["files"]:
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(wheel_zip.read(rel))
+    sys.path.insert(0, str(root))
+    module = importlib.import_module("dilithium_py.ml_dsa")
+    return {"mldsa44": module.ML_DSA_44, "mldsa65": module.ML_DSA_65}
+
+
+def mldsa_test_key(dilithium, kind):
+    """(seed, public key, secret key) of the ML-DSA test key of `kind`."""
+    seed = hashlib.sha256(MLDSA_TEST_KEYS[kind].encode()).digest()
+    pk, sk = dilithium[kind].key_derive(seed)
+    return seed, pk, sk
+
+
+def mldsa_sign(dilithium, kind, m):
+    """(public key, signature) of the ML-DSA test key of `kind` over `m`: pure ML-DSA
+    (FIPS 204 ML-DSA.Sign, deterministic variant) with MLDSA_CONTEXT, self-verified."""
+    _seed, pk, sk = mldsa_test_key(dilithium, kind)
+    sig = dilithium[kind].sign(sk, m, ctx=MLDSA_CONTEXT, deterministic=True)
+    pk_len, sig_len = {"mldsa44": (MLDSA44_PK_LEN, MLDSA44_SIG_LEN),
+                       "mldsa65": (MLDSA65_PK_LEN, MLDSA65_SIG_LEN)}[kind]
+    if (len(pk), len(sig)) != (pk_len, sig_len):
+        sys.exit(f"dilithium-py {kind}: unexpected lengths {len(pk)} / {len(sig)}")
+    if not dilithium[kind].verify(pk, m, sig, ctx=MLDSA_CONTEXT):
+        sys.exit(f"dilithium-py does not verify its own {kind} signature")
+    if dilithium[kind].verify(pk, m, sig, ctx=b""):
+        sys.exit(f"dilithium-py {kind}: the signature verifies without the context")
+    return pk, sig
 
 
 # Serialises a key from its numbers as unencrypted PKCS #8 PEM. Runs under imgtool's
@@ -825,7 +1095,10 @@ def generate(out_dir, imgtool, resign=False):
         "generator": "scripts/gen_image_fixtures.py",
         "format": "MCUboot image (docs/design.md) with keelsign TLVs in the unprotected area: docs/image-format.md",
         "tools": tools,
-        "sources": {"hsslms": {**lms.SOURCES["hsslms"], "url": lms.raw_url(lms.SOURCES["hsslms"])}},
+        "sources": {
+            "hsslms": {**lms.SOURCES["hsslms"], "url": lms.raw_url(lms.SOURCES["hsslms"])},
+            "dilithium-py": dict(DILITHIUM_SOURCE),
+        },
         "tlv_ids": {name: f"{value:#06x}" for name, value in sorted(ids.items())},
         "image": {
             "header_size": HEADER_SIZE,
@@ -852,6 +1125,18 @@ def generate(out_dir, imgtool, resign=False):
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         hsslms = lms.vendor_hsslms(lms.fetch("hsslms"), tmp)
+        dilithium = vendor_dilithium(fetch_dilithium(), tmp)
+        for kind, label in MLDSA_TEST_KEYS.items():
+            seed, pk, _sk = mldsa_test_key(dilithium, kind)
+            manifest["keys"][f"mldsa-test-key:{kind}"] = {
+                "note": "TEST KEY from a fixed public seed; never use for real images",
+                "algorithm": MLDSA_ALGORITHMS[kind],
+                "seed_label": label,
+                "seed_hex": seed.hex(),
+                "public_key_hex": pk.hex(),
+                "sha256": hashlib.sha256(pk).hexdigest(),
+                "key_id_hex": hashlib.sha256(pk).digest()[:key_id_len].hex(),
+            }
         for name, description, pq, lms_levels, protected, ed25519, expect in IMAGES:
             stem = name.removesuffix(".bin")
             signed = imgtool_sign(imgtool, tmp, stem, body, protected, key_path if ed25519 else None,
@@ -875,13 +1160,10 @@ def generate(out_dir, imgtool, resign=False):
                     signatures.append((ids["TLV_LMS_HSS_SIG"], sig))
                     this = (pk, "LmsHss")
                 else:
-                    pk_len, sig_len, tlv = {
-                        "mldsa44": (MLDSA44_PK_LEN, MLDSA44_SIG_LEN, "TLV_MLDSA44_SIG"),
-                        "mldsa65": (MLDSA65_PK_LEN, MLDSA65_SIG_LEN, "TLV_MLDSA65_SIG"),
-                    }[kind]
-                    pk = filler(lms, f"{stem}:{kind}:pk", pk_len)
-                    signatures.append((ids[tlv], filler(lms, f"{stem}:{kind}:sig", sig_len)))
-                    this = (pk, {"mldsa44": "MlDsa44", "mldsa65": "MlDsa65"}[kind])
+                    tlv = {"mldsa44": "TLV_MLDSA44_SIG", "mldsa65": "TLV_MLDSA65_SIG"}[kind]
+                    pk, sig = mldsa_sign(dilithium, kind, m)
+                    signatures.append((ids[tlv], sig))
+                    this = (pk, MLDSA_ALGORITHMS[kind])
                 if public_key is None:
                     public_key, algorithm = this
             key_id = hashlib.sha256(public_key).digest()[:key_id_len]
@@ -906,7 +1188,7 @@ def generate(out_dir, imgtool, resign=False):
                 "bytes": len(data),
                 "sha256": hashlib.sha256(data).hexdigest(),
                 "algorithm": algorithm,
-                "verifiable": all(kind == "lms" for kind in pq),
+                "verifiable": True,
                 "expect_verify_pq": expect,
                 "ed25519": ed25519,
                 "digest_hex": m.hex(),
@@ -929,10 +1211,13 @@ def generate(out_dir, imgtool, resign=False):
 
 
 def generate_mutations(out_dir, outputs, manifest):
-    """The SHA-46 policy mutations of the hybrid images, from the bytes written in this run."""
+    """The SHA-46 / SHA-44 policy mutations, from the bytes written in this run."""
     for name, base, mutate, description in MUTATIONS:
         image = decode_image(outputs[base])
-        mutate(image)
+        if getattr(mutate, "needs_outputs", False):
+            mutate(image, outputs)
+        else:
+            mutate(image)
         data = encode_image(image)
         decoded = decode_image(data)
         if data == outputs[base]:
@@ -959,52 +1244,99 @@ def generate_mutations(out_dir, outputs, manifest):
         }
 
 
+def check_policy_without_ml_dsa(outputs):
+    """POLICY_WITHOUT_ML_DSA follows the rule: without the `ml-dsa` feature, a cell
+    differs exactly when its policy needs the PQ half, the image's PQ key is ML-DSA and the
+    verdict with the feature comes from the ML-DSA backend; it is then
+    UnsupportedAlgorithm(<that algorithm>)."""
+    for name, entry in sorted(outputs.items()):
+        on = POLICY[name]
+        algorithm = entry.get("algorithm")
+        derived = {}
+        for p in POLICIES:
+            reaches = (p != "classical_only" and algorithm in ("MlDsa44", "MlDsa65")
+                       and on[p] in ML_DSA_BACKEND_VERDICTS)
+            derived[p] = f"UnsupportedAlgorithm({algorithm})" if reaches else on[p]
+        listed = POLICY_WITHOUT_ML_DSA.get(name)
+        if (listed if listed is not None else on) != derived:
+            sys.exit(f"{name}: POLICY_WITHOUT_ML_DSA {listed} does not follow the rule ({derived})")
+        if listed is not None and listed == on:
+            sys.exit(f"{name}: POLICY_WITHOUT_ML_DSA lists cells equal to POLICY")
+
+
 def add_policy(out_dir, manifest):
-    """The `policy` cells of every output and policy-matrix.bin (SHA-46)."""
+    """The `policy` (and `policy_without_ml_dsa`) cells of every output and
+    policy-matrix.bin (SHA-46, SHA-44)."""
     outputs = manifest["outputs"]
     if set(POLICY) != set(outputs):
         sys.exit(f"POLICY and the outputs differ: {sorted(set(POLICY) ^ set(outputs))}")
+    if not set(POLICY_WITHOUT_ML_DSA) <= set(outputs):
+        sys.exit(f"POLICY_WITHOUT_ML_DSA names unknown outputs: {sorted(set(POLICY_WITHOUT_ML_DSA) - set(outputs))}")
+    check_policy_without_ml_dsa(outputs)
+    # The ML-DSA test key is the same in every image of its set.
+    for kind, algorithm in MLDSA_ALGORITHMS.items():
+        key = manifest["keys"][f"mldsa-test-key:{kind}"]["public_key_hex"]
+        for name, entry in outputs.items():
+            if entry.get("algorithm") == algorithm and entry.get("public_key_hex") != key:
+                sys.exit(f"{name}: its {algorithm} key is not the {kind} test key")
     cases = []
     for name, entry in sorted(outputs.items()):
-        cells = POLICY[name]
-        if tuple(cells) != POLICIES or any(v not in POLICY_CODES for v in cells.values()):
-            sys.exit(f"{name}: bad policy cells {cells}")
-        entry["policy"] = dict(cells)
+        for table in (POLICY, POLICY_WITHOUT_ML_DSA):
+            cells = table.get(name)
+            if cells is not None and (tuple(cells) != POLICIES or any(v not in POLICY_CODES for v in cells.values())):
+                sys.exit(f"{name}: bad policy cells {cells}")
+        entry["policy"] = dict(POLICY[name])
+        if name in POLICY_WITHOUT_ML_DSA:
+            entry["policy_without_ml_dsa"] = dict(POLICY_WITHOUT_ML_DSA[name])
         entry["in_policy_matrix_bin"] = name not in NOT_IN_POLICY_MATRIX_BIN
         if entry["in_policy_matrix_bin"]:
             cases.append((name, entry))
-    index = bytearray(b"KSPM" + struct.pack("<HH", 1, len(cases)))
+    index = bytearray(b"KSPM" + struct.pack("<HH", 2, len(cases)))
     for name, entry in cases:
         raw_name = name.encode()
         pk = bytes.fromhex(entry.get("public_key_hex", ""))
         index += struct.pack("<B", len(raw_name)) + raw_name
         index += struct.pack("<BH", PQ_ALG_CODES[entry.get("algorithm")], len(pk)) + pk
         index += bytes(POLICY_CODES.index(entry["policy"][p]) for p in POLICIES)
+        index += bytes(POLICY_CODES.index(off_cells(entry)[p]) for p in POLICIES)
     # Self-check: the index decodes back to the manifest.
-    if decode_policy_matrix(bytes(index)) != [
-        (name, entry.get("algorithm"), entry.get("public_key_hex", ""), [entry["policy"][p] for p in POLICIES])
-        for name, entry in cases
-    ]:
+    if decode_policy_matrix(bytes(index)) != expected_index(cases):
         sys.exit("policy-matrix.bin does not decode back to the manifest")
     (out_dir / POLICY_MATRIX_BIN).write_bytes(bytes(index))
     manifest["policy_matrix"] = {
         POLICY_MATRIX_BIN: {
-            "note": "KSPM v1 index of the policy matrix for benches/policy-kat (no image bytes)",
+            "note": "KSPM v2 index of the policy matrix for benches/policy-kat (no image bytes): "
+                    "per case the cells with the ml-dsa feature on, then off",
             "bytes": len(index),
             "sha256": hashlib.sha256(index).hexdigest(),
             "count": len(cases),
+            "version": 2,
         },
         "codes": {str(i): verdict for i, verdict in enumerate(POLICY_CODES)},
         "policies": list(POLICIES),
     }
 
 
+def off_cells(entry):
+    """The cells of an output without the `ml-dsa` feature."""
+    return entry.get("policy_without_ml_dsa", entry["policy"])
+
+
+def expected_index(cases):
+    return [
+        (name, entry.get("algorithm"), entry.get("public_key_hex", ""),
+         [entry["policy"][p] for p in POLICIES], [off_cells(entry)[p] for p in POLICIES])
+        for name, entry in cases
+    ]
+
+
 def decode_policy_matrix(data):
-    """[(name, algorithm, public key hex, [verdict per policy])] of a KSPM v1 index."""
+    """[(name, algorithm, public key hex, [verdict per policy, ml-dsa on],
+    [verdict per policy, ml-dsa off])] of a KSPM v2 index."""
     if data[:4] != b"KSPM":
         raise ValueError("not a KSPM index")
     version, count = struct.unpack_from("<HH", data, 4)
-    if version != 1:
+    if version != 2:
         raise ValueError(f"KSPM version {version}")
     algorithms = {v: k for k, v in PQ_ALG_CODES.items()}
     off, cases = 8, []
@@ -1016,9 +1348,11 @@ def decode_policy_matrix(data):
         off += 3
         pk = data[off:off + pk_len]
         off += pk_len
-        codes = data[off:off + 3]
-        off += 3
-        cases.append((name, algorithms[alg], pk.hex(), [POLICY_CODES[c] for c in codes]))
+        on = data[off:off + 3]
+        off_codes = data[off + 3:off + 6]
+        off += 6
+        cases.append((name, algorithms[alg], pk.hex(), [POLICY_CODES[c] for c in on],
+                      [POLICY_CODES[c] for c in off_codes]))
     if off != len(data):
         raise ValueError("trailing bytes in the KSPM index")
     return cases
@@ -1200,10 +1534,8 @@ def check(imgtool):
         if encode_image(image) != data:
             sys.exit(f"{name}: decode + re-encode is not byte-identical")
     indexed = decode_policy_matrix((FIXTURE_DIR / POLICY_MATRIX_BIN).read_bytes())
-    expected = [
-        (name, entry.get("algorithm"), entry.get("public_key_hex", ""), [entry["policy"][p] for p in POLICIES])
-        for name, entry in sorted(manifest["outputs"].items()) if entry["in_policy_matrix_bin"]
-    ]
+    expected = expected_index(
+        [(name, entry) for name, entry in sorted(manifest["outputs"].items()) if entry["in_policy_matrix_bin"]])
     if indexed != expected:
         sys.exit(f"{POLICY_MATRIX_BIN} does not match the MANIFEST.json policy cells")
     # 2. A fresh regeneration (with the committed signatures) matches the committed files.
