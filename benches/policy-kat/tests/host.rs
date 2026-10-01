@@ -110,14 +110,26 @@ fn index_matches_manifest_and_every_case_passes() {
             case.name
         );
         let policy = object(entry, "policy");
+        // Without `ml-dsa`: the `policy_without_ml_dsa` cells, where the entry has them.
+        let policy_off = if entry.contains("\"policy_without_ml_dsa\": {") {
+            object(entry, "policy_without_ml_dsa")
+        } else {
+            policy
+        };
         for (&p, key) in Policy::ALL
             .iter()
             .zip(["classical_only", "pq_only", "hybrid"])
         {
             assert_eq!(
-                case.expect(p).unwrap().name(),
+                case.expect(p, true).unwrap().name(),
                 field(policy, key).unwrap(),
                 "{} {key}",
+                case.name
+            );
+            assert_eq!(
+                case.expect(p, false).unwrap().name(),
+                field(policy_off, key).unwrap(),
+                "{} {key} without ml-dsa",
                 case.name
             );
         }
@@ -164,10 +176,22 @@ fn index_matches_manifest_and_every_case_passes() {
     assert!(failures.is_empty(), "{failures:#?}");
     assert_eq!(summary.total, TARGET_CASES * Policy::ALL.len() as u32);
     assert!(summary.all_passed());
+    // This run used the cells of this build's `ml-dsa` state (run the test with and
+    // without `--features keelsign-verify/ml-dsa` to cover both); 18 cells differ.
+    let differing: usize = cases
+        .iter()
+        .map(|c| {
+            Policy::ALL
+                .iter()
+                .filter(|&&p| c.expect(p, true) != c.expect(p, false))
+                .count()
+        })
+        .sum();
+    assert_eq!(differing, 18);
 }
 
 #[test]
-fn parser_rejects_truncated_input_and_unknown_codes() {
+fn parser_rejects_truncated_input_unknown_codes_and_v1() {
     // Every truncation is an error, never a panic, and never a full set of cases.
     for cut in 0..POLICY_TARGET.len() {
         let bytes = &POLICY_TARGET[..cut];
@@ -184,12 +208,15 @@ fn parser_rejects_truncated_input_and_unknown_codes() {
     let mut bad = POLICY_TARGET.to_vec();
     bad[0] = b'X';
     assert_eq!(Fixture::parse(&bad).unwrap_err(), ParseError::BadMagic);
-    let mut bad = POLICY_TARGET.to_vec();
-    bad[4] = 2;
-    assert_eq!(
-        Fixture::parse(&bad).unwrap_err(),
-        ParseError::UnsupportedVersion(2)
-    );
+    // A KSPM v1 index (three codes per case) is refused, and so is any other version.
+    for version in [1u8, 3] {
+        let mut bad = POLICY_TARGET.to_vec();
+        bad[4] = version;
+        assert_eq!(
+            Fixture::parse(&bad).unwrap_err(),
+            ParseError::UnsupportedVersion(u16::from(version))
+        );
+    }
     // The first case: u8 name_len at 8, then the name, the algorithm, the key, the codes.
     let first = cases()[0];
     let alg_at = 8 + 1 + first.name.len();
@@ -205,12 +232,15 @@ fn parser_rejects_truncated_input_and_unknown_codes() {
     let mut bad = POLICY_TARGET.to_vec();
     bad[alg_at] = 4;
     assert_eq!(first_err(&bad), Err(ParseError::UnknownAlgorithm(4)));
-    let mut bad = POLICY_TARGET.to_vec();
-    bad[codes_at + 1] = Expect::ALL.len() as u8;
-    assert_eq!(
-        first_err(&bad),
-        Err(ParseError::BadExpectation(Expect::ALL.len() as u8))
-    );
+    // An unknown code in the on set and in the off set.
+    for at in [codes_at + 1, codes_at + 4] {
+        let mut bad = POLICY_TARGET.to_vec();
+        bad[at] = Expect::ALL.len() as u8;
+        assert_eq!(
+            first_err(&bad),
+            Err(ParseError::BadExpectation(Expect::ALL.len() as u8))
+        );
+    }
     let mut bad = POLICY_TARGET.to_vec();
     bad[9] = 0xFF;
     assert_eq!(first_err(&bad), Err(ParseError::BadName));

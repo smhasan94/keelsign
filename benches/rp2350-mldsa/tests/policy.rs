@@ -4,6 +4,8 @@
 //!
 //! Synchronous embedded-test case, no embassy executor. Run from this directory with
 //! `cargo test --release --locked --test policy -- policy_matrix_from_flash`
+//! (52 cases, 156 cells: `passed=156/156`; with `--features ml-dsa` the ML-DSA cells verify,
+//! without it they expect the `ml-dsa`-off verdicts, SHA-44)
 //! (docs/benchmarks.md, "Hybrid verify entry point (SHA-46)"); it logs one
 //! `POLICY board=… case=… policy=… expect=… got=… result=…` line per cell and a
 //! `POLICY board=rp2350 passed=N/N` summary.
