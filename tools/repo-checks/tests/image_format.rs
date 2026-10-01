@@ -784,7 +784,7 @@ fn image_fixtures_match_manifest() {
     let script = read("scripts/gen_image_fixtures.py");
     assert!(script.contains("IMGTOOL_VERSION = \"2.4.0\""));
     assert!(
-        script.contains(&sha),
+        script.contains(sha),
         "the script pins the dilithium-py sha256"
     );
     // imgtool is an external tool prerequisite: the script never installs anything.
