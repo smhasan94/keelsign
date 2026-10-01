@@ -1,0 +1,35 @@
+[package]
+name = "keelsign-fuzz"
+description = "libFuzzer targets for the keelsign-verify image parser (SHA-39; not published)."
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Standalone: not a member of the root workspace, with its own Cargo.lock and target
+# directory. Built by `cargo fuzz` on a pinned nightly (docs/fuzzing.md); its library and
+# tests also build on stable.
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# The parser under test, with no features: the parser does not depend on them.
+keelsign-verify = { path = "../keelsign-verify" }
+# The libFuzzer entry point `fuzz_target!`. Licence (MIT OR Apache-2.0) AND NCSA (the
+# bundled libFuzzer sources); fine for this unpublished test crate.
+libfuzzer-sys = "=0.4.13"
+
+[[bin]]
+name = "parse_image"
+path = "fuzz_targets/parse_image.rs"
+test = false
+doc = false
+bench = false
+
+[lints.rust]
+unsafe_code = "forbid"
