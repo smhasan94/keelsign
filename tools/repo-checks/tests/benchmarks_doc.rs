@@ -1,11 +1,15 @@
 //! Checks that docs/benchmarks.md records the SHA-34 results, the reproduction commands
 //! and the go/no-go decision, and that the benchmark log tooling works.
 
-use repo_checks::{BENCHES, ScratchDir, python_script, run_capture, workspace_root};
-use std::collections::BTreeMap;
+use repo_checks::{
+    BENCHES, Example, ScratchDir, python_script, run_capture, run_ok, workspace_root,
+};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
 
-const REQUIRED_HEADINGS: [&str; 15] = [
+const REQUIRED_HEADINGS: [&str; 16] = [
     "# ML-DSA verify benchmarks (SHA-34)",
     "## Method",
     "## Prerequisites",
@@ -21,6 +25,7 @@ const REQUIRED_HEADINGS: [&str; 15] = [
     "## pqm4 comparison",
     "## Decision",
     "## Follow-ups",
+    "## Recorded figures (SHA-275)",
 ];
 
 const BOARDS: [&str; 2] = ["nrf52840", "rp2350"];
@@ -1931,4 +1936,402 @@ fn drift_reports_name_every_mismatch() {
         report[0].contains("nrf52840: matches 2 functions, lengthen it"),
         "{report:?}"
     );
+}
+
+// ---- SHA-275: ignored drift checks (rebuild and compare exactly) -----------------------
+
+fn bench_dir(bench: &Example) -> PathBuf {
+    workspace_root().join("benches").join(bench.name)
+}
+
+fn board_of(bench: &Example) -> &'static str {
+    bench.name.split('-').next().unwrap_or(bench.name)
+}
+
+/// The rustup proxy for `tool` (`$CARGO_HOME/bin/<tool>`), not the toolchain binary that
+/// `$CARGO` names inside `cargo test`: only the proxy honours `RUSTUP_TOOLCHAIN` and the
+/// bench projects' `rust-toolchain.toml`.
+fn rustup_proxy(tool: &str) -> PathBuf {
+    std::env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cargo")))
+        .map(|home| home.join("bin").join(tool))
+        .filter(|p| p.is_file())
+        .unwrap_or_else(|| PathBuf::from(tool))
+}
+
+/// `tool` run through the rustup proxy in `benches/<name>`, with the outer `cargo test`'s
+/// toolchain and target dir removed (the documented target dirs are relative to the bench
+/// project) and `toolchain` selected if given (otherwise the bench's toolchain file
+/// applies).
+fn bench_tool(bench: &Example, tool: &str, toolchain: Option<&str>) -> Command {
+    let mut cmd = Command::new(rustup_proxy(tool));
+    cmd.current_dir(bench_dir(bench))
+        .env_remove("RUSTUP_TOOLCHAIN")
+        .env_remove("CARGO_TARGET_DIR");
+    if let Some(toolchain) = toolchain {
+        cmd.env("RUSTUP_TOOLCHAIN", toolchain);
+    }
+    cmd
+}
+
+fn bench_cargo(bench: &Example, toolchain: Option<&str>) -> Command {
+    bench_tool(bench, "cargo", toolchain)
+}
+
+/// `KEELSIGN_BENCH_STABLE`, else the bench projects' toolchain file.
+fn stable_toolchain() -> Option<String> {
+    std::env::var("KEELSIGN_BENCH_STABLE")
+        .ok()
+        .filter(|t| !t.is_empty())
+}
+
+/// `KEELSIGN_BENCH_NIGHTLY`, else `nightly` (the documented `cargo +nightly`).
+fn nightly_toolchain() -> String {
+    std::env::var("KEELSIGN_BENCH_NIGHTLY")
+        .ok()
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| "nightly".to_owned())
+}
+
+/// Fails unless the compiler `bench` builds with is the recorded one.
+fn assert_recorded_rustc(bench: &Example, toolchain: Option<&str>, recorded: &str, variable: &str) {
+    let active = run_ok(bench_tool(bench, "rustc", toolchain).arg("--version"));
+    let active = active.trim();
+    assert!(
+        active == recorded,
+        "{}: the active compiler is `{active}` but docs/benchmarks.md recorded `{recorded}`. \
+         Re-measure every table and update the recorded toolchains, or select the recorded \
+         toolchain with {variable} (docs/benchmarks.md#checking-the-recorded-figures)",
+        bench.name
+    );
+}
+
+fn fail_on_drift(what: &str, report: &[String]) {
+    assert!(
+        report.is_empty(),
+        "docs/benchmarks.md {what} differ from a fresh build ({} mismatches); re-run the \
+         documented commands and update every listed table \
+         (docs/benchmarks.md#checking-the-recorded-figures):\n{}",
+        report.len(),
+        report.join("\n")
+    );
+}
+
+/// AC1/AC2: every cell of every "Flash detail" table is what the documented builds give
+/// today, and each table's static RAM delta is 0.
+#[test]
+#[ignore = "builds both bench projects with the recorded stable rustc (thumb targets, flip-link, python3); docs/benchmarks.md#checking-the-recorded-figures"]
+fn recorded_flash_tables_match_a_fresh_build() {
+    let doc = doc();
+    let cells = flash_detail_cells(&doc);
+    let (stable, _) = recorded_toolchains(&doc);
+    let toolchain = stable_toolchain();
+    let mut flash = BTreeMap::new();
+    let mut ram = BTreeMap::new();
+    for bench in &BENCHES {
+        assert_recorded_rustc(
+            bench,
+            toolchain.as_deref(),
+            &stable,
+            "KEELSIGN_BENCH_STABLE",
+        );
+        let board = board_of(bench);
+        for ml_dsa in [false, true] {
+            let feature: &[&str] = if ml_dsa {
+                &["--features", "ml-dsa", "--target-dir", "target/mldsa"]
+            } else {
+                &[]
+            };
+            for profile in ["release", "size"] {
+                let profile_args: &[&str] = if profile == "release" {
+                    &["--release"]
+                } else {
+                    &["--profile", "size"]
+                };
+                run_ok(
+                    bench_cargo(bench, toolchain.as_deref())
+                        .arg("build")
+                        .args(profile_args)
+                        .args(["--locked", "--bins"])
+                        .args(feature),
+                );
+                let bins: BTreeSet<&str> = cells
+                    .iter()
+                    .filter(|c| c.ml_dsa == ml_dsa && c.board() == board && c.profile() == profile)
+                    .map(|c| c.bin.as_str())
+                    .collect();
+                if bins.is_empty() {
+                    continue;
+                }
+                let dir = bench_dir(bench)
+                    .join(if ml_dsa { "target/mldsa" } else { "target" })
+                    .join(bench.target)
+                    .join(profile);
+                let elves: Vec<PathBuf> = bins.iter().map(|bin| dir.join(bin)).collect();
+                let sizes = run_ok(python_script("elf_sizes.py").args(&elves));
+                let rows = table_rows(&sizes);
+                assert_eq!(rows.len(), bins.len(), "elf_sizes.py output:\n{sizes}");
+                for (bin, row) in bins.iter().zip(&rows) {
+                    // | label | elf | .text | .rodata | .data | .bss | flash | static RAM |
+                    let key = (
+                        board.to_owned(),
+                        profile.to_owned(),
+                        ml_dsa,
+                        (*bin).to_owned(),
+                    );
+                    let value = |i: usize| -> u64 {
+                        row[i]
+                            .parse()
+                            .unwrap_or_else(|_| panic!("elf_sizes.py row {row:?}"))
+                    };
+                    flash.insert(key.clone(), value(6));
+                    ram.insert(key, value(7));
+                }
+            }
+        }
+    }
+    let mut report = compare_flash(&cells, &flash);
+    // Static RAM delta 0: every bin of a detail row has the static RAM of the row's
+    // baseline (its first flash column).
+    let mut baseline: BTreeMap<(&str, &str), (&FlashCell, u64)> = BTreeMap::new();
+    for cell in &cells {
+        let Some(&r) = ram.get(&cell.key()) else {
+            continue;
+        };
+        match baseline.get(&(cell.section.as_str(), cell.row.as_str())) {
+            None => {
+                baseline.insert((&cell.section, &cell.row), (cell, r));
+            }
+            Some(&(base, base_ram)) if base_ram != r => report.push(format!(
+                "{}: row `{}`: static RAM of `{}` is {r}, of baseline `{}` {base_ram}; the doc \
+                 says the static RAM delta is 0",
+                cell.section, cell.row, cell.bin, base.bin
+            )),
+            Some(_) => {}
+        }
+    }
+    fail_on_drift("flash figures", &report);
+}
+
+/// Own-frame sizes and demangled names from `stack_frames.py ELF --top N --match …`: the
+/// top-N list, before the `# functions matching` part.
+fn parse_frames(output: &str) -> Vec<(u64, String)> {
+    output
+        .lines()
+        .skip(1)
+        .take_while(|l| !l.starts_with("# functions matching"))
+        .filter_map(|l| {
+            let (size, name) = l.trim_start().split_once(' ')?;
+            Some((size.parse().ok()?, name.trim_start().to_owned()))
+        })
+        .collect()
+}
+
+/// AC1/AC2: every nightly row of `### Static frame detail` is what the documented
+/// `-Z emit-stack-sizes` builds give today, on both boards.
+#[test]
+#[ignore = "needs the recorded nightly (nightly-2026-09-29) with both thumb targets"]
+fn recorded_static_frames_match_a_fresh_nightly_build() {
+    let doc = doc();
+    let rows = frame_rows(&doc);
+    let (_, nightly) = recorded_toolchains(&doc);
+    let toolchain = nightly_toolchain();
+    let builds: BTreeSet<(&str, &str, bool)> = rows
+        .iter()
+        .filter(|r| !r.stable_prologue)
+        .map(|r| (r.bin.as_str(), r.profile.as_str(), r.ml_dsa))
+        .collect();
+    let mut measured = BTreeMap::new();
+    for bench in &BENCHES {
+        assert_recorded_rustc(bench, Some(&toolchain), &nightly, "KEELSIGN_BENCH_NIGHTLY");
+        for &(bin, profile, ml_dsa) in &builds {
+            let target_dir = if ml_dsa {
+                "target/nightly-mldsa"
+            } else {
+                "target/nightly"
+            };
+            let mut cmd = bench_cargo(bench, Some(&toolchain));
+            cmd.arg("rustc");
+            if profile == "release" {
+                cmd.arg("--release");
+            } else {
+                cmd.args(["--profile", profile]);
+            }
+            cmd.arg("--locked");
+            if ml_dsa {
+                cmd.args(["--features", "ml-dsa"]);
+            }
+            cmd.args(["--bin", bin, "--target-dir", target_dir]).args([
+                "--",
+                "-Z",
+                "emit-stack-sizes",
+            ]);
+            run_ok(&mut cmd);
+            let elf = bench_dir(bench)
+                .join(target_dir)
+                .join(bench.target)
+                .join(profile)
+                .join(bin);
+            let output = run_ok(
+                python_script("stack_frames.py")
+                    .arg(&elf)
+                    .args(["--top", "100000", "--match", bin]),
+            );
+            measured.insert(
+                (
+                    board_of(bench).to_owned(),
+                    bin.to_owned(),
+                    profile.to_owned(),
+                    ml_dsa,
+                ),
+                parse_frames(&output),
+            );
+        }
+    }
+    fail_on_drift("static frames", &compare_frames(&rows, &measured));
+}
+
+/// The stack each `keelsign_verify::mldsa::verify_param` instance in an `objdump -d
+/// --no-show-raw-insn` listing reserves in its prologue (4 B per pushed register plus
+/// every `sub sp` immediate), keyed by the set its key-length compare names
+/// (`cmp.w r1, #0x520` = ML-DSA-44, `#0x7a0` = ML-DSA-65).
+fn mldsa_prologues(disassembly: &str) -> Result<Vec<(&'static str, u64)>, String> {
+    let mut found = Vec::new();
+    let mut lines = disassembly.lines();
+    while let Some(line) = lines.next() {
+        if !(line.ends_with(">:") && line.contains("5mldsa12verify_param")) {
+            continue;
+        }
+        let (mut frame, mut set) = (0u64, None);
+        for insn in lines.by_ref().take(12) {
+            let Some((_, text)) = insn.split_once(':') else {
+                break;
+            };
+            let text = text.trim();
+            let mnemonic = text.split_whitespace().next().unwrap_or_default();
+            let operands = text[mnemonic.len()..].trim();
+            let immediate = || -> Result<u64, String> {
+                let imm = operands
+                    .rsplit_once('#')
+                    .map(|(_, imm)| imm.trim())
+                    .ok_or_else(|| format!("no immediate in `{text}`"))?;
+                match imm.strip_prefix("0x") {
+                    Some(hex) => u64::from_str_radix(hex, 16),
+                    None => imm.parse(),
+                }
+                .map_err(|e| format!("`{text}`: {e}"))
+            };
+            match mnemonic {
+                "push" | "push.w" => {
+                    if operands.contains('-') {
+                        return Err(format!("register range in `{text}`"));
+                    }
+                    frame += 4 * operands.split(',').count() as u64;
+                }
+                "sub" | "sub.w" | "subw" if operands.starts_with("sp,") => frame += immediate()?,
+                "cmp" | "cmp.w" => {
+                    set = match immediate()? {
+                        0x520 => Some("ML-DSA-44"),
+                        0x7a0 => Some("ML-DSA-65"),
+                        _ => None,
+                    };
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let set = set.ok_or_else(|| format!("{line} has no key-length compare in its prologue"))?;
+        found.push((set, frame));
+    }
+    Ok(found)
+}
+
+/// One line per stable-prologue row that differs from `measured` ((board, set) → frame).
+fn compare_prologues(rows: &[FrameRow], measured: &BTreeMap<(String, String), u64>) -> Vec<String> {
+    let mut report = Vec::new();
+    for row in rows.iter().filter(|r| r.stable_prologue) {
+        let Some(set) = SETS.iter().find(|s| row.function.contains(*s)) else {
+            report.push(format!(
+                "{FRAME_DETAIL}: `{}` names no ML-DSA set",
+                row.function
+            ));
+            continue;
+        };
+        for (b, board) in BOARDS.iter().enumerate() {
+            let at = format!(
+                "{FRAME_DETAIL}: `{}` {}, {}, {board}",
+                row.bin, row.build, row.function
+            );
+            match measured.get(&((*board).to_owned(), (*set).to_owned())) {
+                Some(&m) if m == row.frames[b] => {}
+                Some(&m) => report.push(format!("{at}: doc {}, measured {m}", row.frames[b])),
+                None => report.push(format!("{at}: doc {}, not found by objdump", row.frames[b])),
+            }
+        }
+    }
+    report
+}
+
+/// AC1/AC2: the stable release prologues of both `verify_param` instances, the figures
+/// "Stack the feature needs" tells integrators to budget with, are what the documented
+/// `objdump` command shows today.
+#[test]
+#[ignore = "needs LLVM objdump (macOS /usr/bin/objdump, or OBJDUMP=llvm-objdump)"]
+fn recorded_stable_mldsa_prologues_match_objdump() {
+    let doc = doc();
+    let rows = frame_rows(&doc);
+    let (stable, _) = recorded_toolchains(&doc);
+    let toolchain = stable_toolchain();
+    let objdump = std::env::var("OBJDUMP").unwrap_or_else(|_| "objdump".to_owned());
+    let mut measured = BTreeMap::new();
+    let mut report = Vec::new();
+    for bench in &BENCHES {
+        assert_recorded_rustc(
+            bench,
+            toolchain.as_deref(),
+            &stable,
+            "KEELSIGN_BENCH_STABLE",
+        );
+        run_ok(bench_cargo(bench, toolchain.as_deref()).args([
+            "build",
+            "--release",
+            "--locked",
+            "--bins",
+            "--features",
+            "ml-dsa",
+            "--target-dir",
+            "target/mldsa",
+        ]));
+        let elf = bench_dir(bench)
+            .join("target/mldsa")
+            .join(bench.target)
+            .join("release/size_verify");
+        let (ok, listing, stderr) = run_capture(
+            Command::new(&objdump)
+                .args(["-d", "--no-show-raw-insn"])
+                .arg(&elf),
+        );
+        assert!(
+            ok,
+            "`{objdump} -d` failed on {} (needs LLVM objdump; set OBJDUMP=llvm-objdump):\n{stderr}",
+            elf.display()
+        );
+        let board = board_of(bench);
+        match mldsa_prologues(&listing) {
+            Ok(prologues) => {
+                for (set, frame) in prologues {
+                    if measured
+                        .insert((board.to_owned(), set.to_owned()), frame)
+                        .is_some()
+                    {
+                        report.push(format!("{board}: two `verify_param` instances for {set}"));
+                    }
+                }
+            }
+            Err(e) => report.push(format!("{board}: {e}")),
+        }
+    }
+    report.extend(compare_prologues(&rows, &measured));
+    fail_on_drift("stable ML-DSA prologues", &report);
 }
