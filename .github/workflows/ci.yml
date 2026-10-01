@@ -42,19 +42,29 @@ jobs:
         run: cargo publish --dry-run --locked -p keelsign
 
   cross-build:
-    name: cross-build ${{ matrix.example }} (${{ matrix.target }})
+    name: cross-build ${{ matrix.project }} (${{ matrix.target }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - example: nrf52840-hello
+          - project: examples/nrf52840-hello
             target: thumbv7em-none-eabihf
-          - example: rp2350-hello
+            bench: false
+          - project: examples/rp2350-hello
             target: thumbv8m.main-none-eabihf
+            bench: false
+          # SHA-34 on-target KATs and benchmarks: build the embedded-test binary and the
+          # flash-footprint bins (docs/benchmarks.md). Running them needs the boards.
+          - project: benches/nrf52840-mldsa
+            target: thumbv7em-none-eabihf
+            bench: true
+          - project: benches/rp2350-mldsa
+            target: thumbv8m.main-none-eabihf
+            bench: true
     defaults:
       run:
-        working-directory: examples/${{ matrix.example }}
+        working-directory: ${{ matrix.project }}
     steps:
       - uses: actions/checkout@v4
 
@@ -69,13 +79,27 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: examples/${{ matrix.example }}
+          workspaces: ${{ matrix.project }}
 
       - name: cargo fmt
         run: cargo fmt --check
 
       - name: cargo clippy
+        if: ${{ !matrix.bench }}
         run: cargo clippy --locked --target ${{ matrix.target }} -- -D warnings
 
       - name: cargo build
+        if: ${{ !matrix.bench }}
         run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: cargo clippy (all targets)
+        if: ${{ matrix.bench }}
+        run: cargo clippy --locked --target ${{ matrix.target }} --all-targets -- -D warnings
+
+      - name: build on-target tests
+        if: ${{ matrix.bench }}
+        run: cargo test --no-run --release --locked --target ${{ matrix.target }}
+
+      - name: build flash-footprint bins
+        if: ${{ matrix.bench }}
+        run: cargo build --release --locked --target ${{ matrix.target }} --bins

@@ -19,6 +19,8 @@ functionality.
 ## Development
 
 Toolchain, probe setup and flashing the example boards: see [docs/setup.md](docs/setup.md).
+ML-DSA verify benchmarks on the boards (on-target KATs, cycles, stack, flash) and the
+go/no-go decision: see [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Licence
 

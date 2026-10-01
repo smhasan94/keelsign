@@ -1,0 +1,12 @@
+[target.thumbv8m.main-none-eabihf]
+# `cargo test --release` flashes the Pico 2 W through the Raspberry Pi Debug Probe (SWD), runs
+# each embedded-test case (probe-rs detects the test binary) and streams defmt over RTT.
+runner = "probe-rs run --chip RP235x"
+# flip-link puts the stack below .bss/.data so a stack overflow faults instead of corrupting memory.
+rustflags = ["-C", "linker=flip-link"]
+
+[build]
+target = "thumbv8m.main-none-eabihf"
+
+[env]
+DEFMT_LOG = "info"

@@ -1,7 +1,14 @@
 [workspace]
-members = ["keelsign", "keelsign-verify", "tools/repo-checks"]
-# Standalone embedded projects with their own Cargo.lock and target (see docs/setup.md).
-exclude = ["examples/nrf52840-hello", "examples/rp2350-hello"]
+members = [
+    "keelsign",
+    "keelsign-verify",
+    "tools/repo-checks",
+    "benches/mldsa-kat",
+    "benches/stack-paint",
+]
+# Standalone embedded projects with their own Cargo.lock and target (see docs/setup.md
+# and docs/benchmarks.md).
+exclude = ["examples/nrf52840-hello", "examples/rp2350-hello", "benches/nrf52840-mldsa", "benches/rp2350-mldsa"]
 resolver = "3"
 
 [workspace.package]
