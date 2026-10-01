@@ -1,6 +1,6 @@
 [package]
 name = "nrf52840-mldsa"
-description = "SHA-34 ML-DSA-44/65 and SHA-65 LMS/HSS verify KATs and benchmarks on the nRF52840-DK (embedded-test)."
+description = "SHA-34 ML-DSA-44/65 and SHA-65 LMS/HSS verify KATs, the SHA-46 policy matrix and benchmarks on the nRF52840-DK (embedded-test)."
 version = "0.0.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -13,8 +13,10 @@ publish = false
 mldsa-kat = { path = "../mldsa-kat", features = ["cortex-m"] }
 lms-kat = { path = "../lms-kat" }
 stack-paint = { path = "../stack-paint" }
+policy-kat = { path = "../policy-kat" }
 # SHA-42: the image reader and digest, used directly by tests/image.rs and size_digest.
-keelsign-verify = { path = "../../keelsign-verify" }
+# SHA-46: the Ed25519 half for the policy matrix (tests/policy.rs) and size_verify.
+keelsign-verify = { path = "../../keelsign-verify", features = ["ed25519"] }
 embassy-nrf = { version = "=0.11.0", features = ["defmt", "nrf52840"] }
 # Synchronous tests, no embassy executor. embedded-test's panic handler replaces
 # panic-probe in the test binary.
@@ -34,6 +36,10 @@ harness = false
 
 [[test]]
 name = "image"
+harness = false
+
+[[test]]
+name = "policy"
 harness = false
 
 [[bin]]
@@ -68,6 +74,16 @@ bench = false
 
 [[bin]]
 name = "size_digest"
+test = false
+bench = false
+
+[[bin]]
+name = "size_verify_baseline"
+test = false
+bench = false
+
+[[bin]]
+name = "size_verify"
 test = false
 bench = false
 
