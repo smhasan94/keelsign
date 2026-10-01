@@ -49,14 +49,16 @@ pub struct Report {
 /// Check the parser on `data`, panicking on any disagreement or broken invariant (the
 /// fuzz "crash"). In order:
 ///
-/// 1. `Image::parse` matches [`oracle::parse`]: the same error, or the same hashed end,
+/// 1. `Image::parse` matches [`oracle::parse`]: the same error, or the same header
+///    fields (decoded independently, little-endian by offset), hashed end,
 ///    `tlv_end` and (protected, type, value offset, value length) of every TLV.
 /// 2. A parsed image is consistent with the input: header, areas and TLVs in bounds and
 ///    tiling their areas, the header and area bytes equal to the input's, `tlvs()` the
 ///    protected TLVs then the unprotected ones, `pairs()` equal to `iter()` and
 ///    `kind()` equal to `TlvKind::of`.
 /// 3. `Image::read_from` with a [`FULL_TLV_BUF`] buffer follows its contract: the image
-///    `Image::parse` finds, or `Truncated` when parsing fails, or `Image::parse`'s error;
+///    `Image::parse` finds, or `Truncated` when the TLV areas do not fit the input (and
+///    parsing fails), or `Image::parse`'s error;
 ///    never `TlvAreaTooLarge` (or `Read`, from a byte-slice reader).
 /// 4. With a [`SMALL_TLV_BUF`] buffer, the same, except `TlvAreaTooLarge` exactly when
 ///    the TLV areas fit the input but not the buffer.
@@ -87,8 +89,12 @@ pub fn check_parse_image(data: &[u8]) -> Report {
             matches!(&parsed, Ok(p) if p == image),
             "Image::read_from (full buffer) found {image:?}, Image::parse {parsed:?}"
         ),
+        // Truncated before the TLV areas are read only when they do not fit the input;
+        // when they fit, the error is Image::parse's.
         Err(Error::Parse(ParseError::Truncated)) => assert!(
-            parsed.is_err(),
+            parsed.is_err()
+                && (tlv_areas_to_buffer(data).is_none()
+                    || parsed.map(|_| ()) == Err(ParseError::Truncated)),
             "Image::read_from (full buffer) is Truncated, Image::parse {parsed:?}"
         ),
         Err(e @ (Error::TlvAreaTooLarge | Error::Read(_))) => {
@@ -146,7 +152,19 @@ fn same_result(a: &Result<Image<'_>, Error>, b: &Result<Image<'_>, Error>) -> bo
 /// The parsed image in the reference parser's terms.
 fn as_oracle(data: &[u8], image: &Image<'_>) -> oracle::Parsed {
     let base = data.as_ptr() as usize;
+    let h = image.header();
     oracle::Parsed {
+        header: oracle::OracleHeader {
+            load_addr: h.load_addr,
+            hdr_size: h.hdr_size,
+            protect_tlv_size: h.protect_tlv_size,
+            img_size: h.img_size,
+            flags: h.flags.0,
+            major: h.version.major,
+            minor: h.version.minor,
+            revision: h.version.revision,
+            build_num: h.version.build_num,
+        },
         hashed_end: u64::from(image.hashed_range().end),
         tlv_end: u64::from(image.tlv_end()),
         tlvs: image

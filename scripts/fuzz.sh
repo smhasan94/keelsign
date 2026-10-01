@@ -45,6 +45,12 @@ fetch() {
 
 run() {
     local secs="$1"
+    case "$secs" in
+        '' | *[!0-9]* | 0 | 0*)
+            echo "fuzz.sh: seconds must be a positive integer, not '$secs'" >&2
+            usage
+            ;;
+    esac
     fetch
     mkdir -p "$WORK" "$ARTIFACTS/$TARGET"
     echo "fuzz.sh: target=$TARGET seconds=$secs toolchain=$TC" | tee "$ARTIFACTS/run.log"

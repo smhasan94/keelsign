@@ -241,6 +241,9 @@ def generate(out_root):
 
 
 def seed_files(root):
+    """The generator's seeds in root/parse_image. Anything else there is ignored: a bare
+    `cargo fuzz run parse_image` (docs/fuzzing.md, AC1) writes the inputs it finds into
+    that directory under 40-hex-digit names, and they are gitignored."""
     return {p.name: p.read_bytes() for p in (root / SEED_DIR).glob("*.bin") if p.name.startswith(("fixture-", "synth-"))}
 
 

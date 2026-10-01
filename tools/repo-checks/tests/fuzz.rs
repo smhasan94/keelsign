@@ -166,6 +166,26 @@ fn corpus_is_committed_and_matches_its_manifest() {
     );
 }
 
+/// `text` without comments (lines starting with `#`, and ` #…` to the end of a line),
+/// whitespace or quotes: harmless reformatting (line breaks, indentation, quoting) does
+/// not change it, so checks match key tokens rather than exact layout.
+fn squash(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with('#') {
+                return "";
+            }
+            match line.find(" #") {
+                Some(at) => &line[..at],
+                None => line,
+            }
+        })
+        .flat_map(str::chars)
+        .filter(|c| !c.is_whitespace() && *c != '"' && *c != '\'')
+        .collect()
+}
+
 /// The text of the job `name` in a workflow: from its `  name:` line up to the next
 /// line indented by exactly two spaces (the next job, or a comment before it).
 fn job<'a>(workflow: &'a str, name: &str) -> &'a str {
@@ -184,84 +204,165 @@ fn job<'a>(workflow: &'a str, name: &str) -> &'a str {
     &body[..end]
 }
 
+/// The steps of a job, each squashed: the text from one `- ` item of its `steps:` list
+/// to the next.
+fn steps(job: &str) -> Vec<String> {
+    let lines: Vec<&str> = job.lines().collect();
+    let start = lines
+        .iter()
+        .position(|l| l.trim() == "steps:")
+        .expect("steps:");
+    let indent = lines[start + 1..]
+        .iter()
+        .find(|l| l.trim_start().starts_with("- "))
+        .map(|l| l.len() - l.trim_start().len())
+        .expect("a step");
+    let mut out: Vec<String> = Vec::new();
+    for line in &lines[start + 1..] {
+        let is_item =
+            line.len() - line.trim_start().len() == indent && line.trim_start().starts_with("- ");
+        if is_item {
+            out.push(String::new());
+        }
+        if let Some(step) = out.last_mut() {
+            step.push_str(line);
+            step.push('\n');
+        }
+    }
+    out.iter().map(|s| squash(s)).collect()
+}
+
+/// The index of the one step containing every token in `tokens` (squashed).
+fn step_with(steps: &[String], job: &str, tokens: &[&str]) -> usize {
+    let found: Vec<usize> = (0..steps.len())
+        .filter(|&i| tokens.iter().all(|t| steps[i].contains(&squash(t))))
+        .collect();
+    assert_eq!(found.len(), 1, "{job}: steps with {tokens:?}: {found:?}");
+    found[0]
+}
+
 /// SHA-39 AC2 and TP3: .github/workflows/fuzz.yml runs the smoke on every PR and the
 /// 30-minute run nightly (schedule and manual dispatch), on the pinned nightly with the
-/// pinned cargo-fuzz; the nightly job always summarises and uploads the artifacts,
-/// including the tarball that keeps the (empty when healthy) crash directory, then runs
-/// the TP1 self-test and the coverage check.
+/// pinned cargo-fuzz, with a read-only token; the nightly job always summarises and
+/// uploads the artifacts, including the tarball that keeps the (empty when healthy)
+/// crash directory, then runs the TP1 self-test and the coverage check.
 #[test]
 fn fuzz_workflow_runs_smoke_on_prs_and_nightly() {
+    assert_eq!(squash("a: \"x y\" # c\n# d\n  b: 'z'"), "a:xyb:z");
     let wf = read(".github/workflows/fuzz.yml");
-    for trigger in [
-        "\n  pull_request:\n",
-        "\n  schedule:\n    - cron: \"17 3 * * *\"\n",
-        "\n  workflow_dispatch:\n",
+    let all = squash(&wf);
+    for token in [
+        "on:pull_request:",
+        "schedule:-cron: \"17 3 * * *\"",
+        "workflow_dispatch:",
+        &format!("FUZZ_TOOLCHAIN: {FUZZ_TOOLCHAIN}"),
+        "cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
     ] {
-        assert!(wf.contains(trigger), "fuzz.yml lacks trigger {trigger:?}");
+        assert!(all.contains(&squash(token)), "fuzz.yml lacks {token:?}");
     }
-    assert!(wf.contains(&format!("FUZZ_TOOLCHAIN: {FUZZ_TOOLCHAIN}")));
-    assert!(wf.contains("cancel-in-progress: ${{ github.event_name == 'pull_request' }}"));
+    // A top-level, read-only token: the `permissions:` line at column 0 and its
+    // indented block.
+    let mut lines = wf.lines().skip_while(|l| l.trim_end() != "permissions:");
+    let mut block = lines.next().expect("top-level permissions").to_owned();
+    for line in lines.take_while(|l| l.is_empty() || l.starts_with(' ') || l.starts_with('#')) {
+        block.push('\n');
+        block.push_str(line);
+    }
+    assert_eq!(squash(&block), "permissions:contents:read");
 
     let check = job(&wf, "fuzz-check");
-    for step in [
+    let check_steps = steps(check);
+    for run in [
         "cargo fmt --manifest-path fuzz/Cargo.toml --check",
         "cargo clippy --manifest-path fuzz/Cargo.toml --all-targets --locked -- -D warnings",
         "cargo test --manifest-path fuzz/Cargo.toml --locked",
         "python3 scripts/gen_fuzz_corpus.py --check",
         "python3 scripts/fuzz_coverage_check.py --self-test",
     ] {
-        assert!(check.contains(step), "fuzz-check lacks {step}");
+        step_with(&check_steps, "fuzz-check", &[&format!("run: {run}")]);
     }
-    assert!(!check.contains("if:"), "fuzz-check runs on every event");
+    assert!(
+        !squash(check).contains("if:"),
+        "fuzz-check runs on every event"
+    );
 
     let smoke = job(&wf, "fuzz-smoke");
-    assert!(smoke.contains("if: github.event_name == 'pull_request'"));
-    assert!(smoke.contains("run: scripts/fuzz.sh smoke"));
+    assert!(squash(smoke).contains(&squash("if: github.event_name == 'pull_request'")));
+    let smoke_steps = steps(smoke);
+    step_with(&smoke_steps, "fuzz-smoke", &["run: scripts/fuzz.sh smoke"]);
 
     let nightly = job(&wf, "fuzz-nightly");
-    assert!(nightly.contains(
-        "if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
-    ));
-    assert!(nightly.contains("timeout-minutes: 60"));
-    assert!(nightly.contains("components: llvm-tools-preview"));
-    for job_text in [smoke, nightly] {
-        assert!(job_text.contains(&format!("toolchain: {FUZZ_TOOLCHAIN}")));
-        assert!(job_text.contains("uses: taiki-e/cache-cargo-install-action@v2"));
-        assert!(job_text.contains(&format!("tool: {CARGO_FUZZ}")));
+    let n = squash(nightly);
+    for token in [
+        "if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+        "timeout-minutes: 60",
+        "components: llvm-tools-preview",
+    ] {
+        assert!(n.contains(&squash(token)), "fuzz-nightly lacks {token:?}");
+    }
+    for (name, text) in [("fuzz-smoke", smoke), ("fuzz-nightly", nightly)] {
+        let s = steps(text);
+        step_with(
+            &s,
+            name,
+            &[
+                "uses: dtolnay/rust-toolchain@master",
+                "toolchain: ${{ env.FUZZ_TOOLCHAIN }}",
+            ],
+        );
+        step_with(
+            &s,
+            name,
+            &[
+                "uses: taiki-e/cache-cargo-install-action@v2",
+                &format!("tool: {CARGO_FUZZ}"),
+            ],
+        );
     }
     // In order: the run, the summary (always), the upload (always), TP1, coverage.
-    let order = [
-        "run: scripts/fuzz.sh nightly",
-        "if: always()\n        run: scripts/fuzz.sh summary",
-        "name: fuzz-nightly-${{ github.run_id }}",
-        "fuzz/artifacts/summary.txt",
-        "fuzz/fuzz-artifacts.tar.gz",
-        "retention-days: 30",
-        "run: scripts/fuzz.sh tp1",
-        "run: scripts/fuzz.sh coverage",
-    ];
-    let mut at = 0;
-    for needle in order {
-        let found = nightly[at..]
-            .find(needle)
-            .unwrap_or_else(|| panic!("fuzz-nightly lacks (or misorders) {needle:?}"));
-        at += found + needle.len();
-    }
-    let upload = &nightly[nightly
-        .find("name: upload nightly artifacts")
-        .expect("upload step")..];
-    assert!(upload.starts_with("name: upload nightly artifacts\n        if: always()"));
+    let ns = steps(nightly);
+    let run = step_with(&ns, "fuzz-nightly", &["run: scripts/fuzz.sh nightly"]);
+    let summary = step_with(
+        &ns,
+        "fuzz-nightly",
+        &["if: always()", "run: scripts/fuzz.sh summary"],
+    );
+    let upload = step_with(
+        &ns,
+        "fuzz-nightly",
+        &[
+            "if: always()",
+            "uses: actions/upload-artifact@v4",
+            "name: fuzz-nightly-${{ github.run_id }}",
+            "fuzz/artifacts/summary.txt",
+            "fuzz/fuzz-artifacts.tar.gz",
+            "retention-days: 30",
+        ],
+    );
+    let tp1 = step_with(&ns, "fuzz-nightly", &["run: scripts/fuzz.sh tp1"]);
+    let coverage = step_with(&ns, "fuzz-nightly", &["run: scripts/fuzz.sh coverage"]);
+    assert!(
+        run < summary && summary < upload && upload < tp1 && tp1 < coverage,
+        "fuzz-nightly step order: {run} {summary} {upload} {tp1} {coverage}"
+    );
 
     // The summary keeps the crash directory: created even when empty, tarred whole, and
     // counted in summary.txt.
-    let sh = read("scripts/fuzz.sh");
-    assert!(sh.contains("mkdir -p \"$ARTIFACTS/$TARGET\""));
-    assert!(sh.contains("tar -czf \"$TARBALL\" -C fuzz artifacts"));
-    assert!(sh.contains("TARBALL=fuzz/fuzz-artifacts.tar.gz"));
-    assert!(sh.contains("crash_files="));
-    assert!(sh.contains("smoke) run \"${FUZZ_SECONDS:-120}\""));
-    assert!(sh.contains("nightly) run \"${FUZZ_SECONDS:-1800}\""));
-    assert!(sh.contains("LIBFUZZER_ARGS=(-timeout=10 -max_len=8192 -print_final_stats=1)"));
+    let sh = squash(&read("scripts/fuzz.sh"));
+    for token in [
+        "mkdir -p \"$ARTIFACTS/$TARGET\"",
+        "tar -czf \"$TARBALL\" -C fuzz artifacts",
+        "TARBALL=fuzz/fuzz-artifacts.tar.gz",
+        "crash_files=",
+        "smoke) run \"${FUZZ_SECONDS:-120}\"",
+        "nightly) run \"${FUZZ_SECONDS:-1800}\"",
+        "LIBFUZZER_ARGS=(-timeout=10 -max_len=8192 -print_final_stats=1)",
+    ] {
+        assert!(
+            sh.contains(&squash(token)),
+            "scripts/fuzz.sh lacks {token:?}"
+        );
+    }
 }
 
 /// SHA-39 AC2: the fuzz crate is a standalone workspace (not a root member), pins
@@ -331,28 +432,30 @@ fn tp1_patch_applies_to_the_parser() {
     assert!(patch.contains("@@ fn split_tlv("));
     assert!(patch.contains("+    if len > tail.len() + 1 {"));
     git(&["apply", "--check", "fuzz/tp1-tlv-length-off-by-one.patch"]);
-    let sh = read("scripts/fuzz.sh");
-    assert!(sh.contains("TP1_PATCH=fuzz/tp1-tlv-length-off-by-one.patch"));
-    assert!(sh.contains("TP1_SECONDS=120"));
-    assert!(sh.contains("git archive HEAD"));
+    let sh = squash(&read("scripts/fuzz.sh"));
+    assert!(sh.contains(&squash("TP1_PATCH=fuzz/tp1-tlv-length-off-by-one.patch")));
+    assert!(sh.contains(&squash("TP1_SECONDS=120")));
+    assert!(sh.contains(&squash("git archive HEAD")));
     // The message tp1 waits for is the harness's disagreement panic.
     let lib = read("fuzz/src/lib.rs");
     assert!(lib.contains(
         "pub const DISAGREEMENT: &str = \"Image::parse disagrees with the reference parser\";"
     ));
-    assert!(sh.contains("DISAGREEMENT=\"Image::parse disagrees with the reference parser\""));
+    assert!(sh.contains(&squash(
+        "DISAGREEMENT=\"Image::parse disagrees with the reference parser\""
+    )));
 }
 
 /// SHA-39 AC3 (supporting): scripts/make-fixtures.sh runs every `scripts/gen_*.py`,
 /// stops on the first failure, and never re-signs.
 #[test]
 fn make_fixtures_runs_every_generator() {
-    let sh = read("scripts/make-fixtures.sh");
-    assert!(sh.contains("\nset -euo pipefail\n"));
-    assert!(
-        !sh.contains("--resign\n") && !sh.contains("--resign "),
-        "never --resign"
-    );
+    let text = read("scripts/make-fixtures.sh");
+    let sh = squash(&text);
+    assert!(text.lines().any(|l| l.trim() == "set -euo pipefail"));
+    // Code only (comments may mention it): never --resign, quoted or not.
+    assert!(!sh.contains("--resign"), "never --resign");
+    assert_eq!(squash("x \"--resign\" # --resign\n# --resign"), "x--resign");
     let mut generators = Vec::new();
     for entry in fs::read_dir(workspace_root().join("scripts")).expect("read scripts") {
         let name = entry
@@ -368,16 +471,16 @@ fn make_fixtures_runs_every_generator() {
     assert!(generators.len() >= 4, "{generators:?}");
     for generator in &generators {
         assert!(
-            sh.contains(&format!("run python3 scripts/{generator}")),
+            sh.contains(&squash(&format!("run python3 scripts/{generator}"))),
             "scripts/make-fixtures.sh does not run {generator}"
         );
     }
     // The fuzz corpus is built from the images, so it comes after them.
     let images = sh
-        .find("run python3 scripts/gen_image_fixtures.py")
+        .find(&squash("run python3 scripts/gen_image_fixtures.py"))
         .expect("images");
     let corpus = sh
-        .find("run python3 scripts/gen_fuzz_corpus.py")
+        .find(&squash("run python3 scripts/gen_fuzz_corpus.py"))
         .expect("corpus");
     assert!(images < corpus);
 }

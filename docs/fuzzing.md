@@ -120,7 +120,9 @@ leaves the input in `fuzz/artifacts/parse_image/`.
 cargo +nightly fuzz run parse_image -- -max_total_time=600 -timeout=10 -max_len=8192 -print_final_stats=1
 ```
 
-or, keeping new inputs out of `fuzz/corpus/parse_image/` and logging the run,
+(from the repository root). It writes the inputs it finds into `fuzz/corpus/parse_image/`
+under 40-hex-digit names; they are gitignored, and `gen_fuzz_corpus.py --check` and the
+repo-checks ignore them. Or, keeping new inputs out of that directory and logging the run,
 `scripts/fuzz.sh run 600`. It passes when it ends with `Done N runs in 600 second(s)` (libFuzzer
 may print 601),
 exits 0, reports `stat::slowest_unit_time_sec: 0` (no input near the 10 s timeout) and
@@ -162,15 +164,21 @@ runs `cargo fuzz coverage parse_image fuzz/corpus/parse_image` (the committed co
 the result is deterministic), writes `llvm-cov` text and HTML reports to
 `fuzz/coverage/parse_image/` (`coverage.txt`, `report.txt`, `html/`; never committed),
 and runs `scripts/fuzz_coverage_check.py` on the text report. The check requires an
-execution count above zero on every arm of `TlvKind::of` in
-`keelsign-verify/src/image.rs` (19: every TLV-type branch) and on every `// cov:` line of
+execution count above zero on the arms of `TlvKind::of` in `keelsign-verify/src/image.rs`
+(every TLV-type branch) and on every `// cov:` line of
 `fuzz/src/lib.rs` (29: the 19 TLV kinds, the 8 `ParseError` variants, and
-`Error::Parse` and `Error::TlvAreaTooLarge` from `Image::read_from`). `Error::Read`
+`Error::Parse` and `Error::TlvAreaTooLarge` from `Image::read_from`). Of the 19
+`TlvKind::of` arms, 18 lines are checked directly. The `KeelsignReserved` arm shares its
+line with its `KEELSIGN_TLV_RANGE.contains(&t)` guard, which runs for every type that
+reaches it, so that line's count can never be 0; the arm is checked through its
+`// cov: TlvKind::KeelsignReserved` marker instead, and the checker's output says so.
+`Error::Read`
 cannot occur with a byte-slice reader (`image::tests::read_from_failure_at_every_call_is_read_error`
 covers it); the other `Error` variants belong to `verify`, which this target does not
 fuzz. `python3 scripts/fuzz_coverage_check.py --self-test` tests the checker itself.
 
-Recorded locally (SHA-39): `fuzz coverage: all 19 TlvKind::of arms and 29 cov markers
+Recorded locally (SHA-39): `fuzz coverage: 18 TlvKind::of arm lines reached directly, the
+KeelsignReserved arm (shares its guard's line) through its marker, and all 29 cov markers
 reached`.
 
 ## CI jobs (AC2, TP3)
@@ -181,7 +189,7 @@ cargo-fuzz 0.13.2 (`taiki-e/cache-cargo-install-action`):
 | Job | When | What |
 |---|---|---|
 | `fuzz-check` | every PR, nightly, manual | stable: `cargo fmt`, `cargo clippy -D warnings` and `cargo test` of the fuzz crate, `gen_fuzz_corpus.py --check`, `fuzz_coverage_check.py --self-test` |
-| `fuzz-smoke` | every PR | `scripts/fuzz.sh smoke` (120 s); on failure uploads `fuzz/artifacts/` |
+| `fuzz-smoke` | every PR | `scripts/fuzz.sh smoke` (120 s); on failure uploads the contents of `fuzz/artifacts/` as `fuzz-smoke-<run id>` |
 | `fuzz-nightly` | `cron: "17 3 * * *"` and `workflow_dispatch` | `scripts/fuzz.sh nightly` (1800 s, `timeout-minutes: 60`); always `scripts/fuzz.sh summary` and uploads `fuzz-nightly-<run id>` (30 days); then `scripts/fuzz.sh tp1` and `scripts/fuzz.sh coverage`, uploading the coverage report |
 
 The nightly artifact holds `summary.txt` (toolchain, cargo-fuzz version, seconds, the
@@ -201,16 +209,29 @@ FUZZ_SECONDS=60 scripts/fuzz.sh nightly && scripts/fuzz.sh summary && tar tzf fu
 
 ## Reproducing a crash
 
-Download the `fuzz-nightly-<run id>` (or `fuzz-smoke-<run id>`) artifact, unpack it, and
-run the target on the crashing input; it panics with the disagreement or invariant that
-failed:
+Download the failing run's artifact and unpack it outside the repository, for example in
+`/tmp/keelsign-crash`. The two artifacts are laid out differently:
+
+- `fuzz-nightly-<run id>` holds `summary.txt` and `fuzz-artifacts.tar.gz`; the tarball
+  unpacks to `artifacts/parse_image/crash-<hash>`:
+
+  ```sh
+  cd /tmp/keelsign-crash && tar xzf fuzz-artifacts.tar.gz   # -> artifacts/parse_image/crash-<hash>
+  ```
+
+- `fuzz-smoke-<run id>` holds the contents of `fuzz/artifacts/` directly (no tarball):
+  `run.log` and `parse_image/crash-<hash>`.
+
+Then run the target on the crashing input from the repository root (cargo fuzz looks for
+`fuzz/` in the current directory), giving the path to the unpacked file; it panics with
+the disagreement or invariant that failed:
 
 ```sh
-tar xzf fuzz-artifacts.tar.gz
-cargo +nightly fuzz run parse_image artifacts/parse_image/crash-<hash>
+cargo +nightly fuzz run parse_image /tmp/keelsign-crash/artifacts/parse_image/crash-<hash>   # nightly
+cargo +nightly fuzz run parse_image /tmp/keelsign-crash/parse_image/crash-<hash>             # smoke
 ```
 
-Minimise it with `cargo +nightly fuzz tmin parse_image artifacts/parse_image/crash-<hash>`,
-turn it into a unit test of the parser in `keelsign-verify/src/image.rs`, and fix the
+Minimise it with `cargo +nightly fuzz tmin parse_image <path to crash-<hash>>` (also from the
+repository root), turn it into a unit test of the parser in `keelsign-verify/src/image.rs`, and fix the
 parser (or, if the reference parser is wrong, both oracles: `fuzz/src/oracle.rs` and
 the test oracle in `image.rs`).

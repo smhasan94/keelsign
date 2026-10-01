@@ -6,7 +6,11 @@ fuzz/coverage/parse_image/coverage.txt, from `cargo fuzz coverage` over the comm
 corpus) and asserts an execution count above zero on:
 
   * every arm of `TlvKind::of` in keelsign-verify/src/image.rs (one line per TLV kind,
-    `CONST => TlvKind::Variant`): every TLV-type branch of the parser;
+    `CONST => TlvKind::Variant`): every TLV-type branch of the parser. The
+    `KeelsignReserved` arm shares its line with its `KEELSIGN_TLV_RANGE.contains(&t)`
+    guard, which runs for every type that reaches it, so that line's count can never be
+    0; that arm is checked through its `cov: TlvKind::KeelsignReserved` marker instead
+    (18 arm lines checked directly, the reserved arm through its marker);
   * every line of fuzz/src/lib.rs with a `// cov:` marker: the arms of the harness's
     `cov` functions, one per TlvKind, per ParseError variant, and Error::Parse and
     Error::TlvAreaTooLarge from Image::read_from.
@@ -42,16 +46,17 @@ ERROR_MARKERS = [
 ]
 
 # `  487|  1.23k|    IMAGE_TLV_KEYHASH => TlvKind::KeyHash,` (count empty on non-code lines).
-LINE = re.compile(r"^\s*(\d+)\|\s*([0-9.]+[kMGTE]?)?\|(.*)$")
+LINE = re.compile(r"^\s*(\d+)\|\s*([0-9.]+[kMGTPE]?)?\|(.*)$")
 MARKER = re.compile(r"=>.*//\s*cov:\s*(\S+)")
 TLV_ARM = re.compile(r"=>\s*TlvKind::")
 
 
 def parse_count(text):
-    """An llvm-cov count (`0`, `12`, `1.23k`, `4.5M`) as a number, or None (no code)."""
+    """An llvm-cov count (`0`, `12`, `1.23k`, `4.5M`, `2.1G`, `3P`) as a number, or None
+    (no code)."""
     if not text:
         return None
-    scale = {"k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "E": 1e18}
+    scale = {"k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15, "E": 1e18}
     if text[-1] in scale:
         return float(text[:-1]) * scale[text[-1]]
     return float(text)
@@ -105,6 +110,11 @@ def check(report):
             if len(arms) != TLV_KIND_ARMS:
                 problems.append(f"{IMAGE_RS}: TlvKind::of has {len(arms)} arms, expected {TLV_KIND_ARMS}")
             for number, count, code in arms:
+                if "KEELSIGN_TLV_RANGE.contains" in code:
+                    # The guard shares the line, so the count includes guard evaluations.
+                    line = f"{IMAGE_RS}:{number}  {code}  count {show(count)} (guard line; arm checked via cov: TlvKind::KeelsignReserved)"
+                    ok.append(line)
+                    continue
                 line = f"{IMAGE_RS}:{number}  {code}  count {show(count)}"
                 (ok if count else problems).append(line)
 
@@ -133,6 +143,9 @@ def self_test():
     assert parse_count("12") == 12
     assert parse_count("1.50k") == 1500
     assert parse_count("2M") == 2e6
+    assert parse_count("3.5G") == 3.5e9
+    assert parse_count("1.25P") == 1.25e15
+    assert files("/x/a.rs:\n    7|  1.25P|code\n")["/x/a.rs"] == [(7, 1.25e15, "code")]
 
     kinds = [
         "KeyHash", "PubKey", "Sha256", "Sha384", "Sha512", "Rsa2048Pss", "EcdsaSig", "Rsa3072Pss",
@@ -171,6 +184,14 @@ def self_test():
     _, problems = check(zero_marker)
     assert len(problems) == 1 and "Error::TlvAreaTooLarge" in problems[0], problems
 
+    # The KeelsignReserved arm shares its guard's line: its count is not used; its marker is.
+    guard_line = report(["3"] * 17 + ["0", "3"], ["1"] * 29)
+    ok, problems = check(guard_line)
+    assert not problems and any("guard line" in line for line in ok), problems
+    reserved_marker = report(["3"] * 19, ["1"] * 17 + ["0"] + ["1"] * 11)
+    _, problems = check(reserved_marker)
+    assert len(problems) == 1 and "TlvKind::KeelsignReserved" in problems[0], problems
+
     missing_arm = report(["3"] * 18, ["1"] * 29)
     _, problems = check(missing_arm)
     assert any("18 arms" in p for p in problems), problems
@@ -208,7 +229,10 @@ def main():
         print(f"MISS  {line}")
     if problems:
         sys.exit(f"fuzz coverage: {len(problems)} problem(s); every TLV-type branch and error variant must be reached")
-    print(f"fuzz coverage: all {TLV_KIND_ARMS} TlvKind::of arms and {REQUIRED_MARKERS} cov markers reached")
+    print(
+        f"fuzz coverage: {TLV_KIND_ARMS - 1} TlvKind::of arm lines reached directly, the KeelsignReserved "
+        f"arm (shares its guard's line) through its marker, and all {REQUIRED_MARKERS} cov markers reached"
+    )
 
 
 if __name__ == "__main__":

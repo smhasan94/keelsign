@@ -21,9 +21,34 @@ const PQ_SIGNATURE_TYPES: core::ops::RangeInclusive<u16> = 0x4BA1..=0x4BA3;
 /// input, value length).
 pub type OracleTlv = (bool, u16, usize, usize);
 
+/// The header fields as the reference parser decodes them: little-endian, by offset
+/// (MCUboot `struct image_header`), independently of `Header::parse`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OracleHeader {
+    /// Offset 4, `u32`.
+    pub load_addr: u32,
+    /// Offset 8, `u16`.
+    pub hdr_size: u16,
+    /// Offset 10, `u16`.
+    pub protect_tlv_size: u16,
+    /// Offset 12, `u32`.
+    pub img_size: u32,
+    /// Offset 16, `u32`.
+    pub flags: u32,
+    /// Offsets 20 and 21, `u8`.
+    pub major: u8,
+    pub minor: u8,
+    /// Offset 22, `u16`.
+    pub revision: u16,
+    /// Offset 24, `u32`.
+    pub build_num: u32,
+}
+
 /// What the reference parser predicts for a valid image.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Parsed {
+    /// The header fields.
+    pub header: OracleHeader,
     /// End of the hashed region, `hdr_size + img_size + protect_tlv_size`.
     pub hashed_end: u64,
     /// End of the unprotected TLV area.
@@ -116,7 +141,19 @@ pub fn parse(d: &[u8]) -> Result<Parsed, ParseError> {
         return Err(BadTlvInfoMagic);
     }
     let tlv_end = area(hashed, u64::from(u16_at(hashed + 2)), false, &mut tlvs)?;
+    let header = OracleHeader {
+        load_addr: u32_at(4),
+        hdr_size: u16_at(8),
+        protect_tlv_size: u16_at(10),
+        img_size: u32_at(12),
+        flags: u32_at(16),
+        major: byte(20),
+        minor: byte(21),
+        revision: u16_at(22),
+        build_num: u32_at(24),
+    };
     Ok(Parsed {
+        header,
         hashed_end: hashed,
         tlv_end,
         tlvs,

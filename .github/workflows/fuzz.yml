@@ -12,6 +12,10 @@ concurrency:
   group: fuzz-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Read-only token: the jobs only check out and upload artifacts.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   # cargo fuzz needs nightly (sanitizers, -Z flags). Pinned; bump by hand together with
@@ -61,7 +65,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2026-09-29
+          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
 
       - uses: taiki-e/cache-cargo-install-action@v2
         with:
@@ -88,7 +92,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2026-09-29
+          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
           components: llvm-tools-preview
 
       - uses: taiki-e/cache-cargo-install-action@v2
