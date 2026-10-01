@@ -730,3 +730,79 @@ fn image_digest_section_records_ram_bound() {
         );
     }
 }
+
+/// SHA-46: the hybrid verify section records the flash delta of `size_verify` over its
+/// baseline on both boards and profiles, the static frame, cycles and peak stack as
+/// values or `pending (SHA-69)`, and the reproduce commands.
+#[test]
+fn hybrid_verify_section_records_flash_delta() {
+    let doc = doc();
+    let hybrid = section(&doc, "## Hybrid verify entry point (SHA-46)");
+    for term in [
+        "Policy::Hybrid",
+        "ed25519-dalek",
+        "verify_strict",
+        "size_verify_baseline",
+        "keelsign-hybrid-ed25519-lms.bin",
+        "policy-matrix.bin",
+        "-Z emit-stack-sizes",
+        "POLICY board=",
+        "NorFlashReader",
+        "docs/policy.md",
+    ] {
+        assert!(
+            hybrid.contains(term),
+            "the hybrid section must mention `{term}`"
+        );
+    }
+    let results = section(&doc, "### Hybrid results");
+    let rows = table_rows(results);
+    for bench in &BENCHES {
+        let board = bench.name.split('-').next().unwrap();
+        let row = rows
+            .iter()
+            .find(|r| r[0] == board)
+            .unwrap_or_else(|| panic!("### Hybrid results has no row for {board}"));
+        assert_eq!(row.len(), 6, "{board}: {row:?}");
+        for cell in &row[1..4] {
+            assert!(
+                parse_bytes(cell).is_some_and(|b| b > 0),
+                "{board}: `{cell}` must be a positive byte count"
+            );
+        }
+        for cell in &row[4..6] {
+            assert!(
+                cell == "pending (SHA-69)" || !cell.is_empty() && !cell.contains("pending"),
+                "{board}: `{cell}` must be a value or `pending (SHA-69)`"
+            );
+        }
+        for profile in ["release", "size"] {
+            let label = format!("{board} / {profile}");
+            let detail = rows
+                .iter()
+                .find(|r| r[0] == label)
+                .unwrap_or_else(|| panic!("no flash detail row `{label}`"));
+            let n: Vec<u64> = detail[1..4]
+                .iter()
+                .map(|c| c.replace(',', "").parse().unwrap())
+                .collect();
+            assert!(n.iter().all(|&v| v > 0), "{label}: {detail:?}");
+            assert_eq!(n[1] - n[0], n[2], "{label}: {detail:?}");
+            let column = if profile == "release" { 1 } else { 2 };
+            assert_eq!(parse_bytes(&row[column]), Some(n[2]), "{label}");
+        }
+    }
+    let reproduce = section(&doc, "### Hybrid reproduce");
+    for command in [
+        "cargo test --release --locked --test policy -- policy_matrix_from_flash",
+        "size_verify_baseline target/thumbv7em-none-eabihf/release/size_verify",
+        "size_verify_baseline target/thumbv7em-none-eabihf/size/size_verify",
+        "cargo +nightly rustc --release --locked --bin size_verify --target-dir target/nightly -- -Z emit-stack-sizes",
+        "cargo test -p keelsign-verify --locked --features ed25519 --test policy_matrix",
+    ] {
+        assert!(
+            reproduce.contains(command),
+            "### Hybrid reproduce must list `{command}`"
+        );
+    }
+}

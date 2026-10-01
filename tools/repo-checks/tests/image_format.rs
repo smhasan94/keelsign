@@ -175,6 +175,15 @@ fn doc_has_required_sections() {
             "## Signing mode must mention `{term}`"
         );
     }
+    // SHA-46 implemented the rules and the policy-matrix images exercise them.
+    assert!(
+        !signing.contains("sample images do not exercise them"),
+        "## Signing mode must not say the sample images skip the SHA-46 rules"
+    );
+    assert!(
+        signing.contains("keelsign_verify::verify") && signing.contains("docs/policy.md"),
+        "## Signing mode must name keelsign_verify::verify and link docs/policy.md"
+    );
     assert!(!section(&doc, "### Rationale").trim().is_empty());
     let lms = section(&doc, "## Accepted LMS parameter sets and CNSA 2.0");
     for term in [
