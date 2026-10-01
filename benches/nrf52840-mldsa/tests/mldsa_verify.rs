@@ -9,8 +9,8 @@
 //! `MLDSA board=… image=… set=… policy=… result=… cycles=… us=… peak_stack=… saturated=…`
 //! line per image and a `MLDSA board=nrf52840 passed=N/N` summary.
 //!
-//! The peak stack is far over the 32 KB device budget (about 93 KB for ML-DSA-44 and
-//! 153 KB for ML-DSA-65 in the verify frame alone); that is the documented SHA-169
+//! The peak stack is far over the 32 KB device budget (about 98 KB for ML-DSA-44 and
+//! 158 KB for ML-DSA-65 in the verify frame alone, stable); that is the documented SHA-169
 //! finding, not a test failure. The test fails on a verdict other than `Ok` or a
 //! saturated paint.
 //!

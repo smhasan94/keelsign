@@ -67,7 +67,7 @@
 //!   `ML-DSA.Verify` with [`tlv::MLDSA_CONTEXT`], through `ml-dsa` with no heap) under
 //!   [`DefaultBackend::new`]; [`DefaultBackend::cnsa_2_0`] refuses ML-DSA with
 //!   [`Error::UnsupportedParameterSet`]. Without the feature, ML-DSA signatures fail with
-//!   [`Error::UnsupportedAlgorithm`]. Its verify needs about 93 KB (ML-DSA-44) / 153 KB
+//!   [`Error::UnsupportedAlgorithm`]. Its verify needs about 98 KB (ML-DSA-44) / 158 KB
 //!   (ML-DSA-65) of stack, far over the 32 KB device budget: see docs/benchmarks.md,
 //!   "ML-DSA verify (SHA-44)" (SHA-169 owns a low-stack verify). LMS/HSS is always
 //!   enabled.

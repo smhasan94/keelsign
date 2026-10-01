@@ -17,8 +17,8 @@
 //! | signature does not decode: malformed hint encoding, or `‖z‖∞ ≥ γ1 − β` (the FIPS 204 Algorithm 3 norm bound, which `ml-dsa` checks while decoding) | [`Error::MalformedSignature`] |
 //! | the verification equation fails (wrong key, message or context, tampered `c̃` or `z`), or the context is longer than 255 bytes | [`Error::SignatureInvalid`] |
 //!
-//! The verify runs entirely on the stack (no heap) and needs a lot of it: about 93 KB for
-//! ML-DSA-44 and 153 KB for ML-DSA-65 (release), far over the 32 KB device budget
+//! The verify runs entirely on the stack (no heap) and needs a lot of it: about 98 KB for
+//! ML-DSA-44 and 158 KB for ML-DSA-65 (stable release), far over the 32 KB device budget
 //! (docs/benchmarks.md, "ML-DSA verify (SHA-44)"; SHA-169 owns a low-stack verify). Each
 //! parameter set runs in its own non-inlined frame, so callers that never reach an ML-DSA
 //! signature (LMS/HSS, Ed25519) do not reserve that stack.
@@ -88,9 +88,9 @@ pub fn verify_with_context(
 /// One parameter set's verify.
 ///
 /// `#[inline(never)]` is load-bearing: inlined into [`verify_with_context`] (and on into
-/// `verify_with`), the ML-DSA-65 state (about 153 KB) would become part of the caller's
+/// `verify_with`), the ML-DSA-65 state (about 158 KB) would become part of the caller's
 /// frame and every verify, LMS/HSS included, would reserve it. Kept out of line, each
-/// parameter set has its own frame (about 93 KB / 153 KB) that only an ML-DSA signature
+/// parameter set has its own frame (about 98 KB / 158 KB) that only an ML-DSA signature
 /// reaches.
 #[cfg(feature = "ml-dsa")]
 #[inline(never)]

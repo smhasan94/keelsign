@@ -136,7 +136,7 @@ build is running.
   with the same `M` (same header, body and protected TLVs) therefore verifies by design;
   a signature taken from an image with a different `M` is `SignatureInvalid`
   (`keelsign-mldsa44-foreign-sig.bin`, `keelsign-mldsa65-foreign-sig.bin`).
-- **Stack.** The verify runs on the stack: about 93 KB (ML-DSA-44) and 153 KB (ML-DSA-65)
+- **Stack.** The verify runs on the stack: about 98 KB (ML-DSA-44) and 158 KB (ML-DSA-65) on stable
   for the verify frame alone, far over the 32 KB device budget. See
   [docs/benchmarks.md](benchmarks.md#ml-dsa-verify-sha-44); SHA-169 owns a low-stack
   verify.

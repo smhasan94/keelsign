@@ -722,20 +722,34 @@ stands: the stack is far over the 32 KB device budget, and
 
 ### Stack the feature needs
 
-**`ml-dsa` needs 93,456 B (ML-DSA-44) / 153,080 B (ML-DSA-65) of stack for the
-`mldsa::verify_param` frame alone (release; 73,872 / 118,952 B at `opt-level = "s"`), on
-top of the `verify_with` chain (about 4.9 KB with the buffers, plus a few KB of ML-DSA
-callees).** That is far over the 32 KB (32,768 B) on-device budget of the SHA-34 decision
-rule. Both sets fit in the stack the test binaries have (261,048 B on the nRF52840,
-522,960 B on the RP2350; ML-DSA-65 leaves about 85 KB free on the nRF52840), so the board
-runs can measure them, but a real 256 KB-RAM bootloader cannot spare 153 KB beside its
-application. Integrators who enable `ml-dsa` on a device must budget that stack
-themselves until [SHA-169](https://linear.app/shakooky/issue/SHA-169) lands.
+**With the stable compiler the repository builds with (`rust-toolchain.toml`: stable,
+Rust 1.91.1), `ml-dsa` needs 97,544 B (ML-DSA-44) / 158,192 B (ML-DSA-65) of stack for
+the `mldsa::verify_param` frame alone (release), on top of the `verify_with` chain (about
+4.9 KB with the buffers, plus a few KB of ML-DSA callees). Budget with these figures.**
+They are the prologues of the two `verify_param` instances in the stable release
+`size_verify --features ml-dsa`, identical on both boards: ML-DSA-44 reserves
+`sub.w sp, sp, #0x17c00` + `sub sp, #0xe4` after pushing nine registers (36 B), ML-DSA-65
+`#0x26800` + `#0x1cc` + 36 B (disassembled with `objdump -d`; the instance is identified by
+its key-length compare, `cmp.w r1, #0x520` = 1,312 or `#0x7a0` = 1,952). The nightly
+`-Z emit-stack-sizes` frames of the same code (`rustc 1.101.0-nightly (c1070d693
+2026-09-28)`) are 93,456 / 153,080 B in release and 73,872 / 118,952 B at
+`opt-level = "s"`; the results table below records those, as SHA-34 did. Either way that is
+far over the 32 KB (32,768 B) on-device budget of the SHA-34 decision rule. Both sets fit
+in the stack the test binaries have (261,048 B on the nRF52840, 522,960 B on the RP2350).
+ML-DSA-65 leaves roughly 85 KB free on the nRF52840: 261,048 B minus the 158,192 B stable
+frame minus about 17 KB for the `verify_with` chain with its 4 KiB TLV buffer and 256 B
+chunk, the ML-DSA callees and the test harness. So the board runs can measure them, but a
+real 256 KB-RAM bootloader cannot spare 158 KB beside its application. Integrators who
+enable `ml-dsa` on a device must budget that stack themselves until
+[SHA-169](https://linear.app/shakooky/issue/SHA-169) lands.
 
 ### ML-DSA verify results
 
-Static frames and flash are measured without the boards (stable Rust 1.91.1, nightly
-`rustc 1.101.0-nightly (c1070d693 2026-09-28)` for the frames); peak stack and cycles need
+Static frames and flash are measured without the boards (stable Rust 1.91.1 for flash,
+nightly `rustc 1.101.0-nightly (c1070d693 2026-09-28)` for the frames: the "Static frame"
+columns are nightly `-Z emit-stack-sizes` figures; the stable release prologues, the
+figures to budget with, are 97,544 / 158,192 B, see
+[Stack the feature needs](#stack-the-feature-needs)); peak stack and cycles need
 the boards (`tests/mldsa_verify.rs`).
 
 | Board | Set | Static frame release | Static frame size | `verify_with` frame (ml-dsa on / off, release) | Flash Δ ml-dsa (release / size) | Peak stack (measured) | Cycles |
@@ -756,19 +770,33 @@ both arms. Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every r
 | rp2350 / release | 121,188 | 176,364 | 55,176 |
 | rp2350 / size | 104,604 | 118,432 | 13,828 |
 
-Feature-off drift. The `size_verify` (ml-dsa off) figures include the KSPM v2
-`policy-matrix.bin` (37,633 B, up from 7,295 B: 19 more images and the off-cells) in
-`.rodata`, which `size_verify_baseline` carries too, so it cancels out of the SHA-46
-delta. With the feature off, SHA-44 still changes `keelsign-verify` itself
-(the `DefaultBackend` ML-DSA arm with its `cnsa_2_0()` refusal) and `policy-kat` (six
-codes per case): re-measured with the same commands, the SHA-46 hybrid delta is
-74,736 / 59,380 B (nrf52840 release / size) and 74,656 / 59,372 B (rp2350), against
-74,376 / 59,144 and 74,264 / 59,152 B at `861abce` (the SHA-46 tip), and the
-`verify_hybrid` frame 4,904 B against 4,896 B. The LMS/HSS delta is 7,216 / 5,384 B
-(nrf52840) and 7,224 / 5,384 B (rp2350), against 6,836 / 5,236 and 6,844 / 5,236 B at
-`861abce` (the [LMS results](#lms-results) table still shows the SHA-240 figures). The
-digest and the SHA-34 ML-DSA bins are unchanged. The SHA-46 and SHA-65 tables above keep
-the figures of their tickets.
+Feature-off drift. The SHA-46 hybrid and SHA-65 LMS/HSS tables above keep the figures of
+their tickets, and they no longer reproduce at this commit. With the feature off, the same
+commands now give a SHA-46 hybrid delta of 74,736 / 59,380 B (nrf52840 release / size) and
+74,656 / 59,372 B (rp2350), against 74,376 / 59,144 and 74,264 / 59,152 B at `861abce`
+(the SHA-46 tip). The LMS/HSS delta is now 7,216 / 5,384 B (nrf52840) and 7,224 / 5,384 B
+(rp2350), against 6,836 / 5,236 and 6,844 / 5,236 B at `861abce`. (The
+[LMS results](#lms-results) table still shows the SHA-240 figures, which had already
+drifted by `861abce`.) The `verify_hybrid` frame in the [Hybrid method](#hybrid-method)
+text, 4,896 B, is now 4,904 B with the feature off.
+
+There are two causes:
+
+- **Code drift of about 360–380 B.** A symbol comparison (`nm -S`) of the feature-off
+  nrf52840 release ELFs between `861abce` and this commit attributes it as follows:
+  - `size_lms`, +380 B: `DefaultBackend::verify` +120 B (the ML-DSA arm and the
+    `cnsa_2_0()` refusal), `keelsign_verify::lms::walk` +256 B (its source is unchanged:
+    a fat-LTO inlining and layout difference) and `lms_kat::verify_with_keys` +4 B.
+  - `size_verify`, +360 B in its delta: `DefaultBackend::verify` +120 B,
+    `verify_pq_with` +16 B, `lms::walk` +236 B, `size_verify::verify_hybrid` −24 B, and
+    14 B net in the two bins' `main` (362 B in all; alignment padding takes back 2 B).
+  - No `mldsa` or `ml_dsa` symbol is in either feature-off ELF.
+- **Bigger absolute sizes.** `size_verify` and `size_verify_baseline` both grow because
+  `policy-matrix.bin`, which both carry in `.rodata`, went from 7,295 B to 37,633 B (KSPM
+  v2: 19 more images and the off-cells). This cancels out of the deltas.
+
+The digest and the SHA-34 ML-DSA bins are unchanged.
+[SHA-275](https://linear.app/shakooky/issue/SHA-275) refreshes those tables.
 
 ### ML-DSA verify reproduce
 

@@ -12,8 +12,8 @@ default = []
 # ML-DSA-44/65 signature verification (SHA-44): pure FIPS 204 `ML-DSA.Verify` with
 # `MLDSA_CONTEXT`, through `ml-dsa` (pinned per CLAUDE.md). Off by default; with it off,
 # ML-DSA signatures fail with `Error::UnsupportedAlgorithm`. Its verify needs about
-# 93 KB (ML-DSA-44) / 153 KB (ML-DSA-65) of stack, far over the 32 KB device budget
-# (docs/benchmarks.md; SHA-169 owns a low-stack verify).
+# 98 KB (ML-DSA-44) / 158 KB (ML-DSA-65) of stack on stable, far over the 32 KB device
+# budget (docs/benchmarks.md; SHA-169 owns a low-stack verify).
 ml-dsa = ["dep:ml-dsa"]
 # The Ed25519 half of a hybrid image (SHA-46): `Policy::ClassicalOnly` and
 # `Policy::Hybrid` verify MCUboot's ED25519 TLV with `ed25519-dalek`'s `verify_strict`.

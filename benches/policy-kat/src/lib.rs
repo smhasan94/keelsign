@@ -2,11 +2,11 @@
 //! `tests/policy.rs` of both bench projects.
 //!
 //! `tests/fixtures/images/policy-matrix.bin` is written by `scripts/gen_image_fixtures.py`
-//! from the `policy` (and `policy_without_ml_dsa`, SHA-44) cells of `MANIFEST.json`. This crate parses it without allocation or
-//! panics, finds each case's image (embedded once with `include_bytes!` in [`IMAGES`]),
-//! and runs [`keelsign_verify::verify_with`] on it under every [`Policy`], with the case's
-//! post-quantum key and the Ed25519 test key trusted, so the same code checks the matrix
-//! on the host and on the boards.
+//! from the `policy` (and `policy_without_ml_dsa`, SHA-44) cells of `MANIFEST.json`. This
+//! crate parses it without allocation or panics, finds each case's image (embedded once
+//! with `include_bytes!` in [`IMAGES`]), and runs [`keelsign_verify::verify_with`] on it
+//! under every [`Policy`], with the case's post-quantum key and the Ed25519 test key
+//! trusted, so the same code checks the matrix on the host and on the boards.
 //!
 //! Index format "KSPM v2" (lengths little-endian):
 //!

@@ -145,7 +145,8 @@ fn ml_dsa_pinned_exact_and_patched() {
 }
 
 /// SHA-44 (AC5): keelsign-verify with `ml-dsa` on a Cortex-M target pulls in no `alloc`
-/// or `std` feature of ml-dsa or the crates it builds on, so ML-DSA verify is heap-free.
+/// or `std` feature of ml-dsa or the crates it builds on, so ML-DSA verify is heap-free,
+/// and none of `getrandom`, `rand_core`, `pkcs8` or `zeroize`.
 #[test]
 fn ml_dsa_feature_tree_has_no_alloc() {
     let root = workspace_root();
@@ -185,6 +186,18 @@ fn ml_dsa_feature_tree_has_no_alloc() {
                 "keelsign-verify --features ml-dsa enables `{needle}`:\n{tree}"
             );
         }
+    }
+    // Verify only: no RNG, no PKCS #8 parsing, no zeroize, neither as packages nor as
+    // enabled features of ml-dsa.
+    for krate in ["getrandom", "rand_core", "pkcs8", "zeroize"] {
+        assert!(
+            !tree.contains(&format!("{krate} v")),
+            "keelsign-verify --features ml-dsa pulls in the package `{krate}`:\n{tree}"
+        );
+        assert!(
+            !tree.contains(&format!("ml-dsa feature \"{krate}\"")),
+            "keelsign-verify --features ml-dsa enables ml-dsa's `{krate}` feature:\n{tree}"
+        );
     }
     // No crate in the normal tree has an `alloc` or `std` feature on.
     for line in tree.lines() {

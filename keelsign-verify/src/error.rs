@@ -38,6 +38,7 @@ pub enum Error {
     /// The LMS/HSS backend ([`lms`](crate::lms)) returns it for a typecode pair outside its
     /// [`ParameterPolicy`](crate::lms::ParameterPolicy) at any level, or an unsupported
     /// number of HSS levels, before hashing anything.
+    ///
     /// [`DefaultBackend::cnsa_2_0`](crate::DefaultBackend::cnsa_2_0) returns it for every
     /// ML-DSA-44/65 signature (never CNSA 2.0 algorithms).
     UnsupportedParameterSet,
