@@ -687,7 +687,7 @@ mod tests {
             ),
             (u32::MAX, ImageError::Encrypted),
             (
-                u32::MAX & !(IMAGE_F_ENCRYPTED_AES128 | IMAGE_F_ENCRYPTED_AES256),
+                !(IMAGE_F_ENCRYPTED_AES128 | IMAGE_F_ENCRYPTED_AES256),
                 ImageError::Compressed,
             ),
         ] {
