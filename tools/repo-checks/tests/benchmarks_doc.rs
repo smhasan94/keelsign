@@ -1325,8 +1325,8 @@ fn flash_tables_are_consistent() {
                     .collect();
                 for (k, d) in t.deltas(&label).into_iter().enumerate() {
                     assert_eq!(
-                        n[k + 1] - n[0],
-                        d,
+                        n[k + 1].checked_sub(n[0]),
+                        Some(d),
                         "{}: `{label}` {} − {} ≠ {d}",
                         t.section,
                         t.header[flash[k + 1]],
@@ -1498,7 +1498,11 @@ fn static_frames_match_the_frame_detail_table() {
             "### Hybrid method must quote `{quoted}`"
         );
     }
-    let total = format!("({} B)", grouped(sum(&hybrid_rows, 0)));
+    let total = format!(
+        "≈ {} KB ({} B)",
+        kilobytes(sum(&hybrid_rows, 0)),
+        grouped(sum(&hybrid_rows, 0))
+    );
     assert!(
         method.contains(&total),
         "### Hybrid method must quote `{total}`"
@@ -1538,17 +1542,22 @@ fn static_frames_match_the_frame_detail_table() {
     let method = normalized(section(&doc, "### Digest method"));
     let digest_frame = both_boards(digest) + both_boards(compress);
     for phrase in [
-        format!("{} B (`image_digest`", both_boards(digest)),
+        format!("{} B (`image_digest`", grouped(both_boards(digest))),
         format!(
-            "`sha2::sha256::compress256` {} B = {digest_frame} B",
-            both_boards(compress)
+            "`sha2::sha256::compress256` {} B = {} B",
+            grouped(both_boards(compress)),
+            grouped(digest_frame)
         ),
-        format!("256 + {digest_frame} = {} B", 256 + digest_frame),
+        format!(
+            "256 + {} = {} B",
+            grouped(digest_frame),
+            grouped(256 + digest_frame)
+        ),
         format!(
             "`size_digest::read_image<…>` {} B + `Image::parse_parts` {} B = {} B",
-            both_boards(read_image),
-            both_boards(parse_parts),
-            both_boards(read_image) + both_boards(parse_parts)
+            grouped(both_boards(read_image)),
+            grouped(both_boards(parse_parts)),
+            grouped(both_boards(read_image) + both_boards(parse_parts))
         ),
     ] {
         assert!(
@@ -1556,6 +1565,14 @@ fn static_frames_match_the_frame_detail_table() {
             "### Digest method must quote `{phrase}`"
         );
     }
+    let bound = format!(
+        "compiled bound with a 256 B chunk is {} B",
+        grouped(256 + digest_frame)
+    );
+    assert!(
+        normalized(section(&doc, "### Digest results")).contains(&bound),
+        "### Digest results must quote `{bound}`"
+    );
 
     // SHA-34: `verify_case` and the largest other frame.
     let results = table_rows(section(&doc, "## Results"));
@@ -1608,6 +1625,30 @@ fn static_frames_match_the_frame_detail_table() {
         normalized(section(&doc, "## Decision")).contains(&quoted),
         "## Decision must quote `{quoted}`"
     );
+    let ratio = format!(
+        "{:.1}",
+        both_boards(f(
+            "size_mldsa44",
+            "release",
+            "mldsa_kat::verify_case<ml_dsa::MlDsa44>"
+        )) as f64
+            / 32_768.0
+    );
+    for (heading, phrase) in [
+        (
+            "## Decision",
+            format!("about {ratio} times the 32,768 B limit"),
+        ),
+        (
+            "## Static stack frame estimate (provisional)",
+            format!("about {ratio} times the 32 KB limit"),
+        ),
+    ] {
+        assert!(
+            normalized(section(&doc, heading)).contains(&phrase),
+            "{heading} must quote `{phrase}`"
+        );
+    }
 
     // SHA-44: `verify_param` per set and profile, `verify_with` on / off.
     let mldsa_results = table_rows(section(&doc, "### ML-DSA verify results"));
@@ -1644,17 +1685,98 @@ fn static_frames_match_the_frame_detail_table() {
 
     // The stable prologues are the figures "### Stack the feature needs" tells to budget.
     let stack = normalized(section(&doc, "### Stack the feature needs"));
+    let prologue = |set: &str| {
+        both_boards(
+            rows.iter()
+                .find(|r| r.stable_prologue && r.function.contains(set))
+                .unwrap_or_else(|| panic!("{FRAME_DETAIL} has no stable-prologue row for {set}")),
+        )
+    };
     for set in SETS {
-        let row = rows
-            .iter()
-            .find(|r| r.stable_prologue && r.function.contains(set))
-            .unwrap_or_else(|| panic!("{FRAME_DETAIL} has no stable-prologue row for {set}"));
-        let quoted = format!("{} B ({set})", grouped(both_boards(row)));
+        let quoted = format!("{} B ({set})", grouped(prologue(set)));
         assert!(
             stack.contains(&quoted),
             "### Stack the feature needs must quote `{quoted}`"
         );
     }
+    let param = |build: &str, set: &str| {
+        both_boards(f(
+            "size_verify",
+            build,
+            &format!("keelsign_verify::mldsa::verify_param<ml_dsa::{set}>"),
+        ))
+    };
+    let case = |bin: &str, set: &str| {
+        both_boards(f(
+            bin,
+            "release",
+            &format!("mldsa_kat::verify_case<ml_dsa::{set}>"),
+        ))
+    };
+    let (p44, p65) = (prologue("ML-DSA-44"), prologue("ML-DSA-65"));
+    let (c44, c65) = (
+        case("size_mldsa44", "MlDsa44"),
+        case("size_mldsa65", "MlDsa65"),
+    );
+    let (r44, r65) = (
+        param("release, `ml-dsa`", "MlDsa44"),
+        param("release, `ml-dsa`", "MlDsa65"),
+    );
+    let case_gap = r44.abs_diff(c44).max(r65.abs_diff(c65));
+    let hybrid_gap = both_boards(hybrid_on).abs_diff(both_boards(hybrid_off));
+    for (heading, phrase) in [
+        (
+            "### Stack the feature needs",
+            format!(
+                "{} / {} B in release and {} / {} B at",
+                grouped(r44),
+                grouped(r65),
+                grouped(param("size, `ml-dsa`", "MlDsa44")),
+                grouped(param("size, `ml-dsa`", "MlDsa65"))
+            ),
+        ),
+        (
+            "### Stack the feature needs",
+            format!("minus the {} B stable frame", grouped(p65)),
+        ),
+        (
+            "### Stack the feature needs",
+            format!("cannot spare {} KB", p65 / 1000),
+        ),
+        (
+            "### Stack the feature needs",
+            format!(
+                "about {} KB with the buffers",
+                kilobytes(both_boards(hybrid_on))
+            ),
+        ),
+        (
+            "### ML-DSA verify results",
+            format!("are {} / {} B", grouped(p44), grouped(p65)),
+        ),
+        (
+            "### ML-DSA verify results",
+            format!(
+                "({} / {} B) within {case_gap} B",
+                grouped(c44),
+                grouped(c65)
+            ),
+        ),
+        (
+            "### ML-DSA verify method",
+            format!("within {hybrid_gap} B of its feature-off size"),
+        ),
+    ] {
+        assert!(
+            normalized(section(&doc, heading)).contains(&phrase),
+            "{heading} must quote `{phrase}`"
+        );
+    }
+}
+
+/// `12760` as the prose rounds it, `12.8` (KB of 1,000 B, one decimal).
+fn kilobytes(bytes: u64) -> String {
+    format!("{:.1}", bytes as f64 / 1000.0)
 }
 
 /// The two `rustc --version` strings recorded under `### Measurement toolchains`:
@@ -1936,6 +2058,65 @@ fn drift_reports_name_every_mismatch() {
         report[0].contains("nrf52840: matches 2 functions, lengthen it"),
         "{report:?}"
     );
+
+    // Stable prologues: objdump listings in, one line per altered figure or bad listing.
+    let listing = |cmp: &str, sub: &str| {
+        format!(
+            "0000784c <_ZN15keelsign_verify5mldsa12verify_param17h1216eb02e5073f09E>:\n\
+             \x20   784c:      \tpush\t{{r4, r5, r6, r7, lr}}\n\
+             \x20   7850:      \tpush.w\t{{r8, r9, r10, r11}}\n\
+             \x20   7854:      \tsub.w\tsp, sp, #0x17c00\n\
+             \x20   7858:      \tsub\tsp, #{sub}\n\
+             \x20   785a:      \t{cmp}\n\n"
+        )
+    };
+    let good = listing("cmp.w\tr1, #0x520", "0xe4");
+    let mut measured = BTreeMap::new();
+    let mut report = Vec::new();
+    for board in BOARDS {
+        collect_prologues(board, &good, &mut measured, &mut report);
+    }
+    assert_eq!(report, Vec::<String>::new());
+    assert_eq!(compare_prologues(&rows, &measured), Vec::<String>::new());
+    let mut altered = BTreeMap::new();
+    collect_prologues("nrf52840", &good, &mut altered, &mut report);
+    collect_prologues(
+        "rp2350",
+        &listing("cmp.w\tr1, #0x520", "0xe8"),
+        &mut altered,
+        &mut report,
+    );
+    assert_eq!(
+        compare_prologues(&rows, &altered),
+        [
+            "### Static frame detail: `size_verify` release, `ml-dsa`, stable prologue, \
+          `verify_param` ML-DSA-44 (`cmp.w r1, #0x520`), rp2350: doc 97544, measured 97548"
+        ]
+    );
+    // No key-length compare, or two instances of one set: error lines.
+    let mut report = Vec::new();
+    collect_prologues(
+        "nrf52840",
+        &listing("mov\tr4, r0", "0xe4"),
+        &mut BTreeMap::new(),
+        &mut report,
+    );
+    assert_eq!(report.len(), 1, "{report:?}");
+    assert!(
+        report[0].contains("has no key-length compare"),
+        "{report:?}"
+    );
+    let mut report = Vec::new();
+    collect_prologues(
+        "nrf52840",
+        &format!("{good}{good}"),
+        &mut BTreeMap::new(),
+        &mut report,
+    );
+    assert_eq!(
+        report,
+        ["nrf52840: two `verify_param` instances for ML-DSA-44"]
+    );
 }
 
 // ---- SHA-275: ignored drift checks (rebuild and compare exactly) -----------------------
@@ -1960,15 +2141,28 @@ fn rustup_proxy(tool: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(tool))
 }
 
-/// `tool` run through the rustup proxy in `benches/<name>`, with the outer `cargo test`'s
-/// toolchain and target dir removed (the documented target dirs are relative to the bench
-/// project) and `toolchain` selected if given (otherwise the bench's toolchain file
-/// applies).
+/// `tool` run through the rustup proxy in `benches/<name>`, with the outer environment's
+/// toolchain, target dir, compiler flags and profile overrides removed (the documented
+/// commands assume none, and their target dirs are relative to the bench project) and
+/// `toolchain` selected if given (otherwise the bench's toolchain file applies).
 fn bench_tool(bench: &Example, tool: &str, toolchain: Option<&str>) -> Command {
     let mut cmd = Command::new(rustup_proxy(tool));
-    cmd.current_dir(bench_dir(bench))
-        .env_remove("RUSTUP_TOOLCHAIN")
-        .env_remove("CARGO_TARGET_DIR");
+    cmd.current_dir(bench_dir(bench));
+    for var in [
+        "RUSTUP_TOOLCHAIN",
+        "CARGO_TARGET_DIR",
+        "CARGO_BUILD_TARGET_DIR",
+        "RUSTFLAGS",
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_BUILD_RUSTFLAGS",
+    ] {
+        cmd.env_remove(var);
+    }
+    for (var, _) in std::env::vars_os() {
+        if var.to_string_lossy().starts_with("CARGO_PROFILE_") {
+            cmd.env_remove(var);
+        }
+    }
     if let Some(toolchain) = toolchain {
         cmd.env("RUSTUP_TOOLCHAIN", toolchain);
     }
@@ -2025,6 +2219,10 @@ fn fail_on_drift(what: &str, report: &[String]) {
 fn recorded_flash_tables_match_a_fresh_build() {
     let doc = doc();
     let cells = flash_detail_cells(&doc);
+    assert!(
+        !cells.is_empty(),
+        "docs/benchmarks.md has no flash detail cells"
+    );
     let (stable, _) = recorded_toolchains(&doc);
     let toolchain = stable_toolchain();
     let mut flash = BTreeMap::new();
@@ -2041,7 +2239,7 @@ fn recorded_flash_tables_match_a_fresh_build() {
             let feature: &[&str] = if ml_dsa {
                 &["--features", "ml-dsa", "--target-dir", "target/mldsa"]
             } else {
-                &[]
+                &["--target-dir", "target"]
             };
             for profile in ["release", "size"] {
                 let profile_args: &[&str] = if profile == "release" {
@@ -2074,6 +2272,7 @@ fn recorded_flash_tables_match_a_fresh_build() {
                 assert_eq!(rows.len(), bins.len(), "elf_sizes.py output:\n{sizes}");
                 for (bin, row) in bins.iter().zip(&rows) {
                     // | label | elf | .text | .rodata | .data | .bss | flash | static RAM |
+                    assert_eq!(row[1], *bin, "elf_sizes.py row order:\n{sizes}");
                     let key = (
                         board.to_owned(),
                         profile.to_owned(),
@@ -2135,6 +2334,10 @@ fn parse_frames(output: &str) -> Vec<(u64, String)> {
 fn recorded_static_frames_match_a_fresh_nightly_build() {
     let doc = doc();
     let rows = frame_rows(&doc);
+    assert!(
+        rows.iter().any(|r| !r.stable_prologue),
+        "{FRAME_DETAIL} has no nightly rows"
+    );
     let (_, nightly) = recorded_toolchains(&doc);
     let toolchain = nightly_toolchain();
     let builds: BTreeSet<(&str, &str, bool)> = rows
@@ -2247,6 +2450,30 @@ fn mldsa_prologues(disassembly: &str) -> Result<Vec<(&'static str, u64)>, String
     Ok(found)
 }
 
+/// Adds the `verify_param` prologues of `board`'s `objdump` listing to `measured`
+/// ((board, set) → frame); a listing it cannot read or two instances of one set become
+/// report lines.
+fn collect_prologues(
+    board: &str,
+    listing: &str,
+    measured: &mut BTreeMap<(String, String), u64>,
+    report: &mut Vec<String>,
+) {
+    match mldsa_prologues(listing) {
+        Ok(prologues) => {
+            for (set, frame) in prologues {
+                if measured
+                    .insert((board.to_owned(), set.to_owned()), frame)
+                    .is_some()
+                {
+                    report.push(format!("{board}: two `verify_param` instances for {set}"));
+                }
+            }
+        }
+        Err(e) => report.push(format!("{board}: {e}")),
+    }
+}
+
 /// One line per stable-prologue row that differs from `measured` ((board, set) → frame).
 fn compare_prologues(rows: &[FrameRow], measured: &BTreeMap<(String, String), u64>) -> Vec<String> {
     let mut report = Vec::new();
@@ -2281,6 +2508,10 @@ fn compare_prologues(rows: &[FrameRow], measured: &BTreeMap<(String, String), u6
 fn recorded_stable_mldsa_prologues_match_objdump() {
     let doc = doc();
     let rows = frame_rows(&doc);
+    assert!(
+        rows.iter().any(|r| r.stable_prologue),
+        "{FRAME_DETAIL} has no stable-prologue rows"
+    );
     let (stable, _) = recorded_toolchains(&doc);
     let toolchain = stable_toolchain();
     let objdump = std::env::var("OBJDUMP").unwrap_or_else(|_| "objdump".to_owned());
@@ -2317,20 +2548,7 @@ fn recorded_stable_mldsa_prologues_match_objdump() {
             "`{objdump} -d` failed on {} (needs LLVM objdump; set OBJDUMP=llvm-objdump):\n{stderr}",
             elf.display()
         );
-        let board = board_of(bench);
-        match mldsa_prologues(&listing) {
-            Ok(prologues) => {
-                for (set, frame) in prologues {
-                    if measured
-                        .insert((board.to_owned(), set.to_owned()), frame)
-                        .is_some()
-                    {
-                        report.push(format!("{board}: two `verify_param` instances for {set}"));
-                    }
-                }
-            }
-            Err(e) => report.push(format!("{board}: {e}")),
-        }
+        collect_prologues(board_of(bench), &listing, &mut measured, &mut report);
     }
     report.extend(compare_prologues(&rows, &measured));
     fail_on_drift("stable ML-DSA prologues", &report);

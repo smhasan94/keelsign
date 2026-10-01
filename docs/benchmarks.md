@@ -694,7 +694,7 @@ Static frames (nightly only, not run in CI):
 ```sh
 cd benches/nrf52840-mldsa
 cargo +nightly rustc --release --locked --bin size_verify --target-dir target/nightly -- -Z emit-stack-sizes
-python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/release/size_verify --top 16
+python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/release/size_verify --top 20 --match size_verify::
 ```
 
 ## ML-DSA verify (SHA-44)
@@ -884,9 +884,10 @@ This runs three ignored checks, which need both compilers above with the thumb t
 flip-link, `python3` and LLVM objdump:
 
 - `recorded_flash_tables_match_a_fresh_build`: builds both bench projects (release and
-  size, with and without `--features ml-dsa`) with the documented commands and compares
-  every cell of every "Flash detail" table with `elf_sizes.py`, and that the static RAM
-  delta is 0.
+  size, with and without `--features ml-dsa`) with the documented commands, compares every
+  flash cell of every "Flash detail" table with `elf_sizes.py` and checks that each
+  table's static RAM delta is 0. The Δ cells are not measured: the CI check
+  `flash_tables_are_consistent` checks that they are the differences of the flash cells.
 - `recorded_static_frames_match_a_fresh_nightly_build`: runs the documented nightly
   builds and compares every row of [Static frame detail](#static-frame-detail) with
   `stack_frames.py`, on both boards.
@@ -898,8 +899,11 @@ column, recorded and measured value) or a toolchain that differs from the record
 The checks run in each ticket's verification, not in CI. When they fail, re-run the
 documented commands with the recorded compilers (or re-measure everything with new ones
 and update [Measurement toolchains](#measurement-toolchains)) and update every table the
-report lists. Non-ignored repo-checks keep the results tables, the prose and the detail
-tables consistent with each other in CI.
+report lists. The recorded `rustc --version` strings and `nightly-2026-09-29` are also
+asserted by `measurement_toolchains_are_recorded` in
+`tools/repo-checks/tests/benchmarks_doc.rs`, so re-measuring with a new compiler means
+updating them in both this document and that test. Non-ignored repo-checks keep the
+results tables, the prose and the detail tables consistent with each other in CI.
 
 ### Historical figures
 
@@ -912,6 +916,9 @@ These are not rebuilt by any command here and are not checked:
 - [ML-DSA verify method](#ml-dsa-verify-method): the 156,448 B merged dispatcher frame is
   a historical planning measurement (SHA-44).
 - [pqm4 comparison](#pqm4-comparison): upstream figures, cited at a pinned commit.
+- The "Re-measured for …" notes (LMS, digest and hybrid results) explain how figures
+  changed between tickets; their deltas are not recorded figures and no command here
+  rebuilds them.
 
 Hardware cells (`pending (hardware)`, `pending (SHA-69)`) are not recorded figures.
 
