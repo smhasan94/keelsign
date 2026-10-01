@@ -72,8 +72,9 @@ hashing from `bootutil_sha_init` to `bootutil_sha_finish` at `:137-210`;
 The verifier MUST reject, rather than hash anyway, an image whose protected area is
 malformed: `ih_protect_tlv_size != 0` with a TLV info magic other than `0x6908`, or a
 protected info header whose `it_tlv_tot != ih_protect_tlv_size`. MCUboot's TLV iterator
-rejects both too (`boot/bootutil/src/tlv.c:66-77`). SHA-35 (parser) and SHA-42 (digest)
-enforce this.
+rejects both too (`boot/bootutil/src/tlv.c:66-77`). SHA-35's parser rejects both
+(`BadTlvInfoMagic`, `ProtectedSizeMismatch`), and SHA-42's `image_digest` hashes only an
+`Image` that parsed, so a malformed protected area is never hashed.
 
 - **ML-DSA-44/65:** pure ML-DSA (FIPS 204 `ML-DSA.Sign` / `ML-DSA.Verify`) with message
   `M` and context string `MLDSA_CONTEXT` ([ML-DSA context](#ml-dsa-context)). Never
@@ -81,13 +82,15 @@ enforce this.
 - **LMS/HSS:** HSS (RFC 8554 §6) with message `M`.
 - The same `M` is signed by the Ed25519 half of a hybrid image ([Hybrid layout](#hybrid-layout)).
 
-The verifier computes `M` itself while hashing the image in chunks (SHA-42), and also
+The verifier computes `M` itself while hashing the image in chunks (SHA-42:
+`keelsign_verify::image_digest`, which hashes the 32 header bytes it parsed and streams
+the rest of the hashed range from the slot through a caller-sized buffer), and also
 requires the `IMAGE_TLV_SHA256` TLV to be present and equal to `M` (SHA-46). Every
 `IMAGE_TLV_SHA256` (`0x10`) present MUST equal `M`, and a keelsign verifier rejects an
 image carrying more than one. Images hashed with SHA-384 or SHA-512
 (`IMAGE_TLV_SHA384` `0x11` / `IMAGE_TLV_SHA512` `0x12`, `image.h:102-103`, no `0x10`) are
-unsupported in v0.1 and rejected. These rules are enforced by SHA-35, SHA-42 and SHA-46;
-the sample images do not exercise them. Images carrying `IMAGE_TLV_SIG_PURE` (`0x25`,
+unsupported in v0.1 and rejected. SHA-35 exposes these TLVs, SHA-42 computes `M` and
+SHA-46 enforces these rules; the sample images do not exercise them. Images carrying `IMAGE_TLV_SIG_PURE` (`0x25`,
 `image.h:109`), MCUboot's "signature over the image, not its digest" mode, are rejected.
 
 ### Rationale
@@ -409,6 +412,7 @@ TLVs:
 | `mcuboot-ed25519.bin` | Ed25519 (`0x24`) | key `keys/ed25519-test-key.pem` |
 | `mcuboot-ed25519-padded.bin` | Ed25519 (`0x24`) | padded to a `0x2000`-byte slot with the boot trailer (`--pad`); bytes after the TLV area are allowed |
 | `rejected/mcuboot-ed25519-bigendian.bin` | Ed25519 (`0x24`) | big-endian (`-e big`); rejected with `BadMagic` |
+| `mcuboot-ed25519-200k.bin` | Ed25519 (`0x24`) | own 204,800-byte body in a `0x40000`-byte slot (SHA-42): the chunked digest on the host and from flash on the boards |
 
 The RSA-2048 and ECDSA P-256 keys are **test keys** derived deterministically from fixed
 public seeds, like the Ed25519 one; every committed key file starts with `# TEST KEY`.

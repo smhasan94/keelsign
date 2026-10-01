@@ -50,6 +50,9 @@ signature TLV (unprotected):
   * rejected/mcuboot-ed25519-bigendian.bin: as mcuboot-ed25519.bin, but big-endian
     (`-e big`); keelsign supports little-endian images only, so the parser rejects it
     (`expect_parse: BadMagic`).
+  * mcuboot-ed25519-200k.bin (SHA-42): as mcuboot-ed25519.bin, but with its own
+    204,800-byte body (DRBG label `image-fixture-body-200k`) in a 0x40000-byte slot, for
+    the chunked image digest on the host and from flash on the boards.
 
 The RSA-2048 and ECDSA P-256 keys are TEST KEYS derived deterministically from fixed
 public seeds (a SHA-256 counter DRBG: Miller-Rabin primes for RSA, a scalar for ECDSA);
@@ -146,6 +149,12 @@ GOLDEN_DEPENDENCY = "(1,1.2.3+4)"
 GOLDEN_BOOT_RECORD = "app"
 PADDED_SLOT_SIZE = 0x2000
 
+# Golden images with their own body instead of the shared BODY_LEN one (SHA-42):
+# name -> (DRBG label of the body, body length, slot size).
+GOLDEN_BODIES = {
+    "mcuboot-ed25519-200k.bin": ("image-fixture-body-200k", 204_800, 0x40000),
+}
+
 # key name -> (committed key file, signature TLV type, fixed signature file or None).
 GOLDEN_KEYS = {
     "rsa2048": (RSA_KEY_PEM, TLV_RSA2048_PSS, "sigs/mcuboot-rsa2048.sig"),
@@ -167,6 +176,9 @@ GOLDEN = [
     ("rejected/mcuboot-ed25519-bigendian.bin",
      "as mcuboot-ed25519.bin but big-endian (-e big): unsupported, the parser rejects it",
      "ed25519", False, "big", "BadMagic"),
+    ("mcuboot-ed25519-200k.bin",
+     "as mcuboot-ed25519.bin with a 204,800-byte body in a 0x40000-byte slot (chunked digest, SHA-42)",
+     "ed25519", False, "little", "Ok"),
 ]
 
 # name, description, PQ signatures ("lms:<label>" / "mldsa44" / "mldsa65"), LMS parameter
@@ -271,14 +283,17 @@ def imgtool_sign(imgtool, tmp, name, body, protected, ed25519_key):
     return out.read_bytes()
 
 
-def imgtool_sign_golden(imgtool, tmp, stem, body, key, padded, endian, fix_sig=None, sig_out=None):
+def imgtool_sign_golden(imgtool, tmp, stem, body, key, padded, endian, fix_sig=None, sig_out=None,
+                        slot_size=None):
     """imgtool sign with the golden-image options: signed with `key`, or with the fixed
     signature `fix_sig` made by `key` earlier."""
     raw = tmp / f"{stem}.body"
     out = tmp / f"{stem}.signed.bin"
     raw.write_bytes(body)
+    if slot_size is None:
+        slot_size = PADDED_SLOT_SIZE if padded else SLOT_SIZE
     cmd = [imgtool, "sign", "--header-size", hex(HEADER_SIZE), "--pad-header", "--align", ALIGN,
-           "--version", VERSION, "--slot-size", hex(PADDED_SLOT_SIZE if padded else SLOT_SIZE),
+           "--version", VERSION, "--slot-size", hex(slot_size),
            "--security-counter", str(SECURITY_COUNTER), "--dependencies", GOLDEN_DEPENDENCY,
            "--boot-record", GOLDEN_BOOT_RECORD, "--public-key-format", "hash", "--endian", endian]
     if padded:
@@ -653,8 +668,16 @@ def generate_golden(out_dir, imgtool, lms, tmp, body, manifest, resign):
         stem = Path(name).name.removesuffix(".bin")
         key_rel, sig_tlv, sig_rel = GOLDEN_KEYS[kind]
         key = out_dir / key_rel
+        own_body = GOLDEN_BODIES.get(name)
         if sig_rel is None:
-            signed = imgtool_sign_golden(imgtool, tmp, stem, body, key, padded, endian)
+            if own_body:
+                label, body_len, slot_size = own_body
+                signed = imgtool_sign_golden(imgtool, tmp, stem, lms.Drbg(label)(body_len), key, padded,
+                                             endian, slot_size=slot_size)
+            else:
+                signed = imgtool_sign_golden(imgtool, tmp, stem, body, key, padded, endian)
+        elif own_body:
+            sys.exit(f"{name}: an own body needs a deterministic (Ed25519) signature")
         else:
             if resign:
                 fresh = tmp / f"{stem}.sig"
@@ -721,6 +744,13 @@ def generate_golden(out_dir, imgtool, lms, tmp, body, manifest, resign):
             "unprotected_tlvs": " ".join(f"{k:#06x}" for k in unprot),
             **layout_fields(image),
         }
+        if own_body:
+            label, body_len, slot_size = own_body
+            manifest["outputs"][name].update({
+                "body_drbg_label": label,
+                "body_len": body_len,
+                "slot_size": slot_size,
+            })
 
 
 def run_bytes(cmd):

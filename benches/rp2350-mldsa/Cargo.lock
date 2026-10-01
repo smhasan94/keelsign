@@ -764,6 +764,7 @@ dependencies = [
 name = "keelsign-verify"
 version = "0.0.1"
 dependencies = [
+ "embedded-storage",
  "sha2",
 ]
 
@@ -1186,6 +1187,7 @@ dependencies = [
  "defmt-rtt",
  "embassy-rp",
  "embedded-test",
+ "keelsign-verify",
  "lms-kat",
  "mldsa-kat",
  "stack-paint",

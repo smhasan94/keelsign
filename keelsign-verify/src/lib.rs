@@ -2,9 +2,9 @@
 //!
 //! **Pre-release: the API is unstable.** The image format (TLV IDs, signing mode, key
 //! ID, hybrid layout) is specified in [docs/image-format.md](https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md) and its constants
-//! are in [`tlv`]. This version holds the MCUboot image parser, the trusted-key set, the
-//! post-quantum signature dispatch and the LMS/HSS verifier; image hashing, the ML-DSA
-//! backend and the hybrid Ed25519 policy land in later releases.
+//! are in [`tlv`]. This version holds the MCUboot image parser, the chunked image digest,
+//! the trusted-key set, the post-quantum signature dispatch and the LMS/HSS verifier; the
+//! ML-DSA backend and the hybrid Ed25519 policy land in later releases.
 //!
 //! - [`image`] parses and validates an MCUboot image (header, protected and unprotected
 //!   TLV areas) without panicking on any input, and yields its TLVs;
@@ -13,6 +13,12 @@
 //!   are unprotected-only (docs/image-format.md), so keelsign TLVs in the protected area
 //!   are ignored for PQ selection (a PQ signature there is inside `M` and can never be a
 //!   valid signature over `M`; rejecting such images is a candidate SHA-46 policy rule).
+//! - [`reader`] reads an image from a slot: [`ImageReader`], implemented for `&[u8]` and,
+//!   through [`NorFlashReader`], for any `embedded-storage` NOR flash.
+//!   [`image::Image::read_from`] reads and validates the header and TLV areas, and
+//!   [`image_digest`] computes the image digest `M` (SHA-256 of header, body and
+//!   protected TLV area) through a caller-sized chunk buffer ([`DEFAULT_CHUNK_LEN`],
+//!   256 bytes), so peak RAM does not grow with the image.
 //! - [`TrustedKeys`] holds up to `N` borrowed public keys and finds one by key ID
 //!   ([`key_id_of`]).
 //! - [`verify_pq`] picks the single post-quantum signature TLV and the key-ID TLV out of
@@ -39,15 +45,19 @@ extern crate std;
 
 mod algorithm;
 mod backend;
+pub mod digest;
 mod dispatch;
 mod error;
 pub mod image;
 pub mod lms;
+pub mod reader;
 pub mod tlv;
 mod trusted_keys;
 
 pub use algorithm::Algorithm;
 pub use backend::{DefaultBackend, verify_pq};
+pub use digest::{DEFAULT_CHUNK_LEN, image_digest};
 pub use dispatch::{Backend, SelectedSignature, select_pq_signature, verify_pq_with};
 pub use error::{Error, KeySetError};
+pub use reader::{ImageReader, NorFlashReader, ReadError};
 pub use trusted_keys::{KeyId, TrustedKey, TrustedKeys, key_id_of};

@@ -69,6 +69,8 @@ use core::fmt;
 use core::ops::Range;
 
 use crate::algorithm::Algorithm;
+use crate::error::Error;
+use crate::reader::ImageReader;
 use crate::tlv::{
     KEELSIGN_TLV_RANGE, MAX_PQ_SIGNATURE_LEN, TLV_KEELSIGN_KEY_ID, TLV_LMS_HSS_SIG,
     TLV_MLDSA44_SIG, TLV_MLDSA65_SIG,
@@ -346,6 +348,43 @@ impl Header {
     }
 }
 
+/// The 32 header bytes of an image together with the [`Header`] parsed from them.
+///
+/// The only way to make one is [`RawHeader::parse`], so the bytes and the fields always
+/// agree and `hdr_size` is at least [`IMAGE_HEADER_SIZE`]. [`Image`] keeps it, and
+/// [`image_digest`](crate::digest::image_digest) hashes these bytes instead of re-reading
+/// the header from storage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RawHeader {
+    bytes: [u8; IMAGE_HEADER_SIZE],
+    header: Header,
+}
+
+impl RawHeader {
+    /// Parse the header from the first [`IMAGE_HEADER_SIZE`] bytes of `bytes` and keep
+    /// them; any further bytes are ignored. Errors are [`Header::parse`]'s.
+    pub fn parse(bytes: &[u8]) -> Result<RawHeader, ParseError> {
+        let header = Header::parse(bytes)?;
+        let (raw, _) = bytes
+            .split_first_chunk::<IMAGE_HEADER_SIZE>()
+            .ok_or(ParseError::Truncated)?;
+        Ok(RawHeader {
+            bytes: *raw,
+            header,
+        })
+    }
+
+    /// The parsed header.
+    pub fn header(&self) -> &Header {
+        &self.header
+    }
+
+    /// The 32 header bytes it was parsed from.
+    pub fn bytes(&self) -> &[u8; IMAGE_HEADER_SIZE] {
+        &self.bytes
+    }
+}
+
 /// A TLV info header (`struct image_tlv_info`): the area's magic and its total size,
 /// info header included.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -553,9 +592,10 @@ impl<'a> Iterator for TlvIter<'a> {
 /// A parsed, validated MCUboot image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Image<'a> {
-    /// The image header. Private so that a copied `Image` cannot have its header edited
-    /// out of step with its TLV areas; read it with [`Image::header`].
-    header: Header,
+    /// The image header and its bytes. Private so that a copied `Image` cannot have its
+    /// header edited out of step with its TLV areas; read it with [`Image::header`] and
+    /// [`Image::raw_header`].
+    raw: RawHeader,
     protected: Option<TlvArea<'a>>,
     unprotected: TlvArea<'a>,
 }
@@ -617,39 +657,108 @@ impl<'a> Image<'a> {
     /// # Ok::<(), keelsign_verify::image::ParseError>(())
     /// ```
     pub fn parse(bytes: &'a [u8]) -> Result<Image<'a>, ParseError> {
-        let header = Header::parse(bytes)?;
+        let raw = RawHeader::parse(bytes)?;
+        let header = raw.header();
         // Size overflow is reported before truncation, for the whole hashed region.
         header.hashed_len()?;
         let tlv_offset = to_usize(header.tlv_offset()?)?;
         let tlv_bytes = bytes.get(tlv_offset..).ok_or(ParseError::Truncated)?;
-        Image::parse_parts(header, tlv_bytes)
+        Image::parse_parts(raw, tlv_bytes)
+    }
+
+    /// Read and validate an image from `reader` (a DFU slot): the header, then the TLV
+    /// areas into `tlv_buf`. The body is not read; hash it with
+    /// [`image_digest`](crate::digest::image_digest).
+    ///
+    /// The TLV areas are sized from their info headers, after checking that they fit
+    /// [`ImageReader::len`]:
+    ///
+    /// 1. The header (32 bytes at offset 0): [`RawHeader::parse`]. A reader shorter than
+    ///    the header is [`ParseError::Truncated`].
+    /// 2. [`ParseError::SizeOverflow`] for the hashed region; then the unprotected info
+    ///    header must fit the reader (`hashed_len + 4 <= len`), or
+    ///    [`ParseError::Truncated`] (also when that sum overflows `u32`: no reader holds
+    ///    it, and [`Image::parse`] reports such bytes as truncated too).
+    /// 3. Its `tlv_tot` (the magic is checked later) gives the TLV areas' size,
+    ///    `protect_tlv_size + max(tlv_tot, 4)`.
+    /// 4. They must fit the reader ([`ParseError::Truncated`], also when their end
+    ///    overflows `u32`) and then `tlv_buf` ([`Error::TlvAreaTooLarge`]).
+    /// 5. They are read into the front of `tlv_buf` and validated by
+    ///    [`Image::parse_parts`], which never sees bytes past the TLV areas or the slot.
+    ///
+    /// Parse errors are [`Error::Parse`] and read errors [`Error::Read`]. When the TLV
+    /// areas fit the reader, the result (or the parse error) is the same as
+    /// [`Image::parse`] of the reader's bytes; when they do not, the error is
+    /// [`ParseError::Truncated`], even if the bytes that do fit hold a fault
+    /// [`Image::parse`] would report first. A `tlv_buf` of
+    /// `2 * (4 + u16::MAX)` bytes fits any image; 4 KiB fits one ML-DSA-65 signature and
+    /// the usual MCUboot TLVs.
+    pub fn read_from<R: ImageReader + ?Sized>(
+        reader: &mut R,
+        tlv_buf: &'a mut [u8],
+    ) -> Result<Image<'a>, Error> {
+        let slot = reader.len();
+        if slot < IMAGE_HEADER_SIZE as u32 {
+            return Err(ParseError::Truncated.into());
+        }
+        let mut header_bytes = [0u8; IMAGE_HEADER_SIZE];
+        reader.read(0, &mut header_bytes)?;
+        let raw = RawHeader::parse(&header_bytes)?;
+        let header = raw.header();
+        let tlv_offset = header.tlv_offset()?;
+        let hashed_len = header.hashed_len()?;
+        let info_end = hashed_len
+            .checked_add(TLV_INFO_SIZE as u32)
+            .ok_or(ParseError::Truncated)?;
+        if info_end > slot {
+            return Err(ParseError::Truncated.into());
+        }
+        let mut info = [0u8; TLV_INFO_SIZE];
+        reader.read(hashed_len, &mut info)?;
+        let tlv_tot = TlvInfo::parse(&info)?.tlv_tot.max(TLV_INFO_SIZE as u16);
+        // At most 2 * u16::MAX: no overflow.
+        let total = u32::from(header.protect_tlv_size).saturating_add(u32::from(tlv_tot));
+        let end = tlv_offset.checked_add(total).ok_or(ParseError::Truncated)?;
+        if end > slot {
+            return Err(ParseError::Truncated.into());
+        }
+        let buf = tlv_buf
+            .get_mut(..to_usize(total)?)
+            .ok_or(Error::TlvAreaTooLarge)?;
+        reader.read(tlv_offset, buf)?;
+        let tlv_bytes: &'a [u8] = buf;
+        Ok(Image::parse_parts(raw, tlv_bytes)?)
     }
 
     /// Validate the TLV areas of an image whose header was parsed separately (for
-    /// example, read from flash in pieces). `tlv_bytes` starts at
-    /// [`Header::tlv_offset`]; offsets in the result are still relative to the image
-    /// start.
+    /// example, read from flash in pieces, as [`Image::read_from`] does). `tlv_bytes`
+    /// starts at [`Header::tlv_offset`]; offsets in the result are still relative to the
+    /// image start.
     ///
-    /// `header` is re-checked: a `hdr_size` below [`IMAGE_HEADER_SIZE`] is
-    /// [`ParseError::HeaderTooSmall`], however the [`Header`] was made (its fields are
-    /// public, so it can be built by hand). The magic is not re-checked: a [`Header`] does
-    /// not hold it.
+    /// `raw` can only come from [`RawHeader::parse`], so its magic was checked and its
+    /// `hdr_size` is at least [`IMAGE_HEADER_SIZE`].
     ///
     /// # Contract
     ///
     /// The caller must ensure that:
     ///
-    /// - `tlv_bytes` is exactly the bytes from [`Header::tlv_offset`] to the end of the
-    ///   slot's usable area, no fewer (so [`ParseError::Truncated`] means the image does not
-    ///   fit the slot) and no more (so TLVs past the slot are rejected, as MCUboot rejects an
-    ///   image whose `tlv_end` exceeds the slot, `image_validate.c:300`).
-    /// - The bytes hashed over [`Image::hashed_range`] are the same bytes `header` was
-    ///   parsed from: the header must not be re-read from storage that could have changed
-    ///   between parsing and hashing.
-    pub fn parse_parts(header: Header, tlv_bytes: &'a [u8]) -> Result<Image<'a>, ParseError> {
-        if usize::from(header.hdr_size) < IMAGE_HEADER_SIZE {
-            return Err(ParseError::HeaderTooSmall);
-        }
+    /// - `tlv_bytes` never extends past the end of the slot's usable area (so TLVs past
+    ///   the slot are rejected, as MCUboot rejects an image whose `tlv_end` exceeds the
+    ///   slot, `image_validate.c:300`), and covers the TLV areas whenever they fit the slot
+    ///   (so [`ParseError::Truncated`] means the image does not fit the slot). Passing every
+    ///   byte from [`Header::tlv_offset`] to the end of the slot's usable area satisfies
+    ///   both; [`Image::read_from`] passes exactly the TLV areas, sized from their info
+    ///   headers after checking that they fit the slot.
+    /// - The bytes hashed over [`Image::hashed_range`] start with the header bytes in
+    ///   `raw`: the header must not be re-read from storage that could have changed
+    ///   between parsing and hashing. [`image_digest`](crate::digest::image_digest) hashes
+    ///   [`Image::raw_header`] for this reason. Only the header is pinned:
+    ///   [`image_digest`](crate::digest::image_digest) re-reads the protected TLV bytes
+    ///   from the reader, so the bytes hashed are not the `tlv_bytes` copy that
+    ///   [`Image::protected`] exposes (as in MCUboot); policy on protected TLV contents
+    ///   (SHA-46) must allow for that.
+    pub fn parse_parts(raw: RawHeader, tlv_bytes: &'a [u8]) -> Result<Image<'a>, ParseError> {
+        let header = raw.header;
         let tlv_offset = header.tlv_offset()?;
         let hashed_len = header.hashed_len()?;
         let prot_size = header.protect_tlv_size;
@@ -682,7 +791,7 @@ impl<'a> Image<'a> {
         }
         let unprotected = area(unprotected_bytes, hashed_len, info.tlv_tot, false)?;
         Ok(Image {
-            header,
+            raw,
             protected,
             unprotected,
         })
@@ -690,7 +799,13 @@ impl<'a> Image<'a> {
 
     /// The image header.
     pub fn header(&self) -> &Header {
-        &self.header
+        &self.raw.header
+    }
+
+    /// The 32 header bytes the image was parsed from, the start of the bytes the digest
+    /// covers.
+    pub fn raw_header(&self) -> &[u8; IMAGE_HEADER_SIZE] {
+        &self.raw.bytes
     }
 
     /// The protected TLV area, if the header announces one.
@@ -812,6 +927,8 @@ mod tests {
     use super::*;
     use crate::algorithm::Algorithm;
     use crate::error::Error;
+    use crate::reader::ReadError;
+    use crate::reader::mock::Recording;
     use crate::select_pq_signature;
 
     // ---- Fixtures and MANIFEST.json ---------------------------------------------------
@@ -851,7 +968,7 @@ mod tests {
     ];
 
     /// The SHA-35 golden MCUboot images (little-endian, parse Ok).
-    const GOLDEN: [(&str, &[u8]); 4] = [
+    const GOLDEN: [(&str, &[u8]); 5] = [
         (
             "mcuboot-rsa2048.bin",
             include_bytes!("../../tests/fixtures/images/mcuboot-rsa2048.bin"),
@@ -867,6 +984,10 @@ mod tests {
         (
             "mcuboot-ed25519-padded.bin",
             include_bytes!("../../tests/fixtures/images/mcuboot-ed25519-padded.bin"),
+        ),
+        (
+            "mcuboot-ed25519-200k.bin",
+            include_bytes!("../../tests/fixtures/images/mcuboot-ed25519-200k.bin"),
         ),
     ];
 
@@ -1707,10 +1828,10 @@ mod tests {
         // input would have to be 4 GiB).
         let mut d = synth(None, &[]);
         set_u32(&mut d, 12, u32::MAX - 32 - 3);
-        let header = Header::parse(&d).unwrap();
+        let raw = RawHeader::parse(&d).unwrap();
         let tlvs = area_bytes(TLV_INFO_MAGIC, &[(IMAGE_TLV_SHA256, &[0; 32])]);
         assert_eq!(
-            Image::parse_parts(header, &tlvs),
+            Image::parse_parts(raw, &tlvs),
             Err(ParseError::SizeOverflow)
         );
         // In range, the offsets are plain sums.
@@ -1836,10 +1957,13 @@ mod tests {
     #[test]
     fn parse_parts_matches_parse() {
         for (name, data) in all_valid() {
-            let header = Header::parse(data).unwrap();
-            let tlv_off = header.tlv_offset().unwrap() as usize;
+            let raw = RawHeader::parse(data).unwrap();
+            assert_eq!(raw.bytes(), &data[..32], "{name}");
+            assert_eq!(raw.header(), &Header::parse(data).unwrap(), "{name}");
+            let tlv_off = raw.header().tlv_offset().unwrap() as usize;
             let whole = Image::parse(data).unwrap();
-            let parts = Image::parse_parts(header, &data[tlv_off..]).unwrap();
+            assert_eq!(whole.raw_header(), raw.bytes(), "{name}");
+            let parts = Image::parse_parts(raw, &data[tlv_off..]).unwrap();
             assert_eq!(parts, whole, "{name}");
             assert_eq!(parts.hashed_range(), whole.hashed_range(), "{name}");
             assert_eq!(parts.tlv_end(), whole.tlv_end(), "{name}");
@@ -1852,7 +1976,7 @@ mod tests {
             let mut d = data.to_vec();
             d[tlv_off] ^= 0x01;
             assert_eq!(
-                Image::parse_parts(header, &d[tlv_off..]),
+                Image::parse_parts(raw, &d[tlv_off..]),
                 Image::parse(&d),
                 "{name}"
             );
@@ -1872,39 +1996,171 @@ mod tests {
         );
     }
 
-    #[test]
-    fn parse_parts_rejects_hand_built_small_header() {
-        let d = synth(None, &[(IMAGE_TLV_SHA256, &[0; 32])]);
-        let good = Header::parse(&d).unwrap();
-        let tlv_bytes = &d[36..];
-        assert!(Image::parse_parts(good, tlv_bytes).is_ok());
-        for hdr_size in 0..32u16 {
-            // Header fields are public: a Header that Header::parse would refuse.
-            let header = Header { hdr_size, ..good };
-            assert_eq!(
-                Image::parse_parts(header, tlv_bytes),
-                Err(ParseError::HeaderTooSmall),
-                "{hdr_size}"
-            );
+    /// Offsets and widths of every magic and length field of a valid image: the header's,
+    /// both TLV info headers' and every TLV header's length.
+    fn length_fields(data: &[u8], image: &Image<'_>) -> Vec<(usize, usize)> {
+        let tlv_off = image.header().tlv_offset().unwrap() as usize;
+        let hashed = image.hashed_range().end as usize;
+        let mut fields = vec![(0, 4), (8, 2), (10, 2), (12, 4)];
+        if image.protected().is_some() {
+            fields.extend([(tlv_off, 2), (tlv_off + 2, 2)]);
         }
-        // Checked before anything else, even with TLV bytes that are not a TLV area.
-        let header = Header {
-            hdr_size: 0,
-            ..good
-        };
+        fields.extend([(hashed, 2), (hashed + 2, 2)]);
+        let base = data.as_ptr() as usize;
+        for tlv in image.tlvs() {
+            fields.push((tlv.value.as_ptr() as usize - base - 2, 2));
+        }
+        fields
+    }
+
+    /// `Image::read_from` over the bytes `data`, with a TLV buffer that fits any image.
+    fn read_from_bytes(data: &[u8]) -> Result<(), Error> {
+        let mut tlv_buf = vec![0u8; 2 * (TLV_INFO_SIZE + usize::from(u16::MAX))];
+        let mut reader = data;
+        let image = Image::read_from(&mut reader, &mut tlv_buf)?;
+        // On success it is the image Image::parse finds.
+        assert_eq!(Ok(image), Image::parse(data));
+        Ok(())
+    }
+
+    #[test]
+    fn read_from_matches_parse_for_every_fixture() {
+        for (name, data) in all_valid() {
+            let whole = Image::parse(data).unwrap();
+            let mut tlv_buf = [0u8; 8192];
+            let mut reader = Recording::new(data);
+            let read = Image::read_from(&mut reader, &mut tlv_buf).unwrap();
+            assert_eq!(read, whole, "{name}");
+            assert_eq!(read.raw_header(), &data[..32], "{name}");
+            assert_eq!(read.hashed_range(), whole.hashed_range(), "{name}");
+            assert_eq!(read.tlv_end(), whole.tlv_end(), "{name}");
+            assert!(read.tlvs().eq(whole.tlvs()), "{name}");
+            // Three ascending reads: the header, the unprotected info header, then exactly
+            // the TLV areas; nothing past tlv_end.
+            let tlv_off = whole.header().tlv_offset().unwrap();
+            let hashed = whole.hashed_range().end;
+            let areas = (whole.tlv_end() - tlv_off) as usize;
+            assert_eq!(
+                reader.reads,
+                [(0, 32), (hashed, 4), (tlv_off, areas)],
+                "{name}"
+            );
+
+            // Damaged magic and length fields: the same error as Image::parse, except that
+            // TLV areas which no longer fit the slot are Truncated before anything inside
+            // them is looked at.
+            for (at, width) in length_fields(data, &whole) {
+                for value in [0x00u8, 0x01, 0x03, 0x04, 0x7F, 0xFF] {
+                    for i in 0..width {
+                        let mut d = data.to_vec();
+                        d[at + i] = value;
+                        let parsed = Image::parse(&d);
+                        match read_from_bytes(&d) {
+                            Ok(()) => assert!(parsed.is_ok(), "{name} @{at}+{i}={value}"),
+                            Err(Error::Parse(ParseError::Truncated)) => {
+                                assert!(parsed.is_err(), "{name} @{at}+{i}={value}");
+                            }
+                            Err(e) => assert_eq!(
+                                Err(e),
+                                parsed.map(|_| ()).map_err(Error::Parse),
+                                "{name} @{at}+{i}={value}"
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn read_from_truncated_slot_and_small_tlv_buf() {
+        for (name, data) in all_valid() {
+            let whole = Image::parse(data).unwrap();
+            let end = whole.tlv_end() as usize;
+            let tlv_off = whole.header().tlv_offset().unwrap() as usize;
+            let areas = end - tlv_off;
+            // Every slot shorter than the image is Truncated, whatever the TLV buffer.
+            let mut bufs = [vec![0u8; 0], vec![0u8; areas - 1], vec![0u8; 8192]];
+            for n in 0..end {
+                let mut slot = &data[..n];
+                for tlv_buf in &mut bufs {
+                    let buf_len = tlv_buf.len();
+                    assert_eq!(
+                        Image::read_from(&mut slot, tlv_buf),
+                        Err(Error::Parse(ParseError::Truncated)),
+                        "{name}: slot {n} of {end}, buffer {buf_len}"
+                    );
+                }
+            }
+            // A slot that holds the image: the TLV buffer must hold the TLV areas.
+            for n in [end, data.len()] {
+                let mut slot = &data[..n];
+                for buf_len in [0, 4, areas - 1] {
+                    let mut tlv_buf = vec![0u8; buf_len];
+                    assert_eq!(
+                        Image::read_from(&mut slot, &mut tlv_buf),
+                        Err(Error::TlvAreaTooLarge),
+                        "{name}: buffer {buf_len}"
+                    );
+                }
+                let mut tlv_buf = vec![0u8; areas];
+                assert_eq!(
+                    Image::read_from(&mut slot, &mut tlv_buf),
+                    Ok(whole),
+                    "{name}"
+                );
+            }
+        }
+        // Header errors come through as Error::Parse.
+        let mut slot: &[u8] = BIG_ENDIAN;
         assert_eq!(
-            Image::parse_parts(header, &[]),
-            Err(ParseError::HeaderTooSmall)
+            Image::read_from(&mut slot, &mut [0u8; 4096]),
+            Err(Error::Parse(ParseError::BadMagic))
         );
-        let header = Header {
-            hdr_size: 31,
-            img_size: u32::MAX,
-            ..good
-        };
+        let mut d = synth(None, &[]);
+        set_u32(&mut d, 12, u32::MAX - 31);
+        assert_eq!(Image::parse(&d), Err(ParseError::SizeOverflow));
+        let mut slot: &[u8] = &d;
         assert_eq!(
-            Image::parse_parts(header, tlv_bytes),
-            Err(ParseError::HeaderTooSmall)
+            Image::read_from(&mut slot, &mut [0u8; 4096]),
+            Err(Error::Parse(ParseError::SizeOverflow))
         );
+        // The hashed region fits u32 but `hashed_len + 4` does not: Truncated from both
+        // (no slot holds the unprotected info header).
+        let mut d = synth(None, &[]);
+        set_u32(&mut d, 12, u32::MAX - 34);
+        assert_eq!(Image::parse(&d), Err(ParseError::Truncated));
+        let mut slot: &[u8] = &d;
+        assert_eq!(
+            Image::read_from(&mut slot, &mut [0u8; 4096]),
+            Err(Error::Parse(ParseError::Truncated))
+        );
+    }
+
+    #[test]
+    fn read_from_failure_at_every_call_is_read_error() {
+        for (name, data) in all_valid() {
+            let mut reader = Recording::new(data);
+            Image::read_from(&mut reader, &mut [0u8; 8192]).unwrap();
+            let calls = reader.reads.len();
+            assert_eq!(calls, 3, "{name}");
+            for k in 0..calls {
+                for error in [
+                    ReadError::OutOfBounds,
+                    ReadError::NotAligned,
+                    ReadError::Other,
+                ] {
+                    let mut reader = Recording::failing_at(data, k);
+                    reader.error = error;
+                    assert_eq!(
+                        Image::read_from(&mut reader, &mut [0u8; 8192]),
+                        Err(Error::Read(error)),
+                        "{name}: call {k}"
+                    );
+                    assert_eq!(reader.reads.len(), k + 1, "{name}: stops at the failure");
+                }
+            }
+        }
     }
 
     #[test]
@@ -2044,11 +2300,17 @@ mod tests {
         assert_eq!(size_of::<ParseError>(), 1);
         assert_eq!(size_of::<ImageVersion>(), 8);
         assert!(size_of::<Header>() <= 24, "{}", size_of::<Header>());
+        assert!(
+            size_of::<RawHeader>() <= 32 + 24,
+            "{}",
+            size_of::<RawHeader>()
+        );
         assert!(size_of::<TlvKind>() <= 4, "{}", size_of::<TlvKind>());
         assert!(size_of::<Tlv<'_>>() <= 3 * size_of::<usize>());
         assert!(size_of::<TlvArea<'_>>() <= 4 * size_of::<usize>());
         assert!(
-            size_of::<Image<'_>>() <= 12 * size_of::<usize>(),
+            // The TLV areas, the header and its 32 raw bytes (SHA-42).
+            size_of::<Image<'_>>() <= 12 * size_of::<usize>() + 32,
             "{}",
             size_of::<Image<'_>>()
         );
@@ -2150,7 +2412,7 @@ mod tests {
 
         #[test]
         fn mutated_golden_images_error_or_yield_in_bounds_tlvs(
-            which in 0usize..11,
+            which in 0usize..12,
             edits in pvec((any::<prop::sample::Index>(), any::<u8>()), 1..8),
             cut in proptest::option::of(any::<prop::sample::Index>()),
         ) {

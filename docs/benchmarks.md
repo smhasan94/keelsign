@@ -444,3 +444,113 @@ cd benches/nrf52840-mldsa
 cargo +nightly rustc --release --locked --bin size_lms --target-dir target/nightly -- -Z emit-stack-sizes
 python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/release/size_lms --top 12 --match keelsign_verify
 ```
+
+## Image digest (SHA-42)
+
+`keelsign_verify::image_digest` computes the image digest `M` (SHA-256 of the header,
+the body and the protected TLV area, the value of the `SHA256` TLV) from an
+`ImageReader`: it hashes the 32 header bytes kept by `Image` (never re-read from the
+slot), then streams the rest of `Image::hashed_range` through the caller's chunk buffer.
+`Image::read_from` reads the header and the TLV areas (sized from their info headers,
+after checking that they fit `ImageReader::len`) into a caller buffer.
+`NorFlashReader` adapts any `embedded-storage` `ReadNorFlash` with `READ_SIZE == 1`
+(the nRF52840 NVMC and the RP2350 blocking flash driver) to `ImageReader`, with
+slot-relative offsets.
+
+### Digest method
+
+- **RAM bound**: peak RAM of one digest is `chunk.len()` + the SHA-256 state (about
+  108 B: 32 B chaining value, 64 B block buffer, block count and buffer position) + the
+  frame of `image_digest`. Nothing scales with the image. The default chunk is
+  `DEFAULT_CHUNK_LEN` = 256 B, MCUboot's `BOOT_TMPBUF_SZ` (`bootutil_priv.h:86` at
+  `a8ffd2c`). With it, the compiled bound is 256 + 512 = 768 B (static frames below).
+- **Static frame**: nightly `-Z emit-stack-sizes` own-frame sizes of `size_digest`, in
+  which `image_digest` and `Image::read_from` each sit alone in an `#[inline(never)]`
+  wrapper: `size_digest::digest<NorFlashReader<…>>` 336 B (`image_digest` with the
+  SHA-256 state, the reader and `finalize` inlined) + `sha2::sha256::compress256` 176 B
+  = 512 B, identical on both boards. `Image::read_from`: `size_digest::read_image<…>`
+  232 B + `Image::parse_parts` 48 B = 280 B. The chunk (256 B) and the TLV buffer
+  (4 KiB) are the caller's and not in these figures.
+- **Flash**: `size_digest` minus `size_digest_baseline`. The baseline is HAL init, the
+  flash driver, defmt and a black-boxed reference to the 2,315-byte golden image
+  `mcuboot-ed25519.bin` in `.rodata`; `size_digest` adds `NorFlashReader`,
+  `Image::read_from` (the image parser), `image_digest` and SHA-256 (sha2 `=0.11.0`,
+  `compress256` in software), run once over that image.
+- **On target** (`tests/image.rs`, needs the board): the "DFU slot" is the 200 KB golden
+  image `mcuboot-ed25519-200k.bin` (204,800-byte body, 205,579 B) embedded in the test
+  binary's `.rodata` and read back through the HAL's `ReadNorFlash` at its flash offset
+  (nRF52840: the address; RP2350: the address minus the XIP base `0x1000_0000`). A fixed
+  partition address would need `#[link_section]`, an unsafe attribute in edition 2024;
+  the real DFU partition comes with the embassy-boot adapter (SHA-55).
+  `image_digest_200k_from_flash` runs `Image::read_from` (4 KiB TLV buffer) and
+  `image_digest` with a 256 B chunk, and checks the digest against the `SHA256` TLV, the
+  in-memory `&[u8]` reader and 64 B and 4096 B chunks, logging the digest.
+  `image_digest_bench` paints the stack and times one 256 B-chunk digest with `CYCCNT`
+  (the chunk on the measured frame), logs
+  `DIGEST board=… bytes=204800 chunk=256 cycles=… us=… peak_stack=… saturated=false` and
+  fails if the stack saturates or the peak exceeds 4,096 B.
+
+### Digest results
+
+Cycles and measured stack need the boards; flash and static frames are measured without
+them (stable Rust 1.91.1, nightly `rustc 1.101.0-nightly (c1070d693 2026-09-28)` for the
+frames).
+
+| Board | Digest cycles (200 KB, 256 B chunk) | Digest time | Peak stack (measured) | Static frame (compiled) | Peak RAM bound (256 B chunk) | Flash Δ release | Flash Δ size |
+|---|---|---|---|---|---|---|---|
+| nrf52840 | pending (hardware) | pending (hardware) | pending (hardware) | 512 B | 768 B | 10,200 B | 9,964 B |
+| rp2350 | pending (hardware) | pending (hardware) | pending (hardware) | 512 B | 768 B | 10,240 B | 10,004 B |
+
+Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
+
+| Board / profile | `size_digest_baseline` flash | `size_digest` flash | Δ digest |
+|---|---|---|---|
+| nrf52840 / release | 5,192 | 15,392 | 10,200 |
+| nrf52840 / size | 4,604 | 14,568 | 9,964 |
+| rp2350 / release | 6,392 | 16,632 | 10,240 |
+| rp2350 / size | 5,308 | 15,312 | 10,004 |
+
+Both baselines include the 2,315-byte image in `.rodata`. The on-target stack limit is
+4,096 B; the compiled bound with a 256 B chunk is 768 B.
+
+### Digest reproduce
+
+Every command block starts from the repository root. For the Pico 2 W use
+`benches/rp2350-mldsa`, board `rp2350` and target `thumbv8m.main-none-eabihf`.
+
+Host tests (no board):
+
+```sh
+cargo test -p keelsign-verify --locked
+```
+
+On-target digest and benchmark (manual procedure, needs the board):
+
+```sh
+cd benches/nrf52840-mldsa
+cargo test --release --locked --test image -- image_digest_200k_from_flash
+cargo test --release --locked --test image -- image_digest_bench 2>&1 | tee ../../docs/bench-logs/nrf52840-digest-run1.txt
+```
+
+`image_digest_200k_from_flash` logs `DIGEST_HEX board=… digest=…` (compare with
+`digest_hex` of `mcuboot-ed25519-200k.bin` in `tests/fixtures/images/MANIFEST.json`) and
+`DIGEST board=… from_flash=ok sha256_tlv=ok chunks=64,256,4096 ok`; record the cycles,
+time and peak stack of the `image_digest_bench` line in [Digest results](#digest-results).
+
+Flash footprint (no board):
+
+```sh
+cd benches/nrf52840-mldsa
+cargo build --release --locked --bins
+cargo build --profile size --locked --bins
+python3 ../../scripts/elf_sizes.py --label nrf52840/release --baseline target/thumbv7em-none-eabihf/release/size_digest_baseline target/thumbv7em-none-eabihf/release/size_digest_baseline target/thumbv7em-none-eabihf/release/size_digest
+python3 ../../scripts/elf_sizes.py --label nrf52840/size --baseline target/thumbv7em-none-eabihf/size/size_digest_baseline target/thumbv7em-none-eabihf/size/size_digest_baseline target/thumbv7em-none-eabihf/size/size_digest
+```
+
+Static frames (nightly only, not run in CI):
+
+```sh
+cd benches/nrf52840-mldsa
+cargo +nightly rustc --release --locked --bin size_digest --target-dir target/nightly -- -Z emit-stack-sizes
+python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/release/size_digest --top 8 --match size_digest::
+```

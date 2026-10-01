@@ -597,6 +597,15 @@ fn image_fixtures_match_manifest() {
             .count(),
         "MANIFEST.json lists exactly the fixture images"
     );
+    // SHA-42: the 200 KB image for the chunked digest, with its own body and slot size.
+    let big = json_object(outputs, "mcuboot-ed25519-200k.bin");
+    assert_eq!(json_field(big, "body_len"), "204800");
+    assert_eq!(json_field(big, "slot_size"), "262144");
+    assert_eq!(
+        json_field(big, "body_drbg_label"),
+        "image-fixture-body-200k"
+    );
+    assert_eq!(json_field(big, "expect_parse"), "Ok");
     // Only the fixture files (and the manifest) are in the directory.
     let mut on_disk: Vec<String> = Vec::new();
     for sub in ["", "keys", "rejected", "sigs"] {

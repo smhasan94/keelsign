@@ -3,8 +3,11 @@
 use core::fmt;
 
 use crate::algorithm::Algorithm;
+use crate::image::ParseError;
+use crate::reader::ReadError;
 
-/// Why an image's post-quantum signature was rejected.
+/// Why an image was rejected: it could not be read or parsed, or its post-quantum
+/// signature does not verify.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -42,6 +45,27 @@ pub enum Error {
     InvalidPublicKey,
     /// The signature does not verify under the selected key.
     SignatureInvalid,
+    /// The image does not parse ([`Image::read_from`](crate::image::Image::read_from)).
+    Parse(ParseError),
+    /// Reading the image from its [`ImageReader`](crate::reader::ImageReader) failed.
+    Read(ReadError),
+    /// The image's TLV areas fit the slot but not the buffer given to
+    /// [`Image::read_from`](crate::image::Image::read_from).
+    TlvAreaTooLarge,
+    /// [`image_digest`](crate::digest::image_digest) was given an empty chunk buffer.
+    ChunkBufferEmpty,
+}
+
+impl From<ParseError> for Error {
+    fn from(e: ParseError) -> Self {
+        Error::Parse(e)
+    }
+}
+
+impl From<ReadError> for Error {
+    fn from(e: ReadError) -> Self {
+        Error::Read(e)
+    }
 }
 
 impl fmt::Display for Error {
@@ -63,6 +87,10 @@ impl fmt::Display for Error {
             Error::MalformedSignature => f.write_str("signature is malformed"),
             Error::InvalidPublicKey => f.write_str("public key is malformed"),
             Error::SignatureInvalid => f.write_str("signature is invalid"),
+            Error::Parse(e) => write!(f, "image does not parse: {e}"),
+            Error::Read(e) => write!(f, "image read failed: {e}"),
+            Error::TlvAreaTooLarge => f.write_str("TLV areas are larger than the TLV buffer"),
+            Error::ChunkBufferEmpty => f.write_str("the digest chunk buffer is empty"),
         }
     }
 }
