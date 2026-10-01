@@ -95,7 +95,11 @@ fn write_file(path: &Path, bytes: &[u8], force: bool, private: bool) -> Result<(
         Error::Exists(p) => io_error(
             "create",
             &p,
-            io::Error::new(io::ErrorKind::AlreadyExists, "temporary file exists"),
+            io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "temporary file left by an interrupted run; it may hold a private key \
+                 (mode 0600): delete it and run again",
+            ),
         ),
         other => other,
     })?;
@@ -111,8 +115,13 @@ fn write_file(path: &Path, bytes: &[u8], force: bool, private: bool) -> Result<(
 /// neither is given. An empty passphrase is a usage error.
 pub fn read_passphrase(args: &PassphraseArgs) -> Result<Option<Zeroizing<Vec<u8>>>, Error> {
     if let Some(path) = &args.passphrase_file {
-        let contents =
-            Zeroizing::new(fs::read(path).map_err(|e| io_error("read passphrase file", path, e))?);
+        let contents = read_capped(path).map_err(|e| match e {
+            ReadError::Io(e) => io_error("read passphrase file", path, e),
+            ReadError::TooLarge => Error::Usage(format!(
+                "the passphrase file {} is larger than 1 MiB",
+                path.display()
+            )),
+        })?;
         let line = contents.split(|&b| b == b'\n').next().unwrap_or_default();
         let line = line.strip_suffix(b"\r").unwrap_or(line);
         if line.is_empty() {
@@ -129,24 +138,78 @@ pub fn read_passphrase(args: &PassphraseArgs) -> Result<Option<Zeroizing<Vec<u8>
                 "--passphrase-env: the environment variable {var} is not set"
             ))
         })?;
-        let value = Zeroizing::new(value.into_string().map_err(|_| {
-            Error::Usage(format!(
+        // Into a zeroizing buffer first, so the value is wiped on every path.
+        let value = Zeroizing::new(value.into_encoded_bytes());
+        if std::str::from_utf8(&value).is_err() {
+            return Err(Error::Usage(format!(
                 "--passphrase-env: the environment variable {var} is not valid Unicode"
-            ))
-        })?);
+            )));
+        }
         if value.is_empty() {
             return Err(Error::Usage(format!(
                 "--passphrase-env: the environment variable {var} is empty"
             )));
         }
-        return Ok(Some(Zeroizing::new(value.as_bytes().to_vec())));
+        return Ok(Some(value));
     }
     Ok(None)
 }
 
-/// The contents of a key file.
+/// Largest key file or passphrase file read (1 MiB); key files are a few KiB.
+pub const MAX_INPUT_LEN: u64 = 1 << 20;
+
+enum ReadError {
+    Io(io::Error),
+    TooLarge,
+}
+
+/// Read at most [`MAX_INPUT_LEN`] bytes of `path` (so `/dev/zero` cannot exhaust memory).
+fn read_capped(path: &Path) -> Result<Zeroizing<Vec<u8>>, ReadError> {
+    use std::io::Read as _;
+    let file = File::open(path).map_err(ReadError::Io)?;
+    let mut contents = Zeroizing::new(Vec::new());
+    file.take(MAX_INPUT_LEN + 1)
+        .read_to_end(&mut contents)
+        .map_err(ReadError::Io)?;
+    if contents.len() as u64 > MAX_INPUT_LEN {
+        return Err(ReadError::TooLarge);
+    }
+    Ok(contents)
+}
+
+/// The contents of a key file (at most 1 MiB).
 pub fn read_key_file(path: &Path) -> Result<Zeroizing<Vec<u8>>, Error> {
-    fs::read(path)
-        .map(Zeroizing::new)
-        .map_err(|e| io_error("read key file", path, e))
+    read_capped(path).map_err(|e| match e {
+        ReadError::Io(e) => io_error("read key file", path, e),
+        ReadError::TooLarge => Error::key_file(
+            path,
+            crate::error::KeyFileError::Corrupt("larger than 1 MiB, so not a key file".into()),
+        ),
+    })
+}
+
+/// Fail with a usage error if `out` is the same file as `key` (also through a symlink
+/// or hard link), so `pubkey --out` can never replace the private key.
+pub fn ensure_not_same_file(key: &Path, out: &Path) -> Result<(), Error> {
+    let same = match (fs::metadata(key), fs::metadata(out)) {
+        #[cfg(unix)]
+        (Ok(a), Ok(b)) => {
+            use std::os::unix::fs::MetadataExt as _;
+            (a.dev(), a.ino()) == (b.dev(), b.ino())
+        }
+        #[cfg(not(unix))]
+        (Ok(_), Ok(_)) => match (fs::canonicalize(key), fs::canonicalize(out)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        },
+        _ => false,
+    };
+    if same {
+        return Err(Error::Usage(format!(
+            "--out {} is the key file --key {}; refusing to replace the private key",
+            out.display(),
+            key.display()
+        )));
+    }
+    Ok(())
 }

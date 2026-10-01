@@ -178,6 +178,7 @@ fn pubkey(args: &PubkeyArgs) -> Result<(), Error> {
         ));
     }
     if let Some(out) = &args.out {
+        keyfile::ensure_not_same_file(&args.key, out)?;
         keyfile::ensure_absent(out, args.force)?;
     }
     let passphrase = keyfile::read_passphrase(&args.passphrase)?;

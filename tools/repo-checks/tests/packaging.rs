@@ -112,10 +112,38 @@ fn keelsign_requires_keelsign_verify_at_the_workspace_version() {
     );
 
     let manifest = read("keelsign/Cargo.toml");
-    let line = manifest
-        .lines()
-        .find(|l| l.starts_with("keelsign-verify = {"))
-        .expect("keelsign must depend on keelsign-verify");
+    // Every place keelsign-verify could appear as a dependency: an inline or dotted key
+    // (`keelsign-verify = ...`, `keelsign-verify.features = ...`) in any dependency
+    // table, or a table header such as `[dependencies.keelsign-verify]` or
+    // `[target.'cfg(unix)'.dev-dependencies.keelsign-verify]`. There must be exactly one,
+    // the inline entry under `[dependencies]`.
+    let mut section = String::new();
+    let mut entries = Vec::new();
+    for raw in manifest.lines() {
+        let l = raw.trim();
+        if l.starts_with('[') {
+            section = l.to_owned();
+            if l.contains("keelsign-verify") {
+                entries.push((section.clone(), l.to_owned()));
+            }
+        } else if l.starts_with("keelsign-verify") || l.starts_with("\"keelsign-verify\"") {
+            entries.push((section.clone(), l.to_owned()));
+        }
+    }
+    assert_eq!(
+        entries.len(),
+        1,
+        "keelsign/Cargo.toml must name keelsign-verify exactly once: {entries:?}"
+    );
+    let (section, line) = &entries[0];
+    assert_eq!(
+        section, "[dependencies]",
+        "keelsign-verify must be a normal dependency: {entries:?}"
+    );
+    assert!(
+        line.starts_with("keelsign-verify = {"),
+        "keelsign-verify must be one inline table: `{line}`"
+    );
     for needle in [
         "path = \"../keelsign-verify\"".to_owned(),
         format!("version = \"={workspace_version}\""),

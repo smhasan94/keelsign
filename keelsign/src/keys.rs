@@ -10,13 +10,14 @@
 
 use crate::error::{Error, KeyFileError};
 use ml_dsa::{Keypair as _, MlDsa44, MlDsa65};
+use pkcs8::der::asn1::AnyRef;
 use pkcs8::der::asn1::OctetStringRef;
 use pkcs8::der::pem::PemLabel as _;
-use pkcs8::der::{Decode as _, Document, Encode as _, SecretDocument};
+use pkcs8::der::{Decode as _, Document, Encode as _, Reader as _, SecretDocument};
 use pkcs8::spki::ObjectIdentifier;
 use pkcs8::{
-    EncodePrivateKey as _, EncodePublicKey as _, EncryptedPrivateKeyInfoRef, LineEnding,
-    PrivateKeyInfoRef, SubjectPublicKeyInfoRef,
+    AlgorithmIdentifierRef, EncodePrivateKey as _, EncodePublicKey as _,
+    EncryptedPrivateKeyInfoRef, LineEnding, PrivateKeyInfoRef, SubjectPublicKeyInfoRef,
 };
 use std::fmt;
 use zeroize::Zeroizing;
@@ -286,7 +287,7 @@ impl PrivateKey {
             }
             Err(e) => e,
         };
-        if EncryptedPrivateKeyInfoRef::from_der(der).is_ok() {
+        if encryption_algorithm(der).is_ok() {
             return Self::from_encrypted(der, passphrase);
         }
         if SubjectPublicKeyInfoRef::from_der(der).is_ok() {
@@ -298,15 +299,29 @@ impl PrivateKey {
     }
 
     fn from_encrypted(der: &[u8], passphrase: Option<&[u8]>) -> Result<Self, KeyFileError> {
-        let encrypted = EncryptedPrivateKeyInfoRef::from_der(der).map_err(|e| {
+        // Check the scheme and bound the KDF cost before anything is derived: the
+        // parameters come from the file, and pkcs5 / scrypt panic on some values (scrypt
+        // N = 0) or would spend unbounded memory and time on others.
+        let (scheme, params) = encryption_algorithm(der).map_err(|e| {
             KeyFileError::Corrupt(format!("not a PKCS#8 encrypted private key: {e}"))
         })?;
+        check_pbes2_algorithms(scheme, params)?;
+        let encrypted = EncryptedPrivateKeyInfoRef::from_der(der)
+            .map_err(|e| KeyFileError::Corrupt(format!("malformed PBES2 parameters: {e}")))?;
+        let pbes2 = encrypted
+            .encryption_algorithm
+            .pbes2()
+            .ok_or_else(|| KeyFileError::Unsupported(UNSUPPORTED_SCHEME.into()))?;
+        check_kdf_limits(&pbes2.kdf)?;
         let passphrase = passphrase.ok_or(KeyFileError::PassphraseRequired)?;
-        // A wrong passphrase usually fails the CBC padding check, but about 1 in 256 times
-        // it decrypts to garbage that then fails to parse: both mean "wrong passphrase".
-        let doc = encrypted
-            .decrypt(passphrase)
-            .map_err(|_| KeyFileError::WrongPassphrase)?;
+        // A wrong passphrase usually fails the CBC padding check (DecryptFailed), but
+        // about 1 in 256 times it decrypts to garbage that then fails to parse: both
+        // mean "wrong passphrase". Anything else is a broken file.
+        let doc = encrypted.decrypt(passphrase).map_err(|e| match e {
+            pkcs8::Error::EncryptedPrivateKey(pkcs8::pkcs5::Error::DecryptFailed)
+            | pkcs8::Error::Asn1(_) => KeyFileError::WrongPassphrase,
+            other => KeyFileError::Corrupt(format!("cannot decrypt the key: {other}")),
+        })?;
         let pki = PrivateKeyInfoRef::from_der(doc.as_bytes())
             .map_err(|_| KeyFileError::WrongPassphrase)?;
         Self::from_pki(&pki)
@@ -351,15 +366,24 @@ impl PrivateKey {
                 let bad = |e: pkcs8::Error| {
                     KeyFileError::Corrupt(format!("invalid {algorithm} seed private key: {e}"))
                 };
-                if algorithm == KeyAlgorithm::MlDsa44 {
+                let key = if algorithm == KeyAlgorithm::MlDsa44 {
                     ml_dsa::SigningKey::<MlDsa44>::try_from(pki.clone())
                         .map(|k| Self::MlDsa44(Box::new(k)))
-                        .map_err(bad)
+                        .map_err(bad)?
                 } else {
                     ml_dsa::SigningKey::<MlDsa65>::try_from(pki.clone())
                         .map(|k| Self::MlDsa65(Box::new(k)))
-                        .map_err(bad)
+                        .map_err(bad)?
+                };
+                // ml-dsa ignores a PKCS#8 v2 publicKey; it must match the seed.
+                if let Some(public_key) = &pki.public_key
+                    && public_key.as_bytes() != Some(key.raw_public_key().as_slice())
+                {
+                    return Err(KeyFileError::Corrupt(
+                        "the public key in the file does not match the private key".into(),
+                    ));
                 }
+                Ok(key)
             }
             KeyAlgorithm::Ed25519 => ed25519_dalek::SigningKey::try_from(pki.clone())
                 .map(|k| Self::Ed25519(Box::new(k)))
@@ -370,6 +394,100 @@ impl PrivateKey {
                 }),
         }
     }
+}
+
+/// The message for an encryption scheme keelsign does not read.
+const UNSUPPORTED_SCHEME: &str =
+    "unsupported encryption scheme; keelsign reads PBES2 (scrypt or PBKDF2 with AES-CBC)";
+
+/// Largest scrypt cost N accepted when decrypting (keelsign writes 2^14).
+pub const MAX_SCRYPT_N: u64 = 1 << 20;
+/// Largest scrypt block size r accepted when decrypting (keelsign writes 8).
+pub const MAX_SCRYPT_R: u16 = 32;
+/// Largest scrypt parallelization p accepted when decrypting (keelsign writes 1).
+pub const MAX_SCRYPT_P: u16 = 16;
+/// Largest PBKDF2 iteration count accepted when decrypting.
+pub const MAX_PBKDF2_ITERATIONS: u32 = 10_000_000;
+
+/// The `encryptionAlgorithm` OID and parameters of a DER `EncryptedPrivateKeyInfo`
+/// (`SEQUENCE { AlgorithmIdentifier, OCTET STRING }`), whatever the scheme.
+fn encryption_algorithm(
+    der: &[u8],
+) -> Result<(ObjectIdentifier, Option<AnyRef<'_>>), pkcs8::der::Error> {
+    AnyRef::from_der(der)?.sequence(|reader| {
+        let algorithm: AlgorithmIdentifierRef<'_> = reader.decode()?;
+        let _data: &OctetStringRef = reader.decode()?;
+        Ok((algorithm.oid, algorithm.parameters))
+    })
+}
+
+/// PBES2 with scrypt or PBKDF2 and AES-CBC, or `Unsupported`.
+fn check_pbes2_algorithms(
+    scheme: ObjectIdentifier,
+    params: Option<AnyRef<'_>>,
+) -> Result<(), KeyFileError> {
+    use pkcs8::pkcs5::pbes2;
+    let unsupported = || KeyFileError::Unsupported(UNSUPPORTED_SCHEME.into());
+    if scheme != pbes2::PBES2_OID {
+        return Err(unsupported());
+    }
+    let params = params.ok_or_else(|| KeyFileError::Corrupt("PBES2 without parameters".into()))?;
+    let (kdf, cipher) = params
+        .sequence(|reader| {
+            let kdf: AlgorithmIdentifierRef<'_> = reader.decode()?;
+            let cipher: AlgorithmIdentifierRef<'_> = reader.decode()?;
+            Ok::<_, pkcs8::der::Error>((kdf.oid, cipher.oid))
+        })
+        .map_err(|e| KeyFileError::Corrupt(format!("malformed PBES2 parameters: {e}")))?;
+    let kdf_ok = kdf == pbes2::SCRYPT_OID || kdf == pbes2::PBKDF2_OID;
+    let cipher_ok = [
+        pbes2::AES_128_CBC_OID,
+        pbes2::AES_192_CBC_OID,
+        pbes2::AES_256_CBC_OID,
+    ]
+    .contains(&cipher);
+    if kdf_ok && cipher_ok {
+        Ok(())
+    } else {
+        Err(unsupported())
+    }
+}
+
+/// Bound the KDF cost taken from the file (see `docs/keys.md`, Passphrase encryption).
+fn check_kdf_limits(kdf: &pkcs8::pkcs5::pbes2::Kdf) -> Result<(), KeyFileError> {
+    let out_of_range = |what: String| {
+        KeyFileError::Unsupported(format!("{what} is outside the range keelsign accepts"))
+    };
+    if let Some(scrypt) = kdf.scrypt() {
+        let n = scrypt.cost_parameter;
+        if !(n.is_power_of_two() && (2..=MAX_SCRYPT_N).contains(&n)) {
+            return Err(out_of_range(format!(
+                "scrypt cost N = {n} (must be a power of two from 2 to 2^20)"
+            )));
+        }
+        let (r, p) = (scrypt.block_size, scrypt.parallelization);
+        if !(1..=MAX_SCRYPT_R).contains(&r) {
+            return Err(out_of_range(format!("scrypt block size r = {r} (1 to 32)")));
+        }
+        if !(1..=MAX_SCRYPT_P).contains(&p) {
+            return Err(out_of_range(format!(
+                "scrypt parallelization p = {p} (1 to 16)"
+            )));
+        }
+        if u32::from(r).checked_mul(u32::from(p)).is_none() {
+            return Err(out_of_range(format!("scrypt r * p = {r} * {p}")));
+        }
+    } else if let Some(pbkdf2) = kdf.pbkdf2() {
+        let i = pbkdf2.iteration_count;
+        if !(1..=MAX_PBKDF2_ITERATIONS).contains(&i) {
+            return Err(out_of_range(format!(
+                "PBKDF2 iteration count {i} (1 to 10,000,000)"
+            )));
+        }
+    } else {
+        return Err(KeyFileError::Unsupported(UNSUPPORTED_SCHEME.into()));
+    }
+    Ok(())
 }
 
 fn public_key_given() -> KeyFileError {

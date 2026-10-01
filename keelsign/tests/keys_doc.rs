@@ -72,6 +72,11 @@ fn docs_keys_md_lists_the_oids_and_formats() {
         "16-byte salt",
         "--passphrase-file",
         "--passphrase-env",
+        "2^20",
+        "10,000,000",
+        "unsupported encryption scheme",
+        "zeroizing buffers",
+        ".NAME.keelsign-tmp-PID",
         // Key ID and KEYHASH, with the RFC worked examples.
         "image-format.md#key-id",
         "9f107644c1084526af3bc8098680b054",

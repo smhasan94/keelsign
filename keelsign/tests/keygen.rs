@@ -538,6 +538,27 @@ fn missing_or_unexpected_passphrase_is_a_clear_error() {
     assert!(!key_path.exists());
 }
 
+/// `der` (a PKCS#8 `EncryptedPrivateKeyInfo` with PBES2) with its PBES2 parameters
+/// changed by `edit`, re-encoded.
+fn reencode_encrypted(
+    der: &[u8],
+    edit: impl FnOnce(&mut pkcs8::pkcs5::pbes2::Parameters),
+) -> Vec<u8> {
+    use pkcs8::der::{Decode as _, Encode as _};
+    let encrypted = pkcs8::EncryptedPrivateKeyInfoRef::from_der(der).expect("parse");
+    let mut scheme = encrypted.encryption_algorithm.clone();
+    let pkcs8::pkcs5::EncryptionScheme::Pbes2(params) = &mut scheme else {
+        panic!("keygen writes PBES2");
+    };
+    edit(params);
+    pkcs8::EncryptedPrivateKeyInfo {
+        encryption_algorithm: scheme,
+        encrypted_data: encrypted.encrypted_data,
+    }
+    .to_der()
+    .expect("encode")
+}
+
 /// Deterministic pseudo-random bytes (64-bit LCG).
 fn noise(len: usize) -> Vec<u8> {
     let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
@@ -603,6 +624,54 @@ fn corrupt_key_file_is_a_clear_error() {
         0x96, 0xc8, 0x50, 0x86, 0xaa, 0x30, 0xb6, 0xb6, 0xcb, 0x0c, 0x5c, 0x38, 0xad, 0x70, 0x31,
         0x66, 0xe1,
     ]);
+    // ML-DSA-44 PKCS#8 v2: a valid seed with a publicKey that is not its public key.
+    let mut mldsa_v2_bad_public = vec![
+        0x30, 0x3b, 0x02, 0x01, 0x01, 0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03,
+        0x04, 0x03, 0x11, 0x04, 0x22, 0x80, 0x20,
+    ];
+    mldsa_v2_bad_public.extend_from_slice(&[7u8; 32]);
+    mldsa_v2_bad_public.extend_from_slice(&[0x81, 0x05, 0x00, b'G', b'A', b'R', b'B']);
+
+    // Encrypted keys whose KDF parameters are out of range or whose scheme is not PBES2,
+    // re-encoded from a generated encrypted DER key.
+    let encrypted_der = gen_key(
+        "enc.der",
+        "ed25519",
+        &[&"--format", &"der", &"--passphrase-file", &pw_file],
+    );
+    let scrypt = |n: u64, r: u16, p: u16| {
+        reencode_encrypted(&encrypted_der, |params| {
+            let pkcs8::pkcs5::pbes2::Kdf::Scrypt(scrypt) = &mut params.kdf else {
+                panic!("keygen writes scrypt");
+            };
+            scrypt.cost_parameter = n;
+            scrypt.block_size = r;
+            scrypt.parallelization = p;
+        })
+    };
+    let pbkdf2_over_cap = reencode_encrypted(&encrypted_der, |params| {
+        let pkcs8::pkcs5::pbes2::Kdf::Scrypt(scrypt) = &params.kdf else {
+            panic!("keygen writes scrypt");
+        };
+        params.kdf = pkcs8::pkcs5::pbes2::Kdf::Pbkdf2(pkcs8::pkcs5::pbes2::Pbkdf2Params {
+            salt: scrypt.salt,
+            iteration_count: 10_000_001,
+            key_length: None,
+            prf: pkcs8::pkcs5::pbes2::Pbkdf2Prf::HmacWithSha256,
+        });
+    });
+    // PBES1 (pbeWithSHA1AndDES-CBC, 1.2.840.113549.1.5.10): patch the last byte of the
+    // PBES2 OID (1.2.840.113549.1.5.13).
+    let pbes2_oid = [
+        0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x05, 0x0d,
+    ];
+    let at = encrypted_der
+        .windows(pbes2_oid.len())
+        .position(|w| w == pbes2_oid)
+        .expect("PBES2 OID");
+    let mut pbes1 = encrypted_der.clone();
+    pbes1[at + pbes2_oid.len() - 1] = 0x0a;
+
     let ecdsa = std::fs::read(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../tests/fixtures/images/keys/ecdsa-p256-test-key.pem"),
@@ -653,6 +722,39 @@ fn corrupt_key_file_is_a_clear_error() {
             false,
             "does not match",
         ),
+        (
+            "mldsa-v2-bad-public.der",
+            mldsa_v2_bad_public,
+            false,
+            "public key in the file does not match the private key",
+        ),
+        ("scrypt-n0.der", scrypt(0, 8, 1), true, "scrypt cost N = 0"),
+        ("scrypt-n3.der", scrypt(3, 8, 1), true, "scrypt cost N = 3"),
+        (
+            "scrypt-n2p21.der",
+            scrypt(1 << 21, 8, 1),
+            true,
+            "scrypt cost N = 2097152",
+        ),
+        (
+            "scrypt-rp-overflow.der",
+            scrypt(1 << 14, u16::MAX, u16::MAX),
+            true,
+            "scrypt block size r = 65535",
+        ),
+        (
+            "scrypt-p-over-cap.der",
+            scrypt(1 << 14, 8, 17),
+            true,
+            "scrypt parallelization p = 17",
+        ),
+        (
+            "pbkdf2-over-cap.der",
+            pbkdf2_over_cap,
+            true,
+            "PBKDF2 iteration count 10000001",
+        ),
+        ("pbes1.der", pbes1, true, "unsupported encryption scheme"),
     ];
     for (name, contents, with_passphrase, reason) in cases {
         let path = dir.join(name);
@@ -696,4 +798,142 @@ fn algorithm_mismatch_is_a_clear_error() {
         assert!(err.contains(&key_path.display().to_string()), "{err}");
         assert!(!pub_path.exists());
     }
+}
+
+#[test]
+fn oversized_key_and_passphrase_files_are_refused() {
+    let dir = scratch("oversized");
+    let big = dir.join("big.pem");
+    let mut contents = b"-----BEGIN PRIVATE KEY-----\n".to_vec();
+    contents.resize(1024 * 1024 + 1, b'A');
+    std::fs::write(&big, &contents).expect("write");
+    let out = keelsign(&[&"pubkey", &"--key", &big]);
+    assert_exit(&out, 5);
+    assert!(
+        stderr(&out).contains("larger than 1 MiB"),
+        "{}",
+        stderr(&out)
+    );
+
+    // The same cap for a passphrase file; no key is written.
+    let key_path = dir.join("never.pem");
+    let out = keelsign(&[
+        &"keygen",
+        &"--alg",
+        &"ed25519",
+        &"--out",
+        &key_path,
+        &"--passphrase-file",
+        &big,
+    ]);
+    assert_exit(&out, 2);
+    assert!(
+        stderr(&out).contains("larger than 1 MiB"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!key_path.exists());
+
+    // A device that never ends is read only up to the cap.
+    #[cfg(unix)]
+    {
+        let out = keelsign(&[&"pubkey", &"--key", &"/dev/zero"]);
+        assert_exit(&out, 5);
+        assert!(
+            stderr(&out).contains("larger than 1 MiB"),
+            "{}",
+            stderr(&out)
+        );
+    }
+}
+
+#[test]
+fn pubkey_refuses_to_overwrite_its_own_key() {
+    let dir = scratch("same_file");
+    let key_path = dir.join("key.pem");
+    assert_exit(
+        &keelsign(&[&"keygen", &"--alg", &"ed25519", &"--out", &key_path]),
+        0,
+    );
+    let before = std::fs::read(&key_path).expect("read");
+    let out = keelsign(&[
+        &"pubkey", &"--key", &key_path, &"--out", &key_path, &"--force",
+    ]);
+    assert_exit(&out, 2);
+    assert!(stderr(&out).contains("is the key file"), "{}", stderr(&out));
+    assert_eq!(std::fs::read(&key_path).expect("read"), before);
+
+    // Also through a symlink to the key.
+    #[cfg(unix)]
+    {
+        let link = dir.join("link.pem");
+        std::os::unix::fs::symlink(&key_path, &link).expect("symlink");
+        let out = keelsign(&[&"pubkey", &"--key", &key_path, &"--out", &link, &"--force"]);
+        assert_exit(&out, 2);
+        assert_eq!(std::fs::read(&key_path).expect("read"), before);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn dangling_symlink_at_out_is_refused() {
+    let dir = scratch("dangling");
+    let link = dir.join("key.pem");
+    let target = dir.join("nonexistent");
+    std::os::unix::fs::symlink(&target, &link).expect("symlink");
+    let out = keelsign(&[&"keygen", &"--alg", &"ed25519", &"--out", &link]);
+    assert_exit(&out, 3);
+    assert!(stderr(&out).contains("--force"), "{}", stderr(&out));
+    assert!(!target.exists(), "nothing is written through the link");
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .expect("link")
+            .file_type()
+            .is_symlink()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn force_replaces_a_symlink_not_its_target() {
+    let dir = scratch("force_symlink");
+    let target = dir.join("target.txt");
+    std::fs::write(&target, b"secret-target\n").expect("write");
+    let link = dir.join("key.pem");
+    std::os::unix::fs::symlink(&target, &link).expect("symlink");
+    let out = keelsign(&[&"keygen", &"--alg", &"ed25519", &"--out", &link, &"--force"]);
+    assert_exit(&out, 0);
+    assert_eq!(std::fs::read(&target).expect("read"), b"secret-target\n");
+    let meta = std::fs::symlink_metadata(&link).expect("metadata");
+    assert!(
+        meta.file_type().is_file(),
+        "the link is replaced by the key file"
+    );
+    let key = std::fs::read(&link).expect("read key");
+    PrivateKey::from_bytes(&key, None).expect("a key");
+}
+
+#[test]
+fn conflicting_passphrase_sources_are_a_usage_error() {
+    let dir = scratch("conflicting_passphrase");
+    let pw_file = write_passphrase_file(&dir);
+    let key_path = dir.join("key.pem");
+    let out = keelsign(&[
+        &"keygen",
+        &"--alg",
+        &"ed25519",
+        &"--out",
+        &key_path,
+        &"--passphrase-file",
+        &pw_file,
+        &"--passphrase-env",
+        &"KEELSIGN_TEST_PW",
+    ]);
+    assert_exit(&out, 2);
+    assert!(
+        stderr(&out).contains("cannot be used with"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!key_path.exists());
 }

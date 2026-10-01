@@ -93,6 +93,8 @@ What `pubkey` (and later `sign`) reads:
   openssl pkey -in K.pem -provparam ml-dsa.output_formats=seed-only -out K.seed.pem
   ```
 
+  A PKCS#8 version 2 ML-DSA key's `publicKey` must match the public key derived from
+  the seed; otherwise the file is rejected (exit code 5).
 - Ed25519: version 1, or version 2 with the public key, which must match the private
   key.
 
@@ -138,6 +140,22 @@ AES-CBC has no integrity check, so a wrong passphrase and a corrupted ciphertext
 the same: keelsign reports "wrong passphrase for FILE (or the encrypted key is
 corrupt)".
 
+When reading an encrypted key, the KDF parameters come from the file, so keelsign checks
+them before deriving anything (a hostile file could otherwise crash the tool or make it
+use unbounded memory and time):
+
+- Only PBES2 with scrypt or PBKDF2 and AES-128/192/256-CBC is read. PBES1, AES-GCM and
+  other KDFs or ciphers are refused: "unsupported encryption scheme; keelsign reads
+  PBES2 (scrypt or PBKDF2 with AES-CBC)" (exit code 5).
+- scrypt: N must be a power of two from 2 to 2^20 (1,048,576), 1 ≤ r ≤ 32 and
+  1 ≤ p ≤ 16. keelsign itself writes N = 2^14, r = 8, p = 1.
+- PBKDF2: 1 to 10,000,000 iterations.
+- A parameter outside these ranges is refused with exit code 5, naming the parameter.
+
+The seed, the passphrase and the decoded key documents are held in zeroizing buffers
+that are wiped when dropped. Transient copies the cryptography libraries make on the
+stack are not wiped; keelsign uses no `unsafe` code to reach them.
+
 ## Key ID and KEYHASH
 
 keelsign identifies a post-quantum key by its **key ID** and an Ed25519 key by MCUboot's
@@ -172,7 +190,16 @@ Worked examples with published test vectors:
 - With `--force`, the new file is written to a temporary file in the same directory
   (`.NAME.keelsign-tmp-PID`, mode `0600` for private keys), flushed to disk and renamed
   over the old one. The replaced file never holds a partial key, and an old
-  world-readable file is replaced by a `0600` one.
+  world-readable file is replaced by a `0600` one. If `--out` is a symbolic link, the
+  link itself is replaced and its target is left unchanged.
+- An interrupted `--force` run (killed, power loss) can leave the temporary file
+  `.NAME.keelsign-tmp-PID` behind. It has mode `0600` and may hold the private key:
+  delete it. If it is still there when the same process ID comes round again, keelsign
+  stops with exit code 1 and says so.
+- `pubkey --out` refuses to write to the file given with `--key` (also through a link),
+  with exit code 2, so it can never replace the private key with its public key.
+- Key files and passphrase files larger than 1 MiB are refused without reading them
+  further (exit code 5 for a key file, 2 for a passphrase file).
 - A failed write removes the partial file.
 - On other platforms (Windows) no access-control change is made; `keygen` prints a note,
   and protecting the file is up to you.
@@ -183,10 +210,10 @@ Worked examples with published test vectors:
 |---|---|
 | 0 | success |
 | 1 | I/O error (unreadable key or passphrase file, write failure), random-number generator failure, internal error |
-| 2 | usage error: unknown command, option or `--alg` value, conflicting options, empty passphrase, `--format der` without `--out` |
+| 2 | usage error: unknown command, option or `--alg` value, conflicting options, empty passphrase, passphrase file over 1 MiB, `--format der` without `--out`, `pubkey --out` naming the `--key` file |
 | 3 | the output file exists and `--force` was not given |
 | 4 | passphrase: wrong, missing for an encrypted key, or given for an unencrypted key |
-| 5 | corrupt or unsupported key file (not PEM/DER PKCS#8, a public key, an unsupported algorithm, ML-DSA `expandedKey`/`both`, parameters present, mismatched Ed25519 public key) |
+| 5 | corrupt or unsupported key file (not PEM/DER PKCS#8, over 1 MiB, a public key, an unsupported algorithm, ML-DSA `expandedKey`/`both`, parameters present, a v2 public key that does not match, an unsupported encryption scheme or out-of-range KDF parameters) |
 | 6 | the key file holds a different algorithm than `--alg` |
 
 Error messages go to standard error, start with `error:` and name the file.
@@ -201,7 +228,7 @@ openssl asn1parse -in signing.pub.pem
 ```
 
 OpenSSL 3.5 or newer prints the names (`ML-DSA-44`, `ML-DSA-65`, `ED25519`); older
-OpenSSL and LibreSSL print the dotted OID or `ED25519`. For an encrypted key,
+OpenSSL and LibreSSL print the dotted OID or `Ed25519`. For an encrypted key,
 `asn1parse` shows the PBES2, scrypt and AES-256-CBC OIDs.
 
 Derive the public key with OpenSSL (ML-DSA needs OpenSSL 3.5 or newer) and compare it
