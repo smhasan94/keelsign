@@ -1,36 +1,98 @@
 # keelsign
 
-Post-quantum firmware signing kit. Sign firmware on the host with ML-DSA or LMS/HSS
+Post-quantum firmware signing kit. Sign firmware on the host with LMS/HSS or ML-DSA
 (optionally hybrid with Ed25519) and verify it on the device, keeping MCUboot's image
 format so MCUboot and embassy-boot users keep their existing update pipeline.
 
-**Status: placeholder / name reservation.** The published `0.0.1` crates contain no
-functionality. Unreleased on `main`: `keelsign-verify` verifies MCUboot images through
-one entry point, `verify`, under a classical-only, PQ-only or hybrid policy
-([docs/policy.md](docs/policy.md)): it reads them from flash, hashes them in chunks and
-verifies LMS/HSS, (with its `ed25519` feature) Ed25519 and (with its `ml-dsa` feature)
-ML-DSA-44/65 signatures. ML-DSA verify needs about 98 KB / 158 KB of stack on stable, far
-over the 32 KB device budget
-([docs/benchmarks.md](docs/benchmarks.md#ml-dsa-verify-sha-44); a low-stack verify is
-SHA-169). The CLI is not there yet.
+**Status: placeholder / name reservation on crates.io.** The published `0.0.1` crates
+contain no functionality. The verifier described below is unreleased and its API is
+unstable. The host CLI, the embassy-boot adapter and the MCUboot C bindings are not
+written yet.
+
+## What works today
+
+`keelsign-verify` is a `no_std`, heap-free, `unsafe`-free verifier with one entry point,
+`verify`. It reads an MCUboot image from a slot, through a `&[u8]` or any
+`embedded-storage` NOR flash. It enforces the image rules, hashes the image in chunks
+(256-byte buffer by default) and checks the signatures the device's policy requires.
+It returns the image version and security counter for the caller's anti-rollback check.
+Every failure is a typed error.
+
+| Policy | Ed25519 signature | Post-quantum signature |
+|---|---|---|
+| `ClassicalOnly` | required | not checked (transition mode) |
+| `PqOnly` | not checked | required |
+| `Hybrid` | required | required |
+
+One hybrid image serves fleets under all three policies. See
+[docs/policy.md](docs/policy.md) for the rules and the full policy × image matrix.
+
+| Signature | Enable with | Static stack frame | Flash, release (nRF52840) |
+|---|---|---|---|
+| LMS/HSS (RFC 8554, SP 800-208; SHA-256 and SHA-256/192, W8) | always on | 1,512 B | about 7 KB |
+| Ed25519 (MCUboot's KEYHASH + ED25519 pair), as a hybrid Ed25519 + LMS verify | `ed25519` feature | about 12.8 KB for the whole verify | about 74 KB for the whole verify |
+| ML-DSA-44 / ML-DSA-65 (FIPS 204) | `ml-dsa` feature | about 98 KB / 158 KB (stable build) | about 55 KB more |
+
+ML-DSA verify needs far more stack than the 32 KB device budget. It works on the test
+boards but not yet in a real bootloader; a low-stack verify is tracked separately. Under
+the strict CNSA 2.0 backend, `DefaultBackend::cnsa_2_0()`, only single-tree LMS is
+accepted. All figures are measured and kept current in
+[docs/benchmarks.md](docs/benchmarks.md); cycle counts and measured peak stack still
+need the boards.
 
 ## Crates
 
 | Crate | Kind | Purpose |
 |---|---|---|
-| `keelsign` | host CLI | `keygen` / `sign` / `verify` / `inspect` MCUboot-format images |
-| `keelsign-verify` | `no_std`, no heap | Parses header + TLV area, hashes image in chunks, verifies ML-DSA-44/65 and LMS/HSS, hybrid with Ed25519; typed errors |
+| `keelsign` | host CLI (placeholder) | `keygen` / `sign` / `verify` / `inspect` MCUboot-format images |
+| `keelsign-verify` | `no_std`, no heap | Parses the header and TLV area, hashes the image in chunks, verifies LMS/HSS, Ed25519 and ML-DSA-44/65 under a policy; typed errors |
 | `keelsign-embassy` (planned) | `no_std` | Adapter for embassy-boot |
-| `keelsign-ffi` (planned) | staticlib | C ABI + cbindgen header for MCUboot's `MCUBOOT_USE_CUSTOM_CRYPTO` hook (`libkeelsign`) |
+| `keelsign-ffi` (planned) | staticlib | C ABI and cbindgen header for MCUboot's `MCUBOOT_USE_CUSTOM_CRYPTO` hook (`libkeelsign`) |
+
+## Boards
+
+| Board | Core | Target |
+|---|---|---|
+| Nordic nRF52840-DK | Cortex-M4F | `thumbv7em-none-eabihf` |
+| Raspberry Pi Pico 2 W (RP2350) | Cortex-M33 | `thumbv8m.main-none-eabihf` |
+| ST NUCLEO-U575ZI-Q | Cortex-M33 | `thumbv8m.main-none-eabihf` |
+
+A Raspberry Pi Debug Probe drives the Pico 2 W. See [docs/hardware.md](docs/hardware.md).
+
+## Documentation
+
+- [docs/image-format.md](docs/image-format.md): the image format. keelsign's TLVs in the
+  MCUboot TLV area, what each signature covers, key IDs, the hybrid Ed25519 layout,
+  sizes, CNSA 2.0 and MCUboot compatibility.
+- [docs/policy.md](docs/policy.md): the three policies, key sets, image rules, error
+  precedence, the policy matrix and anti-rollback.
+- [docs/benchmarks.md](docs/benchmarks.md): on-target known-answer tests, stack and flash
+  per algorithm, and the toolchains every figure was measured with.
+- [docs/setup.md](docs/setup.md): toolchain, probes, flashing the example boards and
+  on-target tests.
+- [docs/hardware.md](docs/hardware.md) and [docs/release.md](docs/release.md): the bill
+  of materials and the human-only release steps.
 
 ## Development
 
-Toolchain, probe setup and flashing the example boards: see [docs/setup.md](docs/setup.md).
-ML-DSA verify benchmarks on the boards (on-target KATs, cycles, stack, flash) and the
-go/no-go decision: see [docs/benchmarks.md](docs/benchmarks.md).
-The image format (keelsign TLVs in the MCUboot TLV area, signing mode, key IDs, hybrid
-Ed25519 layout, sizes and MCUboot compatibility): see
-[docs/image-format.md](docs/image-format.md).
+Stable Rust 1.91 or newer and the two embedded targets; [docs/setup.md](docs/setup.md)
+has the rest. The usual checks:
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo test -p keelsign-verify --locked --features ed25519,ml-dsa
+```
+
+The recorded flash and stack figures in `docs/benchmarks.md` are checked against a fresh
+build. These checks need the exact compilers the doc names and both board targets:
+
+```sh
+cargo test -p repo-checks --locked --test benchmarks_doc -- --ignored recorded_
+```
+
+Test fixtures are generated by the scripts in `scripts/` and never edited by hand.
 
 ## Licence
 
