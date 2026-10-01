@@ -1,7 +1,9 @@
 //! Host known-answer tests for LMS/HSS verify (SHA-65): RFC 8554 Appendix F, the NIST
 //! ACVP LMS sigVer vectors (SHA-256/192), signatures by the independent signer hsslms
 //! 0.1.3, derived negatives and the key-rotation check, all through
-//! `keelsign_verify::verify_pq` with the default backend.
+//! `keelsign_verify::verify_pq` with the default backend (`keelsign_default()`), and every
+//! case also under the strict `cnsa_2_0()` device path
+//! (`verify_pq_with(&DefaultBackend::cnsa_2_0(), ..)`, SHA-240) and the RFC policy.
 
 // Host test code, not no_std firmware: failing a test with a message is the point.
 #![allow(
@@ -15,7 +17,7 @@ use keelsign_verify::lms::ParameterPolicy;
 use keelsign_verify::{Error, KeySetError, TrustedKeys};
 use lms_kat::{
     Case, Expect, Fixture, KeyInfo, LMS_TARGET, Outcome, ParseError, Source, TARGET_CASES,
-    check_rotation, ids, run_fixture, verify_case, verify_case_rfc_all_sets,
+    check_rotation, ids, run_fixture, verify_case, verify_case_cnsa_2_0, verify_case_rfc_all_sets,
 };
 
 const LMS_HOST: &[u8] = include_bytes!("../fixtures/lms-host.bin");
@@ -35,7 +37,7 @@ fn host_case(id: u16) -> Case<'static> {
         .unwrap_or_else(|| panic!("case {id} missing from the host fixture"))
 }
 
-/// Asserts both expectations of `case` and returns the outcome.
+/// Asserts all three expectations of `case` and returns the outcome.
 fn assert_case(case: &Case<'_>) -> Outcome {
     let outcome = Outcome::run(case);
     assert!(
@@ -81,7 +83,7 @@ fn rfc8554_test_case_2_is_unsupported_parameter_set_and_verifies_under_rfc_polic
             lmots_typecode: 0x03
         })
     );
-    assert!(!ParameterPolicy::cnsa_2_0().allows(0x06, 0x03));
+    assert!(!ParameterPolicy::keelsign_default().allows(0x06, 0x03));
     assert_eq!(verify_case(&tc2), Err(Error::UnsupportedParameterSet));
     assert_eq!(verify_case_rfc_all_sets(&tc2), Ok(()));
     assert_case(&tc2);
@@ -122,7 +124,7 @@ fn acvp_lms_sigver_m24_16_cases_match_under_rfc_policy_and_are_unsupported_gated
 }
 
 #[test]
-fn hsslms_signed_cnsa_cases_verify() {
+fn hsslms_signed_w8_cases_verify_under_keelsign_default() {
     // SHA-256 (M32) and SHA-256/192 (M24), W8, one and two levels, H5 and H10.
     let expected = [
         (ids::M32_H5_L1, 1, 0x05, 0x04, 60, 1296),
@@ -157,7 +159,7 @@ fn hsslms_signed_cnsa_cases_verify() {
         other.msg = &msg;
         assert_eq!(verify_case(&other), Err(Error::SignatureInvalid), "{id}");
     }
-    // Outside the keelsign policy, but valid RFC 8554 / SP 800-208 signatures.
+    // Outside the keelsign device policies, but valid RFC 8554 / SP 800-208 signatures.
     for id in [ids::M32_W4, ids::M24_W2, ids::HSS_L3] {
         let case = host_case(id);
         assert_eq!(
@@ -170,7 +172,7 @@ fn hsslms_signed_cnsa_cases_verify() {
 }
 
 #[test]
-fn every_host_case_matches_both_expectations() {
+fn every_host_case_matches_all_three_expectations() {
     let all = cases(LMS_HOST);
     let failures: Vec<Outcome> = all
         .iter()
@@ -186,6 +188,30 @@ fn every_host_case_matches_both_expectations() {
     for source in [Source::Rfc8554, Source::Acvp, Source::Hsslms] {
         assert!(all.iter().any(|c| c.source == source), "{source:?}");
     }
+    // The strict column follows the script's stated rule: the default expectation for an
+    // `L = 1` key, `UnsupportedParameterSet` for every other `L`.
+    for case in &all {
+        let levels = KeyInfo::of(case.pk).unwrap().levels;
+        let rule = if levels == 1 {
+            case.expect_default
+        } else {
+            Expect::UnsupportedParameterSet
+        };
+        assert_eq!(
+            case.expect_cnsa_2_0, rule,
+            "case {} (L = {levels})",
+            case.id
+        );
+    }
+    // The deviation is exercised: valid two-level cases that only the strict policy
+    // refuses, and single-tree cases valid under all three.
+    assert!(
+        all.iter().any(|c| c.expect_default == Expect::Ok
+            && c.expect_cnsa_2_0 == Expect::UnsupportedParameterSet)
+    );
+    assert!(all.iter().any(|c| c.expect_default == Expect::Ok
+        && c.expect_cnsa_2_0 == Expect::Ok
+        && c.expect_rfc_all_sets == Expect::Ok));
     let summary = run_fixture(LMS_HOST, |_, _| {}).unwrap();
     assert!(summary.all_passed(), "{summary:?}");
     assert_eq!(summary.total as usize, all.len());
@@ -194,13 +220,13 @@ fn every_host_case_matches_both_expectations() {
 #[test]
 fn negative_cases_return_their_expected_variant() {
     let all = cases(LMS_HOST);
-    // Every error variant the LMS backend can return appears under the CNSA policy.
+    // Every error variant the LMS backend can return appears under the default policy.
     for expect in [
         Expect::SignatureInvalid,
         Expect::UnsupportedParameterSet,
         Expect::MalformedSignature,
     ] {
-        let matching: Vec<&Case<'_>> = all.iter().filter(|c| c.expect_cnsa == expect).collect();
+        let matching: Vec<&Case<'_>> = all.iter().filter(|c| c.expect_default == expect).collect();
         assert!(!matching.is_empty(), "no {expect:?} case");
         for case in matching {
             assert_eq!(verify_case(case), expect.result(), "case {}", case.id);
@@ -231,9 +257,34 @@ fn negative_cases_return_their_expected_variant() {
     let l3 = host_case(ids::TC1_KEY_L3);
     assert_eq!(verify_case(&l3), Err(Error::UnsupportedParameterSet));
     assert_eq!(
+        verify_case_cnsa_2_0(&l3),
+        Err(Error::UnsupportedParameterSet)
+    );
+    assert_eq!(
         verify_case_rfc_all_sets(&l3),
         Err(Error::MalformedSignature)
     );
+    // Every case derived from TC1 (401-406, 5xx) is under TC1's L = 2 key, so the strict
+    // policy refuses it before reading the signature, whatever the default result is.
+    let derived: Vec<&Case<'_>> = all
+        .iter()
+        .filter(|c| c.source == Source::Rfc8554 && c.id > ids::RFC_TC2)
+        .collect();
+    assert_eq!(derived.len(), 6 + tc1.sig.len().div_ceil(97));
+    for case in derived {
+        assert_eq!(
+            case.expect_cnsa_2_0,
+            Expect::UnsupportedParameterSet,
+            "{}",
+            case.id
+        );
+        assert_eq!(
+            verify_case_cnsa_2_0(case),
+            Err(Error::UnsupportedParameterSet),
+            "{}",
+            case.id
+        );
+    }
 }
 
 #[test]
@@ -309,7 +360,7 @@ fn lm_ots_typecode_mismatch_in_signature_is_rejected() {
     assert_eq!(case.sig[ots..ots + 4], 0x08u32.to_be_bytes());
     assert_eq!(case.sig[..ots], base.sig[..ots]);
     assert_eq!(case.sig[ots + 4..], base.sig[ots + 4..]);
-    assert!(ParameterPolicy::cnsa_2_0().allows(0x05, 0x04));
+    assert!(ParameterPolicy::keelsign_default().allows(0x05, 0x04));
     assert_eq!(verify_case(&case), Err(Error::SignatureInvalid));
     assert_eq!(
         verify_case_rfc_all_sets(&case),
@@ -348,6 +399,68 @@ fn truncated_signature_is_malformed_signature() {
             case.id
         );
     }
+}
+
+#[test]
+fn two_level_cases_are_unsupported_under_cnsa_2_0_and_single_tree_cases_match_default() {
+    // Every case whose key has L != 1 is refused by the strict device path, valid or not
+    // under the default (1, 302, 304, 312 are valid two-level signatures).
+    for id in [
+        ids::RFC_TC1,
+        ids::M32_H5H5_L2,
+        ids::M32_H5H10_L2,
+        ids::M24_H5H5_L2,
+        ids::RFC_TC2,
+        ids::HSS_L3,
+        ids::TC1_KEY_L3,
+        ids::M32_H5H5_L2_Q_TWO_POW_H,
+        ids::M32_H5H5_L2_LMOTS_TYPECODE_MISMATCH,
+    ] {
+        let case = host_case(id);
+        assert_ne!(KeyInfo::of(case.pk).unwrap().levels, 1, "{id}");
+        assert_eq!(
+            verify_case_cnsa_2_0(&case),
+            Err(Error::UnsupportedParameterSet),
+            "{id}"
+        );
+        assert_eq!(
+            case.expect_cnsa_2_0,
+            Expect::UnsupportedParameterSet,
+            "{id}"
+        );
+    }
+    for id in [
+        ids::RFC_TC1,
+        ids::M32_H5H5_L2,
+        ids::M32_H5H10_L2,
+        ids::M24_H5H5_L2,
+    ] {
+        assert_eq!(verify_case(&host_case(id)), Ok(()), "{id}");
+    }
+    // Single trees (L = 1), W8, both hash sizes and both heights: the strict result is the
+    // default one, Ok.
+    for id in [
+        ids::M32_H5_L1,
+        ids::M32_H10_L1,
+        ids::M24_H5_L1,
+        ids::M24_H10_L1,
+        ids::ROTATION_A,
+        ids::ROTATION_B,
+    ] {
+        let case = host_case(id);
+        assert_eq!(KeyInfo::of(case.pk).unwrap().levels, 1, "{id}");
+        assert_eq!(verify_case_cnsa_2_0(&case), Ok(()), "{id}");
+        assert_eq!(verify_case_cnsa_2_0(&case), verify_case(&case), "{id}");
+        let mut other = case;
+        let msg = [0u8; 32];
+        other.msg = &msg;
+        assert_eq!(
+            verify_case_cnsa_2_0(&other),
+            Err(Error::SignatureInvalid),
+            "{id}"
+        );
+    }
+    assert!(host_case(ids::M24_H5_L1).pk.len() == 52 && host_case(ids::M32_H5_L1).pk.len() == 60);
 }
 
 #[test]
@@ -408,6 +521,37 @@ fn target_subset_is_subset_of_host_set() {
         );
     }
     assert!(target.iter().any(|c| c.source == Source::Acvp));
+    // The on-target run checks the strict policy on both sides: single trees it accepts
+    // and valid two-level cases it refuses.
+    for id in [ids::M24_H5_L1, ids::ROTATION_A, ids::ROTATION_B] {
+        let case = target.iter().find(|c| c.id == id).unwrap();
+        assert_eq!(case.expect_cnsa_2_0, Expect::Ok, "{id}");
+    }
+    for id in [ids::RFC_TC1, ids::M32_H5H5_L2, ids::M24_H5H5_L2] {
+        let case = target.iter().find(|c| c.id == id).unwrap();
+        assert_eq!(case.expect_default, Expect::Ok, "{id}");
+        assert_eq!(
+            case.expect_cnsa_2_0,
+            Expect::UnsupportedParameterSet,
+            "{id}"
+        );
+    }
+    for case in &target {
+        let outcome = Outcome::run(case);
+        assert_eq!(outcome.default, case.expect_default.result(), "{}", case.id);
+        assert_eq!(
+            outcome.cnsa_2_0,
+            case.expect_cnsa_2_0.result(),
+            "{}",
+            case.id
+        );
+        assert_eq!(
+            outcome.rfc_all_sets,
+            case.expect_rfc_all_sets.result(),
+            "{}",
+            case.id
+        );
+    }
     let summary = run_fixture(LMS_TARGET, |_, _| {}).unwrap();
     assert!(summary.all_passed(), "{summary:?}");
     assert_eq!(summary.total, TARGET_CASES);
@@ -422,7 +566,8 @@ fn parser_rejects_truncated_input() {
         .next()
         .unwrap()
         .unwrap();
-    let first_end = 8 + 11 + first.pk.len() + first.sig.len() + first.msg.len();
+    // Per-case header: id (2), source (1), three expectations (3), three lengths (6).
+    let first_end = 8 + 12 + first.pk.len() + first.sig.len() + first.msg.len();
     for cut in 0..8 {
         assert_eq!(
             Fixture::parse(&bytes[..cut]).unwrap_err(),
@@ -436,24 +581,31 @@ fn parser_rejects_truncated_input() {
     let mut bad = bytes.to_vec();
     bad[0] ^= 0xff;
     assert_eq!(Fixture::parse(&bad).unwrap_err(), ParseError::BadMagic);
-    let mut bad = bytes.to_vec();
-    bad[4] = 2;
-    assert_eq!(
-        Fixture::parse(&bad).unwrap_err(),
-        ParseError::UnsupportedVersion(2)
-    );
+    // Version 1 (two expectations) and any later version are refused.
+    for version in [1u8, 3] {
+        let mut bad = bytes.to_vec();
+        bad[4] = version;
+        assert_eq!(
+            Fixture::parse(&bad).unwrap_err(),
+            ParseError::UnsupportedVersion(u16::from(version))
+        );
+    }
     let mut bad = bytes.to_vec();
     bad[8 + 2] = 9;
     assert_eq!(
         Fixture::parse(&bad).unwrap().cases().next(),
         Some(Err(ParseError::UnknownSource(9)))
     );
-    let mut bad = bytes.to_vec();
-    bad[8 + 3] = 5;
-    assert_eq!(
-        Fixture::parse(&bad).unwrap().cases().next(),
-        Some(Err(ParseError::BadExpectation(5)))
-    );
+    // Each of the three expectation bytes (default, cnsa_2_0, rfc_all_sets).
+    for (at, code) in [(8 + 3, 5u8), (8 + 4, 6), (8 + 5, 0xff)] {
+        let mut bad = bytes.to_vec();
+        bad[at] = code;
+        assert_eq!(
+            Fixture::parse(&bad).unwrap().cases().next(),
+            Some(Err(ParseError::BadExpectation(code))),
+            "byte {at}"
+        );
+    }
     let mut trailing = bytes.to_vec();
     trailing.push(0);
     assert_eq!(

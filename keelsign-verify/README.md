@@ -7,7 +7,8 @@ flash through `NorFlashReader`) and the chunked image digest (`image_digest`, pe
 bounded by the caller's chunk buffer, 256 bytes by default), the trusted-key set (lookup
 by key ID), the post-quantum signature dispatch with typed errors, and the built-in
 LMS/HSS verifier (RFC 8554, SP 800-208; SHA-256 and SHA-256/192 with W8, up to two HSS
-levels) behind `verify_pq`. The image format
+levels by default, or single-tree only under the strict CNSA 2.0 policy
+(`DefaultBackend::cnsa_2_0()`)) behind `verify_pq`. The image format
 (keelsign TLV IDs `0x4BA0`–`0x4BA3`, the signing mode, key IDs and the hybrid Ed25519
 layout) is specified in
 [docs/image-format.md](https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md).

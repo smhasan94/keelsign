@@ -218,8 +218,13 @@ fn lms_fixtures_match_manifest() {
         assert_eq!(&bytes[..4], b"KSLM", "{name}: magic");
         assert_eq!(
             u16::from_le_bytes([bytes[4], bytes[5]]),
-            1,
-            "{name}: version"
+            2,
+            "{name}: version (KSLM v2, three expectations per case)"
+        );
+        assert_eq!(
+            json_field(entry, "version"),
+            "2",
+            "{name}: manifest version"
         );
         let header_count = u16::from_le_bytes([bytes[6], bytes[7]]);
         assert_eq!(header_count, count, "{name}: case count");
@@ -233,11 +238,70 @@ fn lms_fixtures_match_manifest() {
             usize::from(count),
             "{name}: manifest lists every case"
         );
+        // Three expectations per case, one per policy; the v1 key is gone.
+        let cases = lms_manifest_cases(entry);
+        assert_eq!(cases.len(), usize::from(count), "{name}: case objects");
+        for case in &cases {
+            for key in ["expect_default", "expect_cnsa_2_0", "expect_rfc_all_sets"] {
+                assert_eq!(
+                    case.matches(&format!("\"{key}\":")).count(),
+                    1,
+                    "{name}: {key} in {case}"
+                );
+            }
+        }
+        assert!(
+            !entry.contains("\"expect_cnsa\":"),
+            "{name}: the v1 key expect_cnsa must not remain"
+        );
+    }
+    assert!(
+        manifest.contains("\"format\": \"KSLM v2"),
+        "manifest format is KSLM v2"
+    );
+    let policies = json_object(&manifest, "policies");
+    for needle in [
+        "keelsign_default",
+        "DefaultBackend::cnsa_2_0()",
+        "rfc_8554_all_sets",
+    ] {
+        assert!(policies.contains(needle), "manifest policies name {needle}");
     }
     let host = json_object(outputs, "lms-host.bin");
     for source in ["\"rfc8554\"", "\"acvp\"", "\"hsslms\""] {
         assert!(host.contains(source), "host fixture has {source} cases");
     }
+    // The CNSA 2.0 deviation is exercised (a case Ok by default and refused by the strict
+    // policy) and a single-tree case is Ok under all three policies.
+    let host_cases = lms_manifest_cases(host);
+    assert!(
+        host_cases
+            .iter()
+            .any(|c| json_field(c, "expect_default") == "Ok"
+                && json_field(c, "expect_cnsa_2_0") == "UnsupportedParameterSet")
+    );
+    assert!(
+        host_cases
+            .iter()
+            .any(|c| json_field(c, "expect_default") == "Ok"
+                && json_field(c, "expect_cnsa_2_0") == "Ok"
+                && json_field(c, "expect_rfc_all_sets") == "Ok")
+    );
+}
+
+/// The case objects of an LMS manifest output entry (flat objects inside `"cases": [`).
+fn lms_manifest_cases(entry: &str) -> Vec<&str> {
+    let start = entry.find("\"cases\": [").expect("cases array");
+    let mut rest = &entry[start..];
+    let end = rest.find(']').expect("cases array closes");
+    rest = &rest[..end];
+    let mut out = Vec::new();
+    while let Some(open) = rest.find('{') {
+        let close = rest[open..].find('}').expect("case object closes") + open;
+        out.push(&rest[open..=close]);
+        rest = &rest[close + 1..];
+    }
+    out
 }
 
 #[test]

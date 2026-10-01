@@ -4,6 +4,11 @@
 //! Synchronous embedded-test cases, no embassy executor. Run from this directory with
 //! `cargo test --release --test lms` (docs/benchmarks.md). Every case is logged over
 //! defmt; `lms_bench` logs one `BENCH …` line per case for `scripts/bench_summarize.py`.
+//!
+//! `lms_kat` checks all three expectations of every case: the default device path
+//! (`verify_pq`, `keelsign_default()`), the strict CNSA 2.0 device path
+//! (`verify_pq_with(&DefaultBackend::cnsa_2_0(), ..)`, single tree only) and the RFC
+//! policy. `lms_bench` measures the default path.
 #![no_std]
 #![no_main]
 
@@ -51,16 +56,19 @@ fn init_board() -> Board {
     Board { dwt_present }
 }
 
-/// Runs every case of the on-target fixture under both policies and logs each outcome.
+/// Runs every case of the on-target fixture under all three policies (strict `cnsa_2_0`
+/// through `DefaultBackend::cnsa_2_0()`) and logs each outcome.
 fn kat() -> Result<(), &'static str> {
     let summary = run_fixture(LMS_TARGET, |case, outcome| {
         info!(
-            "KAT board={=str} set=LMS src={=str} tc={=u16} expect_cnsa={=str} cnsa={=str} expect_rfc={=str} rfc={=str} result={=str}",
+            "KAT board={=str} set=LMS src={=str} tc={=u16} expect_default={=str} default={=str} expect_cnsa2={=str} cnsa2={=str} expect_rfc={=str} rfc={=str} result={=str}",
             BOARD,
             case.source.name(),
             case.id,
-            result_name(outcome.expect_cnsa.result()),
-            result_name(outcome.cnsa),
+            result_name(outcome.expect_default.result()),
+            result_name(outcome.default),
+            result_name(outcome.expect_cnsa_2_0.result()),
+            result_name(outcome.cnsa_2_0),
             result_name(outcome.expect_rfc_all_sets.result()),
             result_name(outcome.rfc_all_sets),
             if outcome.passed() { "ok" } else { "FAIL" }
@@ -94,7 +102,7 @@ fn rotation() -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Paints the stack, then times one `verify_pq` and measures its stack high-water mark.
+/// Paints the stack, then times one `verify_pq` (default policy) and measures its stack high-water mark.
 #[inline(never)]
 fn measure_case(case: &Case<'_>) -> (Result<(), Error>, u32, Watermark) {
     let sp0 = cortex_m::register::msp::read();
@@ -112,7 +120,7 @@ fn bench() -> Result<(), &'static str> {
     for case in fixture.cases() {
         let case = case.map_err(|_| "fixture case does not parse")?;
         let (result, cycles, mark) = measure_case(&case);
-        let passed = result == case.expect_cnsa.result();
+        let passed = result == case.expect_default.result();
         let info = KeyInfo::of(case.pk).ok_or("public key too short for its typecodes")?;
         info!(
             "BENCH board={=str} set=LMS-{=str}-{=str}-L{=u32} src={=str} tc={=u16} msg_len={=usize} sig_len={=usize} expect_valid={=bool} ok={=bool} result={=str} cycles={=u32} us={=u32} peak_stack={=u32} saturated={=bool}",
@@ -124,7 +132,7 @@ fn bench() -> Result<(), &'static str> {
             case.id,
             case.msg.len(),
             case.sig.len(),
-            case.expect_cnsa == Expect::Ok,
+            case.expect_default == Expect::Ok,
             passed,
             result_name(result),
             cycles,

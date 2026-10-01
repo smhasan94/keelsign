@@ -177,16 +177,24 @@ fn doc_has_required_sections() {
     for term in [
         "cnsa_2_0()",
         "keelsign_default()",
+        "DefaultBackend::cnsa_2_0()",
+        "verify_pq_with",
         "CNSA 2.0 FAQ v2.1",
         "Deviation from CNSA 2.0",
         "L = 1",
-        "follow-up",
+        "are not allowed",
+        "web.archive.org",
     ] {
         assert!(
             lms.contains(term),
             "the LMS/CNSA section must mention `{term}`"
         );
     }
+    // SHA-240 implemented the split: the section no longer describes it as planned.
+    assert!(
+        !lms.contains("planned"),
+        "the LMS/CNSA section must not describe the policy split as planned"
+    );
     let compat = section(&doc, "## MCUboot compatibility");
     for term in [
         "CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST",

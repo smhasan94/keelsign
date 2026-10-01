@@ -23,10 +23,15 @@
 //!   ([`key_id_of`]).
 //! - [`verify_pq`] picks the single post-quantum signature TLV and the key-ID TLV out of
 //!   an image's TLVs, looks up the trusted key, checks that its [`Algorithm`] matches and
-//!   is compiled in, and verifies the signature with the built-in [`DefaultBackend`].
-//!   [`verify_pq_with`] does the same with any [`Backend`].
+//!   is compiled in, and verifies the signature with the built-in
+//!   [`DefaultBackend::new`]. [`verify_pq_with`] does the same with any [`Backend`].
 //! - [`lms`] verifies LMS/HSS signatures (RFC 8554, SP 800-208) over SHA-256 and
-//!   SHA-256/192 under the keelsign parameter policy.
+//!   SHA-256/192 with LM-OTS W8, under one of two device policies:
+//!   [`lms::ParameterPolicy::keelsign_default`] (up to two HSS levels; used by
+//!   [`lms::verify`], [`DefaultBackend::new`] and [`verify_pq`]) or the strict
+//!   [`lms::ParameterPolicy::cnsa_2_0`] (single-tree LMS only, `L = 1`), selected with
+//!   [`verify_pq_with`]`(&DefaultBackend::cnsa_2_0(), keys, tlvs, message)`. Only the
+//!   strict policy is CNSA 2.0-compliant (docs/image-format.md).
 //!
 //! Every failure is a distinct [`Error`] variant.
 //!

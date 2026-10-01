@@ -582,6 +582,34 @@ fn lms_crate_choice_recorded() {
     );
 }
 
+/// SHA-240: the LMS section names the default and the strict CNSA 2.0 policy, how the
+/// strict one is selected, and the fixtures' three expectations.
+#[test]
+fn lms_section_names_both_policies() {
+    let doc = doc();
+    let lms = section(&doc, LMS_SECTION);
+    for needle in [
+        "keelsign_default()",
+        "cnsa_2_0()",
+        "DefaultBackend::cnsa_2_0()",
+        "three expectations",
+        "expect_cnsa2=",
+    ] {
+        assert!(
+            lms.contains(needle),
+            "the LMS section must mention `{needle}`"
+        );
+    }
+    assert!(
+        !lms.contains("renamed or split"),
+        "the LMS section must not describe the policy split as future work"
+    );
+    assert!(
+        !lms.contains("expect_cnsa=…"),
+        "the LMS section must describe the current lms_kat log line"
+    );
+}
+
 /// A synthetic LMS log: no Wycheproof cases, so the headline is the shortest-message
 /// valid case of each set.
 #[test]

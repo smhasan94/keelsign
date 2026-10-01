@@ -1,6 +1,6 @@
 //! Flash-footprint baseline for LMS/HSS on the nRF52840-DK: HAL init, one defmt line, a
 //! black-boxed reference to the on-target LMS fixture, a parse of it that finds its first
-//! case accepted by the keelsign policy, and a trusted-key set holding that case's key
+//! case accepted by the default policy, and a trusted-key set holding that case's key
 //! (which computes its key ID with SHA-256). The fixture bytes, the parser, SHA-256 and
 //! the key set therefore cancel out of the `size_lms` delta, which leaves `verify_pq`
 //! with the LMS/HSS backend (docs/benchmarks.md).
@@ -20,7 +20,7 @@ fn main() -> ! {
     info!("size_lms_baseline fixture={=usize}", fixture.len());
     let case = Fixture::parse(fixture)
         .ok()
-        .and_then(|f| f.cases().flatten().find(|c| c.expect_cnsa == Expect::Ok));
+        .and_then(|f| f.cases().flatten().find(|c| c.expect_default == Expect::Ok));
     let keys = case.and_then(|c| trusted_lms_key(black_box(c.pk)).ok());
     let keys = black_box(keys);
     info!(

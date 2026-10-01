@@ -1,10 +1,18 @@
 //! LMS/HSS signature verification (RFC 8554, NIST SP 800-208) over SHA-256 and
 //! SHA-256/192, without heap or panics.
 //!
-//! [`verify`] checks an HSS signature (RFC 8554 §6.3) under the keelsign parameter policy
-//! [`ParameterPolicy::cnsa_2_0`]: LM-OTS W8 with SHA-256 (n = m = 32) or SHA-256/192
-//! (n = m = 24), any tree height H5–H25, at most [`MAX_HSS_LEVELS`] levels. A single LMS
-//! tree is an HSS key with one level (`L = 1`).
+//! [`verify`] checks an HSS signature (RFC 8554 §6.3) under the keelsign device default
+//! [`ParameterPolicy::keelsign_default`]: LM-OTS W8 with SHA-256 (n = m = 32) or
+//! SHA-256/192 (n = m = 24), any tree height H5–H25, at most [`MAX_HSS_LEVELS`] (2)
+//! levels. A single LMS tree is an HSS key with one level (`L = 1`; RFC 8554 §6: the HSS
+//! formats with `L = 1` are the LMS formats prepended by a fixed field).
+//!
+//! The strict [`ParameterPolicy::cnsa_2_0`] accepts the same W8 pairs but a single tree
+//! only (`L = 1`): the CNSA 2.0 FAQ v2.1 (December 2024) does not allow the multi-tree
+//! HSS for National Security Systems. Select it with [`verify_with_policy`] or, on the
+//! device path, [`DefaultBackend::cnsa_2_0`](crate::DefaultBackend::cnsa_2_0) with
+//! [`verify_pq_with`](crate::verify_pq_with). [`ParameterPolicy::rfc_8554_all_sets`] is
+//! for host tests only and has no device entry point.
 //!
 //! Encodings (RFC 8554 §3.3, big-endian `u32str` / `u16str`):
 //!
@@ -47,7 +55,9 @@ use crate::error::Error;
 /// m = 24 (SHA-256/192) or m = 32 (SHA-256).
 pub const PUBLIC_KEY_LENS: [usize; 2] = [52, 60];
 
-/// The most HSS levels [`ParameterPolicy::cnsa_2_0`] (and so [`verify`]) accepts.
+/// The most HSS levels [`ParameterPolicy::keelsign_default`] (and so [`verify`] and
+/// [`verify_pq`](crate::verify_pq)) accepts. The strict [`ParameterPolicy::cnsa_2_0`]
+/// accepts one.
 pub const MAX_HSS_LEVELS: u32 = 2;
 
 /// RFC 8554 §6: an HSS key has between one and eight levels.
@@ -164,14 +174,34 @@ pub struct ParameterPolicy {
 }
 
 impl ParameterPolicy {
-    /// The keelsign device policy, used by [`verify`] and so by
+    /// The keelsign device default, used by [`verify`],
+    /// [`DefaultBackend::new`](crate::DefaultBackend::new) and so by
     /// [`verify_pq`](crate::verify_pq): LMS_SHA256_M32_H{5..25} (0x05–0x09) with
     /// LMOTS_SHA256_N32_W8 (0x04), or LMS_SHA256_M24_H{5..25} (0x0A–0x0E) with
-    /// LMOTS_SHA256_N24_W8 (0x08), at most [`MAX_HSS_LEVELS`] levels.
-    pub const fn cnsa_2_0() -> Self {
+    /// LMOTS_SHA256_N24_W8 (0x08), the same hash at every level, at most
+    /// [`MAX_HSS_LEVELS`] (2) levels.
+    ///
+    /// Two levels deviate from CNSA 2.0, which allows single-tree LMS only; use
+    /// [`cnsa_2_0`](Self::cnsa_2_0) for National Security Systems.
+    pub const fn keelsign_default() -> Self {
         Self {
             sets: Sets::W8,
             max_levels: MAX_HSS_LEVELS,
+        }
+    }
+
+    /// Strict CNSA 2.0 (CNSA 2.0 FAQ v2.1, December 2024): the same W8 pairs as
+    /// [`keelsign_default`](Self::keelsign_default), single tree only (`L = 1`).
+    ///
+    /// The FAQ approves LMS and XMSS for National Security Systems and says the
+    /// multi-tree algorithms HSS and XMSS^MT "are not allowed", so an `L >= 2` public key
+    /// is [`Error::UnsupportedParameterSet`] before its signature is read. On the device
+    /// path, select it with [`DefaultBackend::cnsa_2_0`](crate::DefaultBackend::cnsa_2_0)
+    /// and [`verify_pq_with`](crate::verify_pq_with).
+    pub const fn cnsa_2_0() -> Self {
+        Self {
+            sets: Sets::W8,
+            max_levels: 1,
         }
     }
 
@@ -179,9 +209,11 @@ impl ParameterPolicy {
     /// W1, W2, W4 and W8), up to the RFC's eight levels.
     ///
     /// **Host and test use only, never on a device**: it exists to check this
-    /// implementation against published vectors outside the keelsign policy (RFC 8554
-    /// Test Case 2, the NIST ACVP LMS vectors). [`verify_pq`](crate::verify_pq) can never
-    /// reach it.
+    /// implementation against published vectors outside the device policies (RFC 8554
+    /// Test Case 2, the NIST ACVP LMS vectors). No device entry point reaches it:
+    /// [`DefaultBackend`](crate::DefaultBackend) has no constructor for it, so neither
+    /// [`verify_pq`](crate::verify_pq) nor [`verify_pq_with`](crate::verify_pq_with) with
+    /// that backend can use it.
     pub const fn rfc_8554_all_sets() -> Self {
         Self {
             sets: Sets::All,
@@ -229,9 +261,10 @@ impl ParameterPolicy {
 /// - The key must be exactly `4 + 24 + m` bytes for that typecode's m (52 for m = 24, 60
 ///   for m = 32); otherwise [`Error::InvalidPublicKey`].
 ///
-/// The LM-OTS typecode, the keelsign policy ([`ParameterPolicy::cnsa_2_0`]: W8 only,
-/// `m == n`, at most [`MAX_HSS_LEVELS`] levels) and everything else are left to
-/// [`verify`], so a well-formed key outside the policy (a W2 key, say) is accepted here
+/// The LM-OTS typecode, the parameter policy ([`ParameterPolicy::keelsign_default`]: W8
+/// only, `m == n`, at most [`MAX_HSS_LEVELS`] levels; [`ParameterPolicy::cnsa_2_0`]: the
+/// same with `L = 1`) and everything else are left to verification, so a well-formed key
+/// outside the policy (a W2 key, or an `L = 2` key under `cnsa_2_0()`) is accepted here
 /// and refused with [`Error::UnsupportedParameterSet`] when it verifies a signature.
 pub fn check_public_key(public_key: &[u8]) -> Result<(), Error> {
     let mut rest = public_key;
@@ -249,12 +282,19 @@ pub fn check_public_key(public_key: &[u8]) -> Result<(), Error> {
     }
 }
 
-/// Verify an HSS `signature` over `message` under `public_key` with the keelsign policy
-/// [`ParameterPolicy::cnsa_2_0`].
+/// Verify an HSS `signature` over `message` under `public_key` with the keelsign device
+/// default [`ParameterPolicy::keelsign_default`] (at most two levels).
 ///
-/// See the [module documentation](self) for the encodings and the error mapping.
+/// For the strict single-tree CNSA 2.0 policy use
+/// [`verify_with_policy`]`(&ParameterPolicy::cnsa_2_0(), ..)`. See the
+/// [module documentation](self) for the encodings and the error mapping.
 pub fn verify(public_key: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Error> {
-    verify_with_policy(&ParameterPolicy::cnsa_2_0(), public_key, message, signature)
+    verify_with_policy(
+        &ParameterPolicy::keelsign_default(),
+        public_key,
+        message,
+        signature,
+    )
 }
 
 /// Verify an HSS `signature` over `message` under `public_key`, accepting the parameter
@@ -657,6 +697,10 @@ pub(crate) const fn test_public_key(fill: u8) -> [u8; 60] {
     key
 }
 
+/// The test signer, for the backend tests (`crate::backend::tests`).
+#[cfg(test)]
+pub(crate) use tests::{MSG, hss};
+
 #[cfg(test)]
 mod tests {
     // Host test code, not no_std firmware: failing a test with a message is the point.
@@ -812,15 +856,15 @@ mod tests {
         }
     }
 
-    const MSG: &[u8] = b"a 32-byte image digest stand-in";
+    pub(crate) const MSG: &[u8] = b"a 32-byte image digest stand-in";
 
     /// An HSS signature over `MSG` by one tree per `(lms, lmots)` level, each leaf `q`.
-    struct Signed {
-        pk: Vec<u8>,
-        sig: Vec<u8>,
+    pub(crate) struct Signed {
+        pub(crate) pk: Vec<u8>,
+        pub(crate) sig: Vec<u8>,
     }
 
-    fn hss(levels: &[(u32, u32)], label: u8) -> Signed {
+    pub(crate) fn hss(levels: &[(u32, u32)], label: u8) -> Signed {
         let trees: Vec<TestTree> = levels
             .iter()
             .enumerate()
@@ -849,8 +893,13 @@ mod tests {
         CELL.get_or_init(|| hss(&[(0x0A, 0x08), (0x0A, 0x08)], 2))
     }
 
-    fn cnsa(pk: &[u8], sig: &[u8]) -> Result<(), Error> {
+    /// `verify`, i.e. under `ParameterPolicy::keelsign_default()`.
+    fn default_verify(pk: &[u8], sig: &[u8]) -> Result<(), Error> {
         verify(pk, MSG, sig)
+    }
+
+    fn strict(pk: &[u8], sig: &[u8]) -> Result<(), Error> {
+        verify_with_policy(&ParameterPolicy::cnsa_2_0(), pk, MSG, sig)
     }
 
     fn all_sets(pk: &[u8], sig: &[u8]) -> Result<(), Error> {
@@ -870,9 +919,9 @@ mod tests {
     }
 
     #[test]
-    fn signed_two_level_signatures_verify_under_both_policies() {
+    fn signed_two_level_signatures_verify_under_default_and_rfc_policies() {
         for s in [m32_l2(), m24_l2()] {
-            assert_eq!(cnsa(&s.pk, &s.sig), Ok(()));
+            assert_eq!(default_verify(&s.pk, &s.sig), Ok(()));
             assert_eq!(all_sets(&s.pk, &s.sig), Ok(()));
             assert_eq!(
                 verify(&s.pk, b"another message", &s.sig),
@@ -960,7 +1009,8 @@ mod tests {
         );
         assert_eq!(PUBLIC_KEY_LENS, [4 + 4 + 4 + 16 + 24, 4 + 4 + 4 + 16 + 32]);
         assert_eq!(MAX_HSS_LEVELS, 2);
-        assert_eq!(ParameterPolicy::cnsa_2_0().max_levels(), 2);
+        assert_eq!(ParameterPolicy::keelsign_default().max_levels(), 2);
+        assert_eq!(ParameterPolicy::cnsa_2_0().max_levels(), 1);
         assert_eq!(ParameterPolicy::rfc_8554_all_sets().max_levels(), 8);
     }
 
@@ -1001,71 +1051,122 @@ mod tests {
         }
     }
 
+    /// An HSS public key with `L = levels` and a well-formed key shape for the pair (m
+    /// from the LMS set, else 32).
+    fn shaped_key(levels: u32, lms: u32, ots: u32) -> Vec<u8> {
+        let m = lms_params(lms).map_or(32, |p| p.m);
+        let mut pk = levels.to_be_bytes().to_vec();
+        pk.extend_from_slice(&lms.to_be_bytes());
+        pk.extend_from_slice(&ots.to_be_bytes());
+        pk.extend_from_slice(&[0x5a; 16]);
+        pk.extend_from_slice(&vec![0xa5; m]);
+        pk
+    }
+
+    /// `Nspk = 0` followed by the bottom (M32 H5 W8) LMS signature of `m32_l2()`.
+    fn one_level_dummy_signature() -> Vec<u8> {
+        let one_level_sig = &m32_l2().sig[4 + lms_sig_len(32, 34, 32, 5) + 56..];
+        let mut sig = 0u32.to_be_bytes().to_vec();
+        sig.extend_from_slice(one_level_sig);
+        sig
+    }
+
     #[test]
-    fn every_non_cnsa_typecode_pair_is_unsupported_parameter_set() {
-        let good = m32_l2();
-        let cnsa_pair =
-            |lms: u32, ots: u32| matches!((lms, ots), (0x05..=0x09, 0x04) | (0x0A..=0x0E, 0x08));
-        let mut accepted = 0;
+    fn every_typecode_pair_and_level_count_matches_each_policy() {
+        // The expected sets, written independently of `ParameterPolicy`: the two device
+        // policies accept the W8 pairs (SHA-65's set), the RFC policy every `m == n` pair
+        // of the SHA-256 families; at most 2 / 1 / 8 levels.
+        fn w8_pair(lms: u32, ots: u32) -> bool {
+            matches!((lms, ots), (0x05..=0x09, 0x04) | (0x0A..=0x0E, 0x08))
+        }
+        fn m_eq_n_pair(lms: u32, ots: u32) -> bool {
+            matches!(
+                (lms, ots),
+                (0x05..=0x09, 0x01..=0x04) | (0x0A..=0x0E, 0x05..=0x08)
+            )
+        }
+        type Pair = fn(u32, u32) -> bool;
+        let policies: [(&str, ParameterPolicy, Pair, u32); 3] = [
+            (
+                "keelsign_default",
+                ParameterPolicy::keelsign_default(),
+                w8_pair,
+                2,
+            ),
+            ("cnsa_2_0", ParameterPolicy::cnsa_2_0(), w8_pair, 1),
+            (
+                "rfc_8554_all_sets",
+                ParameterPolicy::rfc_8554_all_sets(),
+                m_eq_n_pair,
+                8,
+            ),
+        ];
+        let sig = one_level_dummy_signature();
+        let level_counts = [0u32, 1, 2, 3, 4, 8, 9, u32::MAX];
+        let mut accepted_pairs = [0usize; 3];
         for lms in 0..=0x20u32 {
             for ots in 0..=0x10u32 {
-                // A well-formed key shape for the pair (m from the LMS set, else 32).
-                let m = lms_params(lms).map_or(32, |p| p.m);
-                let mut pk = 1u32.to_be_bytes().to_vec();
-                pk.extend_from_slice(&lms.to_be_bytes());
-                pk.extend_from_slice(&ots.to_be_bytes());
-                pk.extend_from_slice(&[0x5a; 16]);
-                pk.extend_from_slice(&vec![0xa5; m]);
-                let one_level_sig = &good.sig[4 + lms_sig_len(32, 34, 32, 5) + 56..];
-                let mut sig = 0u32.to_be_bytes().to_vec();
-                sig.extend_from_slice(one_level_sig);
-                let result = cnsa(&pk, &sig);
-                assert_eq!(
-                    ParameterPolicy::cnsa_2_0().allows(lms, ots),
-                    cnsa_pair(lms, ots)
-                );
-                if cnsa_pair(lms, ots) {
-                    accepted += 1;
-                    assert_ne!(
-                        result,
-                        Err(Error::UnsupportedParameterSet),
-                        "{lms:#x}/{ots:#x}"
-                    );
-                    // L outside 1..=2 is unsupported for an accepted pair too.
-                    for levels in [0u32, 3, 4, u32::MAX] {
-                        let pk = patch_u32(&pk, 0, levels);
-                        assert_eq!(
-                            cnsa(&pk, &sig),
-                            Err(Error::UnsupportedParameterSet),
-                            "{lms:#x}/{ots:#x} L={levels}"
-                        );
-                    }
-                } else {
+                for (k, (name, policy, pair, max_levels)) in policies.iter().enumerate() {
+                    assert_eq!(policy.max_levels(), *max_levels, "{name}");
                     assert_eq!(
-                        result,
-                        Err(Error::UnsupportedParameterSet),
-                        "{lms:#x}/{ots:#x}"
+                        policy.allows(lms, ots),
+                        pair(lms, ots),
+                        "{name} {lms:#x}/{ots:#x}"
                     );
+                    if pair(lms, ots) {
+                        accepted_pairs[k] += 1;
+                    }
+                    for levels in level_counts {
+                        let pk = shaped_key(levels, lms, ots);
+                        let result = verify_with_policy(policy, &pk, MSG, &sig);
+                        let in_policy = pair(lms, ots) && (1..=*max_levels).contains(&levels);
+                        if in_policy {
+                            // Past the policy gate: the one-level signature is either the
+                            // wrong shape for this key (`Nspk + 1 != L`, other lengths) or
+                            // does not verify under it.
+                            assert!(
+                                matches!(
+                                    result,
+                                    Err(Error::MalformedSignature | Error::SignatureInvalid)
+                                ),
+                                "{name} {lms:#x}/{ots:#x} L={levels}: {result:?}"
+                            );
+                        } else {
+                            assert_eq!(
+                                result,
+                                Err(Error::UnsupportedParameterSet),
+                                "{name} {lms:#x}/{ots:#x} L={levels}"
+                            );
+                        }
+                    }
                 }
+                // cnsa_2_0 ⊆ keelsign_default ⊆ rfc_8554_all_sets on every cell.
+                let [default, cnsa, rfc] = policies.each_ref().map(|(_, p, _, _)| *p);
+                assert!(!cnsa.allows(lms, ots) || default.allows(lms, ots));
+                assert!(!default.allows(lms, ots) || rfc.allows(lms, ots));
+                for levels in level_counts {
+                    let accepts = |p: &ParameterPolicy| {
+                        p.allows(lms, ots) && (1..=p.max_levels()).contains(&levels)
+                    };
+                    assert!(!accepts(&cnsa) || accepts(&default), "{lms:#x}/{ots:#x}");
+                    assert!(!accepts(&default) || accepts(&rfc), "{lms:#x}/{ots:#x}");
+                }
+                // The independent tables agree with each other: W8 pairs are m == n pairs.
+                assert!(!w8_pair(lms, ots) || m_eq_n_pair(lms, ots));
                 // m != n is unsupported under every policy.
                 if let (Some(l), Some(o)) = (lms_params(lms), lmots_params(ots)) {
-                    if l.m != o.n {
-                        assert_eq!(all_sets(&pk, &sig), Err(Error::UnsupportedParameterSet));
-                        assert!(!ParameterPolicy::rfc_8554_all_sets().allows(lms, ots));
-                    } else {
-                        assert!(ParameterPolicy::rfc_8554_all_sets().allows(lms, ots));
-                    }
-                } else {
-                    assert_eq!(all_sets(&pk, &sig), Err(Error::UnsupportedParameterSet));
+                    assert_eq!(l.m == o.n, m_eq_n_pair(lms, ots), "{lms:#x}/{ots:#x}");
                 }
             }
         }
-        // Every height H5-H25 of both hashes, with W8 only.
-        assert_eq!(accepted, 10);
+        // Every height H5-H25 of both hashes: W8 only for the device policies, W1-W8 for
+        // the RFC policy.
+        assert_eq!(accepted_pairs, [10, 10, 40]);
 
         // The gate covers the level-1 key signed inside the signature, before any hash:
-        // with a non-CNSA level-1 key the result is unsupported even though level 0's
-        // signature no longer matches.
+        // with a level-1 key outside the default policy the result is unsupported even
+        // though level 0's signature no longer matches.
+        let good = m32_l2();
         let child_at = 4 + lms_sig_len(32, 34, 32, 5);
         for (lms, ots) in [
             (0x05, 0x03),
@@ -1077,18 +1178,27 @@ mod tests {
         ] {
             let sig = patch_u32(&patch_u32(&good.sig, child_at, lms), child_at + 4, ots);
             assert_eq!(
-                cnsa(&good.pk, &sig),
+                default_verify(&good.pk, &sig),
+                Err(Error::UnsupportedParameterSet),
+                "{lms:#x}/{ots:#x}"
+            );
+            // Under cnsa_2_0 the L = 2 key is refused first.
+            assert_eq!(
+                strict(&good.pk, &sig),
                 Err(Error::UnsupportedParameterSet),
                 "{lms:#x}/{ots:#x}"
             );
         }
         // A level-1 key with the other hash (M24 under an M32 level 0) is unsupported
-        // under both policies (SP 800-208 §4), even at the right length.
+        // under every policy (SP 800-208 §4), even at the right length.
         let mut mixed = good.sig[..child_at].to_vec();
         mixed.extend_from_slice(&0x0Au32.to_be_bytes());
         mixed.extend_from_slice(&0x08u32.to_be_bytes());
         mixed.extend_from_slice(&good.sig[child_at + 8..]);
-        assert_eq!(cnsa(&good.pk, &mixed), Err(Error::UnsupportedParameterSet));
+        assert_eq!(
+            default_verify(&good.pk, &mixed),
+            Err(Error::UnsupportedParameterSet)
+        );
         assert_eq!(
             all_sets(&good.pk, &mixed),
             Err(Error::UnsupportedParameterSet)
@@ -1096,11 +1206,105 @@ mod tests {
     }
 
     #[test]
+    fn two_level_signatures_are_unsupported_under_cnsa_2_0_and_single_tree_w8_verifies_for_both_hashes()
+     {
+        // L = 1, H5, both hash sizes: accepted under all three policies.
+        for (s, pk_len) in [(hss(&[(0x05, 0x04)], 4), 60), (hss(&[(0x0A, 0x08)], 5), 52)] {
+            assert_eq!(s.pk.len(), pk_len);
+            assert_eq!(&s.pk[..4], &1u32.to_be_bytes());
+            assert_eq!(default_verify(&s.pk, &s.sig), Ok(()));
+            assert_eq!(strict(&s.pk, &s.sig), Ok(()));
+            assert_eq!(all_sets(&s.pk, &s.sig), Ok(()));
+            assert_eq!(
+                verify_with_policy(&ParameterPolicy::cnsa_2_0(), &s.pk, b"other", &s.sig),
+                Err(Error::SignatureInvalid)
+            );
+        }
+        // L = 2, both hash sizes: valid signatures under the default and RFC policies,
+        // unsupported under cnsa_2_0 whatever the signature bytes are (the key is refused
+        // before the signature is read).
+        for s in [m32_l2(), m24_l2()] {
+            assert_eq!(&s.pk[..4], &2u32.to_be_bytes());
+            assert_eq!(default_verify(&s.pk, &s.sig), Ok(()));
+            assert_eq!(all_sets(&s.pk, &s.sig), Ok(()));
+            assert_eq!(strict(&s.pk, &s.sig), Err(Error::UnsupportedParameterSet));
+            for sig in [&[][..], &s.sig[..10], &[0xA5; 3000][..]] {
+                assert_eq!(strict(&s.pk, sig), Err(Error::UnsupportedParameterSet));
+            }
+        }
+        // An L = 1 key with an Nspk = 1 (two-level) signature is malformed under all three.
+        for s in [m32_l2(), m24_l2()] {
+            let pk = patch_u32(&s.pk, 0, 1);
+            assert_eq!(default_verify(&pk, &s.sig), Err(Error::MalformedSignature));
+            assert_eq!(strict(&pk, &s.sig), Err(Error::MalformedSignature));
+            assert_eq!(all_sets(&pk, &s.sig), Err(Error::MalformedSignature));
+        }
+    }
+
+    #[test]
+    fn keelsign_default_is_sha_65s_accepted_set() {
+        let policy = ParameterPolicy::keelsign_default();
+        // SHA-65's policy, field for field.
+        assert_eq!(
+            policy,
+            ParameterPolicy {
+                sets: Sets::W8,
+                max_levels: 2
+            }
+        );
+        assert_eq!(policy.max_levels(), 2);
+        assert_eq!(policy.max_levels(), MAX_HSS_LEVELS);
+        // Exactly the ten W8 pairs, each at L = 1 and L = 2, and no L = 3.
+        let w8: Vec<(u32, u32)> = (0x05..=0x09)
+            .map(|l| (l, 0x04))
+            .chain((0x0A..=0x0E).map(|l| (l, 0x08)))
+            .collect();
+        assert_eq!(w8.len(), 10);
+        let sig = one_level_dummy_signature();
+        for lms in 0..=0x20u32 {
+            for ots in 0..=0x10u32 {
+                let expected = w8.contains(&(lms, ots));
+                assert_eq!(policy.allows(lms, ots), expected, "{lms:#x}/{ots:#x}");
+                if expected {
+                    for levels in [1u32, 2] {
+                        let pk = shaped_key(levels, lms, ots);
+                        assert_ne!(
+                            verify_with_policy(&policy, &pk, MSG, &sig),
+                            Err(Error::UnsupportedParameterSet),
+                            "{lms:#x}/{ots:#x} L={levels}"
+                        );
+                    }
+                    let pk = shaped_key(3, lms, ots);
+                    assert_eq!(
+                        verify_with_policy(&policy, &pk, MSG, &sig),
+                        Err(Error::UnsupportedParameterSet)
+                    );
+                }
+            }
+        }
+        // `verify` is `verify_with_policy(&keelsign_default(), ..)` on the signed cases.
+        let one = hss(&[(0x0A, 0x08)], 3);
+        for s in [m32_l2(), m24_l2(), &one] {
+            assert_eq!(
+                verify(&s.pk, MSG, &s.sig),
+                verify_with_policy(&policy, &s.pk, MSG, &s.sig)
+            );
+            assert_eq!(verify(&s.pk, MSG, &s.sig), Ok(()));
+            assert_eq!(
+                verify(&s.pk, b"other", &s.sig),
+                verify_with_policy(&policy, &s.pk, b"other", &s.sig)
+            );
+        }
+        // The device backend's default is the same policy.
+        assert_eq!(crate::DefaultBackend::new().lms_policy(), policy);
+    }
+
+    #[test]
     fn every_truncation_of_a_valid_signature_is_malformed_not_a_panic() {
         for s in [m32_l2(), m24_l2()] {
             for len in 0..s.sig.len() {
                 assert_eq!(
-                    cnsa(&s.pk, &s.sig[..len]),
+                    default_verify(&s.pk, &s.sig[..len]),
                     Err(Error::MalformedSignature),
                     "truncated to {len} of {}",
                     s.sig.len()
@@ -1111,7 +1315,7 @@ mod tests {
                 let mut long = s.sig.clone();
                 long.extend(std::iter::repeat_n(0u8, extra));
                 assert_eq!(
-                    cnsa(&s.pk, &long),
+                    default_verify(&s.pk, &long),
                     Err(Error::MalformedSignature),
                     "+{extra}"
                 );
@@ -1120,13 +1324,16 @@ mod tests {
             for nspk in [0u32, 2, 7, u32::MAX] {
                 let sig = patch_u32(&s.sig, 0, nspk);
                 assert_eq!(
-                    cnsa(&s.pk, &sig),
+                    default_verify(&s.pk, &sig),
                     Err(Error::MalformedSignature),
                     "Nspk={nspk}"
                 );
             }
         }
-        assert_eq!(cnsa(&m32_l2().pk, &[]), Err(Error::MalformedSignature));
+        assert_eq!(
+            default_verify(&m32_l2().pk, &[]),
+            Err(Error::MalformedSignature)
+        );
     }
 
     #[test]
@@ -1135,7 +1342,7 @@ mod tests {
             // Too short to hold L and both typecodes.
             for len in 0..12 {
                 assert_eq!(
-                    cnsa(&s.pk[..len], &s.sig),
+                    default_verify(&s.pk[..len], &s.sig),
                     Err(Error::InvalidPublicKey),
                     "{len}"
                 );
@@ -1143,23 +1350,26 @@ mod tests {
             // Typecodes present but the wrong length for them.
             for len in 12..s.pk.len() {
                 assert_eq!(
-                    cnsa(&s.pk[..len], &s.sig),
+                    default_verify(&s.pk[..len], &s.sig),
                     Err(Error::InvalidPublicKey),
                     "{len}"
                 );
             }
             let mut long = s.pk.clone();
             long.push(0);
-            assert_eq!(cnsa(&long, &s.sig), Err(Error::InvalidPublicKey));
+            assert_eq!(default_verify(&long, &s.sig), Err(Error::InvalidPublicKey));
         }
         // An M32 key cut to the M24 length (52 bytes) and an M24 key padded to 60.
         assert_eq!(
-            cnsa(&m32_l2().pk[..52], &m32_l2().sig),
+            default_verify(&m32_l2().pk[..52], &m32_l2().sig),
             Err(Error::InvalidPublicKey)
         );
         let mut padded = m24_l2().pk.clone();
         padded.extend_from_slice(&[0; 8]);
-        assert_eq!(cnsa(&padded, &m24_l2().sig), Err(Error::InvalidPublicKey));
+        assert_eq!(
+            default_verify(&padded, &m24_l2().sig),
+            Err(Error::InvalidPublicKey)
+        );
     }
 
     #[test]
@@ -1171,7 +1381,7 @@ mod tests {
         for at in [4 + 4, bottom + 4] {
             for tc in [0x03u32, 0x08, 0x01, 0xffff_ffff] {
                 assert_eq!(
-                    cnsa(&s.pk, &patch_u32(&s.sig, at, tc)),
+                    default_verify(&s.pk, &patch_u32(&s.sig, at, tc)),
                     Err(Error::SignatureInvalid)
                 );
             }
@@ -1180,7 +1390,7 @@ mod tests {
         for at in [4 + 4 + 32 * 35, bottom + 4 + 32 * 35] {
             for tc in [0x06u32, 0x0A, 0x09, 0] {
                 assert_eq!(
-                    cnsa(&s.pk, &patch_u32(&s.sig, at, tc)),
+                    default_verify(&s.pk, &patch_u32(&s.sig, at, tc)),
                     Err(Error::SignatureInvalid)
                 );
             }
@@ -1189,7 +1399,7 @@ mod tests {
         for at in [4, bottom] {
             for q in [32u32, 33, 1 << 25, u32::MAX, 0, 31] {
                 assert_eq!(
-                    cnsa(&s.pk, &patch_u32(&s.sig, at, q)),
+                    default_verify(&s.pk, &patch_u32(&s.sig, at, q)),
                     Err(Error::SignatureInvalid),
                     "q={q}"
                 );
@@ -1202,7 +1412,7 @@ mod tests {
         for at in (4..s.sig.len()).step_by(7) {
             let mut sig = s.sig.clone();
             sig[at] ^= 0x01;
-            let result = cnsa(&s.pk, &sig);
+            let result = default_verify(&s.pk, &sig);
             assert!(result.is_err(), "flip at {at} verified");
         }
         // Flipping the public key's root or I also fails.
@@ -1210,7 +1420,7 @@ mod tests {
             let mut pk = s.pk.clone();
             pk[at] ^= 0x80;
             assert_eq!(
-                cnsa(&pk, &s.sig),
+                default_verify(&pk, &s.sig),
                 Err(Error::SignatureInvalid),
                 "pk flip at {at}"
             );
@@ -1219,14 +1429,18 @@ mod tests {
 
     #[test]
     fn single_level_and_all_heights_are_accepted() {
-        // L = 1 (a plain LMS key) verifies under both policies.
+        // L = 1 (a plain LMS key) verifies under all three policies.
         let one = hss(&[(0x0A, 0x08)], 3);
-        assert_eq!(cnsa(&one.pk, &one.sig), Ok(()));
-        // Every height H5-H25 of both hashes is inside the CNSA policy; the signature
+        assert_eq!(default_verify(&one.pk, &one.sig), Ok(()));
+        assert_eq!(strict(&one.pk, &one.sig), Ok(()));
+        assert_eq!(all_sets(&one.pk, &one.sig), Ok(()));
+        // Every height H5-H25 of both hashes is inside every policy; the signature
         // length for each follows RFC 8554 Algorithm 6a step 2i.
         for (lms, ots) in [(0x05..=0x09, 0x04), (0x0A..=0x0E, 0x08)] {
             for tc in lms {
+                assert!(ParameterPolicy::keelsign_default().allows(tc, ots));
                 assert!(ParameterPolicy::cnsa_2_0().allows(tc, ots));
+                assert!(ParameterPolicy::rfc_8554_all_sets().allows(tc, ots));
                 let l = lms_params(tc).unwrap();
                 let o = lmots_params(ots).unwrap();
                 let pk = [0u8; 60];
