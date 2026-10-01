@@ -42,6 +42,10 @@ ml-dsa = { version = "=0.1.1", default-features = false, optional = true }
 [dev-dependencies]
 # Property tests of the image parser (SHA-35). Host tests only; without `fork`/`timeout`.
 proptest = { version = "=1.11.0", default-features = false, features = ["std"] }
+# The KSMD fixture parser and runner of SHA-34's ML-DSA known-answer fixtures (NIST ACVP
+# sigVer and Wycheproof), for tests/mldsa_kat.rs (SHA-44, TP4). Unpublished and path-only,
+# so `cargo publish` strips it.
+mldsa-kat = { path = "../benches/mldsa-kat" }
 
 [lints]
 workspace = true

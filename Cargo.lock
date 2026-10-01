@@ -237,6 +237,7 @@ dependencies = [
  "ed25519-dalek",
  "embedded-storage",
  "ml-dsa",
+ "mldsa-kat",
  "proptest",
  "sha2",
 ]
