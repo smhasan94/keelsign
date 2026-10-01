@@ -26,8 +26,9 @@
 //! ([docs/image-format.md][spec]), so keelsign TLVs in the protected area are ignored for
 //! PQ selection: a PQ signature TLV there is inside `M`, the bytes it would sign, so it can
 //! never be a valid signature over `M`. The parser still yields them (from
-//! [`Image::protected`] and [`Image::tlvs`]); rejecting such images outright is a candidate
-//! image-policy rule (SHA-46).
+//! [`Image::protected`] and [`Image::tlvs`]); [`verify`](crate::verify) rejects such
+//! images outright ([`ImageError::KeelsignTlvProtected`](crate::ImageError::KeelsignTlvProtected),
+//! SHA-46).
 //!
 //! # What the parser does not decide
 //!
@@ -37,7 +38,9 @@
 //!   ticket (SHA-35) asked for an `UnknownTlv` error; the image format (SHA-37) requires
 //!   verifiers to ignore unknown TLV types, and that constraint wins.
 //! - The header flags, how many `SHA256` TLVs an image has, the KEYHASH / signature
-//!   pairing and anti-rollback are image policy (SHA-46). The parser only exposes them
+//!   pairing and the security counter are image policy, enforced by
+//!   [`verify`](crate::verify) (SHA-46, docs/policy.md); anti-rollback is the caller's
+//!   ([`VerifiedImage`](crate::VerifiedImage)). The parser only exposes them
 //!   ([`Header::flags`], [`Image::tlvs`]).
 //! - The order of TLVs carries no meaning: no state is kept from one TLV to the next.
 //!
@@ -230,7 +233,9 @@ impl ImageVersion {
     }
 }
 
-/// The header's `ih_flags` (`IMAGE_F_*`), exposed but not acted on (SHA-46).
+/// The header's `ih_flags` (`IMAGE_F_*`). The parser does not act on them;
+/// [`verify`](crate::verify) rejects encrypted, compressed and non-bootable images
+/// (SHA-46).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ImageFlags(pub u32);
 
@@ -583,8 +588,8 @@ impl<'a> TlvArea<'a> {
     /// PQ selection MUST use the unprotected area's pairs, `image.unprotected().pairs()`.
     /// keelsign TLVs are unprotected-only (docs/image-format.md), so keelsign TLVs in the
     /// protected area are ignored for PQ selection: a PQ signature there is inside `M` and
-    /// can never be a valid signature over `M`. Rejecting such images is a candidate policy
-    /// rule (SHA-46). See the [module docs](self#post-quantum-signature-selection).
+    /// can never be a valid signature over `M`; [`verify`](crate::verify) rejects such
+    /// images (SHA-46). See the [module docs](self#post-quantum-signature-selection).
     pub fn pairs(&self) -> impl Iterator<Item = (u16, &'a [u8])> + use<'a> {
         self.iter().map(|tlv| tlv.as_pair())
     }
@@ -870,8 +875,8 @@ impl<'a> Image<'a> {
     /// Not the input of PQ selection: that MUST be `self.unprotected().pairs()`. keelsign
     /// TLVs are unprotected-only (docs/image-format.md), so keelsign TLVs in the protected
     /// area, which this iterator yields, are ignored for PQ selection; a PQ signature there
-    /// is inside `M` and can never be a valid signature over `M`. Rejecting such images is
-    /// a candidate policy rule (SHA-46).
+    /// is inside `M` and can never be a valid signature over `M`;
+    /// [`verify`](crate::verify) rejects such images (SHA-46).
     pub fn tlvs(&self) -> impl Iterator<Item = Tlv<'a>> + use<'a> {
         self.protected
             .map(|area| area.iter())
@@ -1184,51 +1189,7 @@ mod tests {
 
     // ---- Synthetic images -------------------------------------------------------------
 
-    fn header_bytes(hdr_size: u16, protect_tlv_size: u16, img_size: u32) -> Vec<u8> {
-        let mut h = Vec::new();
-        h.extend_from_slice(&IMAGE_MAGIC.to_le_bytes());
-        h.extend_from_slice(&0x1000u32.to_le_bytes());
-        h.extend_from_slice(&hdr_size.to_le_bytes());
-        h.extend_from_slice(&protect_tlv_size.to_le_bytes());
-        h.extend_from_slice(&img_size.to_le_bytes());
-        h.extend_from_slice(&0u32.to_le_bytes());
-        h.extend_from_slice(&[1, 2, 3, 0, 4, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(h.len(), IMAGE_HEADER_SIZE);
-        h
-    }
-
-    fn area_bytes(magic: u16, tlvs: &[(u16, &[u8])]) -> Vec<u8> {
-        let mut body = Vec::new();
-        for (t, v) in tlvs {
-            body.extend_from_slice(&t.to_le_bytes());
-            body.extend_from_slice(&u16::try_from(v.len()).unwrap().to_le_bytes());
-            body.extend_from_slice(v);
-        }
-        let mut out = Vec::new();
-        out.extend_from_slice(&magic.to_le_bytes());
-        out.extend_from_slice(&u16::try_from(4 + body.len()).unwrap().to_le_bytes());
-        out.extend(body);
-        out
-    }
-
-    /// A 32-byte header, a 4-byte body and the given TLV areas.
-    fn synth(protected: Option<&[(u16, &[u8])]>, unprotected: &[(u16, &[u8])]) -> Vec<u8> {
-        let prot = protected.map(|t| area_bytes(TLV_PROT_INFO_MAGIC, t));
-        let prot_len = prot.as_ref().map_or(0, Vec::len);
-        let mut d = header_bytes(32, u16::try_from(prot_len).unwrap(), 4);
-        d.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD]);
-        d.extend(prot.unwrap_or_default());
-        d.extend(area_bytes(TLV_INFO_MAGIC, unprotected));
-        d
-    }
-
-    fn set_u16(d: &mut [u8], at: usize, v: u16) {
-        d[at..at + 2].copy_from_slice(&v.to_le_bytes());
-    }
-
-    fn set_u32(d: &mut [u8], at: usize, v: u32) {
-        d[at..at + 4].copy_from_slice(&v.to_le_bytes());
-    }
+    use super::test_support::{area_bytes, header_bytes, set_u16, set_u32, synth};
 
     // ---- Reference parser (oracle) ----------------------------------------------------
 
@@ -2432,7 +2393,7 @@ mod tests {
         assert!(ImageFlags(IMAGE_F_RAM_LOAD).ram_load());
         assert!(ImageFlags(IMAGE_F_ROM_FIXED).rom_fixed());
         assert_eq!(ImageFlags(u32::MAX).unknown_bits(), !0xF3D);
-        // Flags are parsed, never acted on (SHA-46).
+        // Flags are parsed, never acted on by the parser (verify does, SHA-46).
         let mut d = synth(None, &[]);
         set_u32(&mut d, 16, u32::MAX);
         assert_eq!(
@@ -2521,5 +2482,70 @@ mod tests {
                 prop_assert!(image.tlv_end() as usize <= d.len());
             }
         }
+    }
+}
+
+/// Synthetic-image builders shared by the image and policy tests.
+#[cfg(test)]
+pub(crate) mod test_support {
+    // Host test code, not no_std firmware: failing a test with a message is the point.
+    #![allow(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing
+    )]
+
+    use std::vec::Vec;
+
+    use super::{IMAGE_HEADER_SIZE, IMAGE_MAGIC, TLV_INFO_MAGIC, TLV_PROT_INFO_MAGIC};
+
+    pub(crate) fn header_bytes(hdr_size: u16, protect_tlv_size: u16, img_size: u32) -> Vec<u8> {
+        let mut h = Vec::new();
+        h.extend_from_slice(&IMAGE_MAGIC.to_le_bytes());
+        h.extend_from_slice(&0x1000u32.to_le_bytes());
+        h.extend_from_slice(&hdr_size.to_le_bytes());
+        h.extend_from_slice(&protect_tlv_size.to_le_bytes());
+        h.extend_from_slice(&img_size.to_le_bytes());
+        h.extend_from_slice(&0u32.to_le_bytes());
+        h.extend_from_slice(&[1, 2, 3, 0, 4, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(h.len(), IMAGE_HEADER_SIZE);
+        h
+    }
+
+    pub(crate) fn area_bytes(magic: u16, tlvs: &[(u16, &[u8])]) -> Vec<u8> {
+        let mut body = Vec::new();
+        for (t, v) in tlvs {
+            body.extend_from_slice(&t.to_le_bytes());
+            body.extend_from_slice(&u16::try_from(v.len()).unwrap().to_le_bytes());
+            body.extend_from_slice(v);
+        }
+        let mut out = Vec::new();
+        out.extend_from_slice(&magic.to_le_bytes());
+        out.extend_from_slice(&u16::try_from(4 + body.len()).unwrap().to_le_bytes());
+        out.extend(body);
+        out
+    }
+
+    /// A 32-byte header, a 4-byte body and the given TLV areas.
+    pub(crate) fn synth(
+        protected: Option<&[(u16, &[u8])]>,
+        unprotected: &[(u16, &[u8])],
+    ) -> Vec<u8> {
+        let prot = protected.map(|t| area_bytes(TLV_PROT_INFO_MAGIC, t));
+        let prot_len = prot.as_ref().map_or(0, Vec::len);
+        let mut d = header_bytes(32, u16::try_from(prot_len).unwrap(), 4);
+        d.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD]);
+        d.extend(prot.unwrap_or_default());
+        d.extend(area_bytes(TLV_INFO_MAGIC, unprotected));
+        d
+    }
+
+    pub(crate) fn set_u16(d: &mut [u8], at: usize, v: u16) {
+        d[at..at + 2].copy_from_slice(&v.to_le_bytes());
+    }
+
+    pub(crate) fn set_u32(d: &mut [u8], at: usize, v: u32) {
+        d[at..at + 4].copy_from_slice(&v.to_le_bytes());
     }
 }

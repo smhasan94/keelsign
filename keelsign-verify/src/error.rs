@@ -5,11 +5,12 @@ use core::fmt;
 use crate::algorithm::Algorithm;
 use crate::ed25519::Ed25519Error;
 use crate::image::ParseError;
+use crate::policy::ImageError;
 use crate::reader::ReadError;
 
 /// Why an image was rejected: it could not be read or parsed, its post-quantum
-/// signature does not verify (the flat variants), or its classical half does not
-/// ([`Error::Ed25519`]).
+/// signature does not verify (the flat variants), its classical half does not
+/// ([`Error::Ed25519`]), or it breaks an image rule ([`Error::Image`]).
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -58,6 +59,9 @@ pub enum Error {
     ChunkBufferEmpty,
     /// The Ed25519 (classical) half of the image was rejected (SHA-46).
     Ed25519(Ed25519Error),
+    /// The image breaks an image rule of [`verify`](crate::verify), whatever the policy
+    /// (SHA-46).
+    Image(ImageError),
 }
 
 impl From<ParseError> for Error {
@@ -69,6 +73,12 @@ impl From<ParseError> for Error {
 impl From<Ed25519Error> for Error {
     fn from(e: Ed25519Error) -> Self {
         Error::Ed25519(e)
+    }
+}
+
+impl From<ImageError> for Error {
+    fn from(e: ImageError) -> Self {
+        Error::Image(e)
     }
 }
 
@@ -102,6 +112,7 @@ impl fmt::Display for Error {
             Error::TlvAreaTooLarge => f.write_str("TLV areas are larger than the TLV buffer"),
             Error::ChunkBufferEmpty => f.write_str("the digest chunk buffer is empty"),
             Error::Ed25519(e) => write!(f, "Ed25519 half rejected: {e}"),
+            Error::Image(e) => write!(f, "image rule broken: {e}"),
         }
     }
 }
@@ -134,3 +145,133 @@ impl fmt::Display for KeySetError {
 }
 
 impl core::error::Error for KeySetError {}
+
+#[cfg(test)]
+mod tests {
+    // Host test code, not no_std firmware: failing a test with a message is the point.
+    #![allow(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing
+    )]
+
+    use std::collections::BTreeSet;
+    use std::string::ToString;
+    use std::vec::Vec;
+
+    use super::*;
+
+    /// One value of every variant. The match is exhaustive, so a new variant needs a
+    /// value here.
+    fn every_variant() -> Vec<Error> {
+        let all = Vec::from([
+            Error::MissingKeyId,
+            Error::InvalidKeyId,
+            Error::MultipleKeyIds,
+            Error::MissingPqSignature,
+            Error::MultiplePqSignatures,
+            Error::KeyNotTrusted,
+            Error::KeyAlgorithmMismatch,
+            Error::UnsupportedAlgorithm(Algorithm::MlDsa44),
+            Error::UnsupportedParameterSet,
+            Error::MalformedSignature,
+            Error::InvalidPublicKey,
+            Error::SignatureInvalid,
+            Error::Parse(ParseError::BadMagic),
+            Error::Read(ReadError::Other),
+            Error::TlvAreaTooLarge,
+            Error::ChunkBufferEmpty,
+            Error::Ed25519(Ed25519Error::SignatureInvalid),
+            Error::Image(ImageError::DigestMismatch),
+        ]);
+        for e in &all {
+            match e {
+                Error::MissingKeyId
+                | Error::InvalidKeyId
+                | Error::MultipleKeyIds
+                | Error::MissingPqSignature
+                | Error::MultiplePqSignatures
+                | Error::KeyNotTrusted
+                | Error::KeyAlgorithmMismatch
+                | Error::UnsupportedAlgorithm(_)
+                | Error::UnsupportedParameterSet
+                | Error::MalformedSignature
+                | Error::InvalidPublicKey
+                | Error::SignatureInvalid
+                | Error::Parse(_)
+                | Error::Read(_)
+                | Error::TlvAreaTooLarge
+                | Error::ChunkBufferEmpty
+                | Error::Ed25519(_)
+                | Error::Image(_) => {}
+            }
+        }
+        all
+    }
+
+    #[test]
+    fn every_variant_displays_distinctly() {
+        let all = every_variant();
+        let messages: BTreeSet<_> = all.iter().map(ToString::to_string).collect();
+        assert_eq!(messages.len(), all.len(), "Display strings are distinct");
+        // The classical half and the image rules are named in the message.
+        assert!(
+            Error::Ed25519(Ed25519Error::SignatureInvalid)
+                .to_string()
+                .starts_with("Ed25519 half rejected: ")
+        );
+        assert!(
+            Error::Image(ImageError::DigestMismatch)
+                .to_string()
+                .starts_with("image rule broken: ")
+        );
+        // Every Ed25519Error and ImageError variant also displays distinctly once wrapped,
+        // and differs from every flat variant.
+        let ed = [
+            Ed25519Error::NotEnabled,
+            Ed25519Error::Missing,
+            Ed25519Error::Multiple,
+            Ed25519Error::Unpaired,
+            Ed25519Error::InvalidKeyHash,
+            Ed25519Error::InvalidSignatureLength,
+            Ed25519Error::KeyNotTrusted,
+            Ed25519Error::InvalidPublicKey,
+            Ed25519Error::SignatureInvalid,
+        ];
+        let image = [
+            ImageError::Encrypted,
+            ImageError::Compressed,
+            ImageError::NonBootable,
+            ImageError::KeelsignTlvProtected(0x4BA0),
+            ImageError::SigPure,
+            ImageError::MissingSha256Tlv,
+            ImageError::MultipleSha256Tlvs,
+            ImageError::InvalidSha256Tlv,
+            ImageError::MultipleSecurityCounters,
+            ImageError::InvalidSecurityCounter,
+            ImageError::DigestMismatch,
+        ];
+        let wrapped: Vec<Error> = ed
+            .iter()
+            .map(|&e| Error::from(e))
+            .chain(image.iter().map(|&e| Error::from(e)))
+            .collect();
+        let mut messages: BTreeSet<_> = all
+            .iter()
+            .filter(|e| !matches!(e, Error::Ed25519(_) | Error::Image(_)))
+            .map(ToString::to_string)
+            .collect();
+        let flat = messages.len();
+        messages.extend(wrapped.iter().map(ToString::to_string));
+        assert_eq!(messages.len(), flat + ed.len() + image.len());
+        assert_eq!(
+            Error::from(Ed25519Error::Missing),
+            Error::Ed25519(Ed25519Error::Missing)
+        );
+        assert_eq!(
+            Error::from(ImageError::SigPure),
+            Error::Image(ImageError::SigPure)
+        );
+    }
+}

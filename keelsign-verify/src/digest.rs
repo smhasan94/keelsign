@@ -7,7 +7,7 @@
 //! copy [`Image`] parsed ([`TlvArea::bytes`](crate::image::TlvArea::bytes)). Neither the
 //! header nor the protected area is re-read from storage, so the digest covers exactly
 //! the header and protected TLVs that were parsed (the version and the security counter
-//! an image policy reports; SHA-46). This is the value
+//! [`verify`](crate::verify) reports; SHA-46). This is the value
 //! MCUboot stores in the `SHA256` TLV (`bootutil_img_hash`, `image_validate.c` at
 //! `a8ffd2c`) and the message keelsign's post-quantum signatures sign
 //! ([docs/image-format.md][spec]).

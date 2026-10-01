@@ -83,7 +83,7 @@ fn keelsign_verify_is_no_std_no_alloc_forbid_unsafe() {
     let sources = sources();
     // SHA-65: the LMS/HSS verifier and the default backend are covered by these rules;
     // SHA-46: the Ed25519 half and the policy entry point too.
-    for required in ["lms.rs", "backend.rs", "ed25519.rs"] {
+    for required in ["lms.rs", "backend.rs", "ed25519.rs", "policy.rs"] {
         assert!(
             sources.iter().any(|(name, _)| name == required),
             "keelsign-verify/src/{required} must exist"
