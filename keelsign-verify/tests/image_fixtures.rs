@@ -16,13 +16,14 @@
 use std::fs;
 use std::path::PathBuf;
 
+use keelsign_verify::ed25519::select_ed25519_signature;
 use keelsign_verify::image::{Image, ParseError};
 use keelsign_verify::tlv::{
     KEELSIGN_TLV_RANGE, KEY_ID_LEN, TLV_KEELSIGN_KEY_ID, TLV_LMS_HSS_SIG, TLV_MLDSA44_SIG,
 };
 use keelsign_verify::{
-    Algorithm, DefaultBackend, Error, TrustedKey, TrustedKeys, key_id_of, select_pq_signature,
-    verify_pq, verify_pq_with,
+    Algorithm, DefaultBackend, Error, TrustedKey, TrustedKeys, key_id_of, keyhash_of,
+    select_pq_signature, verify_pq, verify_pq_with,
 };
 use sha2::{Digest, Sha256};
 
@@ -30,8 +31,9 @@ const TLV_KEYHASH: u16 = 0x0001;
 const TLV_SHA256: u16 = 0x0010;
 const TLV_ED25519: u16 = 0x0024;
 
-/// Every fixture image, as named in MANIFEST.json.
-const FIXTURES: [&str; 7] = [
+/// Every signed keelsign fixture image, as named in MANIFEST.json (the SHA-46 policy
+/// mutations and their verdicts are in `tests/policy_matrix.rs`).
+const FIXTURES: [&str; 10] = [
     "keelsign-lms-m32-h5.bin",
     "keelsign-hss2-m32-h5h5.bin",
     "keelsign-lms-protected-tlvs.bin",
@@ -39,7 +41,13 @@ const FIXTURES: [&str; 7] = [
     "keelsign-mldsa44.bin",
     "keelsign-mldsa65.bin",
     "keelsign-dual-pq-invalid.bin",
+    "keelsign-hybrid-ed25519-mldsa44.bin",
+    "keelsign-hybrid-protected-tlvs.bin",
+    "keelsign-hybrid-reserved-tlv-protected.bin",
 ];
+
+/// The SHA-46 image with a keelsign TLV in the protected area on purpose.
+const RESERVED_PROTECTED: &str = "keelsign-hybrid-reserved-tlv-protected.bin";
 
 /// The golden MCUboot images (SHA-35), as named in MANIFEST.json.
 const GOLDEN: [&str; 6] = [
@@ -185,13 +193,21 @@ fn every_fixture_walks_and_selects_expected_tlvs() {
             "{name}: no bytes after the TLVs"
         );
 
-        // Every keelsign TLV is unprotected, after the MCUboot TLVs, in the keelsign block.
-        assert!(
-            protected(&image)
-                .iter()
-                .all(|(k, _)| !KEELSIGN_TLV_RANGE.contains(k)),
-            "{name}: keelsign TLV in the protected area"
-        );
+        // Every keelsign TLV is unprotected, after the MCUboot TLVs, in the keelsign block
+        // (except in the SHA-46 image that breaks that rule on purpose).
+        let protected_keelsign: Vec<u16> = protected(&image)
+            .iter()
+            .map(|(k, _)| *k)
+            .filter(|k| KEELSIGN_TLV_RANGE.contains(k))
+            .collect();
+        if name == RESERVED_PROTECTED {
+            assert_eq!(protected_keelsign, [TLV_KEELSIGN_KEY_ID], "{name}");
+        } else {
+            assert!(
+                protected_keelsign.is_empty(),
+                "{name}: keelsign TLV in the protected area"
+            );
+        }
         let first_keelsign = kinds
             .iter()
             .position(|k| KEELSIGN_TLV_RANGE.contains(k))
@@ -292,7 +308,7 @@ fn lms_fixtures_verify_through_verify_pq() {
         );
         verified += 1;
     }
-    assert_eq!(verified, 4, "four LMS/HSS fixtures verify");
+    assert_eq!(verified, 6, "six LMS/HSS fixtures verify");
 }
 
 #[test]
@@ -353,7 +369,7 @@ fn hss2_image_is_unsupported_under_cnsa_2_0_and_single_tree_images_verify() {
             other => panic!("{name}: unexpected L = {other}"),
         }
     }
-    assert_eq!((single_tree, two_level), (3, 1));
+    assert_eq!((single_tree, two_level), (5, 1));
 }
 
 #[test]
@@ -487,6 +503,13 @@ fn hybrid_fixture_has_one_keyhash_ed25519_pair_before_keelsign_tlvs() {
     assert_eq!(keyhash.len(), 32);
     assert_eq!(keyhash, sha256(&spki).as_slice());
     assert_eq!(unprotected(&image)[keyhash_at + 1].1.len(), 64, "ED25519");
+    // The same pair through the verifier's selection (SHA-46), and the KEYHASH is
+    // keyhash_of the raw key.
+    let selected = select_ed25519_signature(image.unprotected().pairs()).unwrap();
+    assert_eq!(selected.keyhash, keyhash);
+    assert_eq!(selected.signature, unprotected(&image)[keyhash_at + 1].1);
+    let raw: [u8; 32] = spki[12..].try_into().unwrap();
+    assert_eq!(keyhash_of(&raw).as_slice(), keyhash);
 
     // The PQ half verifies over the same M the Ed25519 signature covers.
     let public_key = hex(&field(&entry, "public_key_hex"));

@@ -48,7 +48,13 @@
         "version": "1.2.3+4"
       },
       "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
       "key_id_hex": "f7e6078d1f2b541747b299359be05b7d",
+      "policy": {
+        "classical_only": "Ed25519(Missing)",
+        "hybrid": "Ed25519(Missing)",
+        "pq_only": "MultiplePqSignatures"
+      },
       "protected_tlv_lens": "",
       "protected_tlvs": "",
       "public_key_hex": "000000010000000500000004a5868fba0d62d858ef78936906d35366cd2216c0ebcfc3f80750bed362bdd3a0fd3303525084981a51824b5162c3d141",
@@ -75,7 +81,13 @@
         "version": "1.2.3+4"
       },
       "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
       "key_id_hex": "76d91a3bd3171a9a49a03660c2f4424d",
+      "policy": {
+        "classical_only": "Ed25519(Missing)",
+        "hybrid": "Ed25519(Missing)",
+        "pq_only": "Ok"
+      },
       "protected_tlv_lens": "",
       "protected_tlvs": "",
       "public_key_hex": "000000020000000500000004e285d641ec6950f411c95dca2016c790705267a95c16533583f0a916a5f0e47704395bb096e450fae01772e4de1b53d4",
@@ -85,6 +97,134 @@
       "unprotected_tlv_lens": "32 16 2644",
       "unprotected_tlvs": "0x0010 0x4ba0 0x4ba3",
       "verifiable": true
+    },
+    "keelsign-hybrid-bad-body.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3512,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: body byte 0 ^= 0x01",
+      "digest_hex": "d75caf193402374e21587c6229d83405f8a6d3b98e6a7372cdbf2d61f16899db",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "body byte 0 ^= 0x01",
+      "policy": {
+        "classical_only": "Image(DigestMismatch)",
+        "hybrid": "Image(DigestMismatch)",
+        "pq_only": "Image(DigestMismatch)"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "7138893157bfa926a998bce9bb584b9f8cfc6e6f3c6af935c2630239c435b254",
+      "tlv_end": 3512,
+      "unprotected_tlv_lens": "32 32 64 16 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3"
+    },
+    "keelsign-hybrid-bad-ed25519.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3512,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: ED25519 TLV value byte 0 ^= 0x01",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "ED25519 TLV value byte 0 ^= 0x01",
+      "policy": {
+        "classical_only": "Ed25519(SignatureInvalid)",
+        "hybrid": "Ed25519(SignatureInvalid)",
+        "pq_only": "Ok"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "75f346053ffe2c3af99d412a051610e28866e42fca1b673ce095ea54dbd3a2ec",
+      "tlv_end": 3512,
+      "unprotected_tlv_lens": "32 32 64 16 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3"
+    },
+    "keelsign-hybrid-bad-pq.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3512,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: LMS/HSS signature TLV (0x4BA3) last byte ^= 0x01",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "LMS/HSS signature TLV (0x4BA3) last byte ^= 0x01",
+      "policy": {
+        "classical_only": "Ok",
+        "hybrid": "SignatureInvalid",
+        "pq_only": "SignatureInvalid"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "5348870f36590d6c3b2e2ffb3931c9ed1f56f912af059d43297074c41c7fb95a",
+      "tlv_end": 3512,
+      "unprotected_tlv_lens": "32 32 64 16 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3"
+    },
+    "keelsign-hybrid-bad-sha256.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3512,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: SHA256 TLV value byte 0 ^= 0x01",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "SHA256 TLV value byte 0 ^= 0x01",
+      "policy": {
+        "classical_only": "Image(DigestMismatch)",
+        "hybrid": "Image(DigestMismatch)",
+        "pq_only": "Image(DigestMismatch)"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "37846111772c1455ab9c8c8896d4f596bf288c26d8ce989cfe9d545c42f8c874",
+      "tlv_end": 3512,
+      "unprotected_tlv_lens": "32 32 64 16 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3"
     },
     "keelsign-hybrid-ed25519-lms.bin": {
       "algorithm": "LmsHss",
@@ -102,7 +242,13 @@
         "version": "1.2.3+4"
       },
       "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
       "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "policy": {
+        "classical_only": "Ok",
+        "hybrid": "Ok",
+        "pq_only": "Ok"
+      },
       "protected_tlv_lens": "",
       "protected_tlvs": "",
       "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
@@ -112,6 +258,553 @@
       "unprotected_tlv_lens": "32 32 64 16 1296",
       "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3",
       "verifiable": true
+    },
+    "keelsign-hybrid-ed25519-mldsa44.bin": {
+      "algorithm": "MlDsa44",
+      "bytes": 4636,
+      "description": "hybrid: imgtool Ed25519 (KEYHASH + ED25519) plus an ML-DSA-44 filler signature (does not verify)",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "expect_verify_pq": "UnsupportedAlgorithm",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "2a69f9acafc829dc3e7d8babfa66e333",
+      "policy": {
+        "classical_only": "Ok",
+        "hybrid": "UnsupportedAlgorithm(MlDsa44)",
+        "pq_only": "UnsupportedAlgorithm(MlDsa44)"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "82fd19190699c3d99def88a4298fd4b1a2ac95808b1645b03fc40734a9d76825caffbdaca073dc0fadf97702e0cb568f12142b56e01d962901f9317ebf9aa00aa0d79408ff431ce40166cefa2b9381e86ff21a14529f9e5b14c2761f95f5a90b9848b4911946f300e59a985392bb8d58c81e2ac412bf90853129ddf4c6f7874131544a93d51af104a5bf83fce1762d2b9856c66847364a62a4605dfe39923eb0c8c26818738dc5fdc2ac72fc38be2f153ac055f8eddddec63f77009b2ed5e7229041b001b82078a1a463369d7664c92438532a0e4abc5af7e48db4316f3f67254b4055350b5baa3df4ea44f5ba85a1c495dfd8fc3aabf4354ef8f12e3294d9bc4d0dc73d4f00cad39bed820d10b9161161f45b53d4892b0542630a43274070941638565f698222da85690d633d7b94f36a1255767aeffa7b8ce41dd442a91d2a9bd35d33e9a08e77ff5d59422a66e2c7b57bf9f0c438a8d03248103fc9faa7add931f5d542040bfe1ed1f3868a5f5c2e7776af1575c61589a6db059719630c7a00e8f3e8f24dc5df9b7d37ced5d1022d1a575a2b929d9f1cbdcbc45d646743ded976084964b3f4964eb656293c9b8b1775ff5a31a2066f8a128cb34c705b9024f7ea5e4c3286308cf9cc3a134c3c38db60be6e3afe9e13ceeea7c485b97d72313b0a975eb0121d1f76ca633c9a19b7da6d84e273e4c7a0130c74bc3c7222c4f8beff912bb86c2717f1549f33aad5e3de1e363d80a11047974f41cc1fa52c8fb2b5fa7fa7442100ff3ccd3bb625b1c5cd6d9fac5d83c69f0443c1b9422a15f97a9ca2d3454e3d760797a936e58eb1df6f45880b89f861995fb766d5e30dba5b56a8db6ddb66dd7b012aab930dadec5f0db4e4432946a88f004ef7decc99f8d1ae8055e7e6f5d3c0bb4c98b3e6860f63dcc260b76d3af6bb14c0fa12604ff007fb8928ba4670444e19c6022e24eae313b34a12bc86cabe807b25c645541be5f43750eba59ef6ac556864ff93eb189d3d5b1ec10502746d7d21e3a3458837f35322d88eaed97ced5f513b366cd2f4c0365eecaaeb6952b6386c5351ee7a6f48082528fc792dc88c3746fbd89adddf54589758fa8475687a8e9d7ea0d18817245f8a437e8d67ad570519c1d8804e2bc9583d9e3f09b4d82ccff73e827c14eb056a8c1ae6f966be1ac294349de48bf63cefc95edd72896d28e11f6dec5ac7eaba390c951025035fe3977686232fe9afe55559165ef2c8028468271e3cda6a329a39f66b811e9a1881b683234b23a8e54d38feb778cb99a9eabd211d2c1f72172b973fbfb76f1dd87ff74d07fce203dc15d299971051f1bae076158bceb4b254e6fab694a111d8aed48a36559afee0fc41e8b8088c6ab62ca7a87920fdb0ce08e9355fbe7a42bc55d56ee44c95b4b1ffb52151638a90b9c07dd84ac4bf9c73f738c4fb1dda86a7c05ec7f2c68ad8e9d0c9802110342d3673d4d6f61fad52ac982ea5fdc48f90a504e6f5c18f7ab138ec5eea82d1fd94dd6e74eab0a56807a8d7190aa3b6629e8d145979b13729b7a506d92bca375afb03074595bf72551fdc1cd4857632b8ad47f205d5540e5599ced7abc684da854bf9e694711ef2fbf4eeea8cc298643ff8ef9a02f4b913cd9fd9db8b84738c88d82cb25f52f2b9fb35d7d0a1452c90089ee7e3a3854ea1017ef98913bce859b2f88f847215548617cbd707fb599a836d90c1652a06163fce3e609e2cf83840f6597fc72c6bf9e4b02ac8bf1b0a822692f96bf3ed8ca5e3a9a7305d1653e2a494377d888c407e3f7c095c1107f1b17c3ad76747bad3ef32eaebb6a6dc71909a7781ec522313055c76c7749bd44461",
+      "sha256": "61dbc4828fe2b331b74bda3dfab9af033086d7b7f3b366d6bd5ca3a27599ae5b",
+      "signature_lens": "2420",
+      "tlv_end": 4636,
+      "unprotected_tlv_lens": "32 32 64 16 2420",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba1",
+      "verifiable": false
+    },
+    "keelsign-hybrid-flag-compressed.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3512,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: ih_flags |= IMAGE_F_COMPRESSED_LZMA2 (0x400)",
+      "digest_hex": "0bb4804a35025eab445467d41cee0fbd4776a93016839fd90e18bc022ebfa699",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 1024,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "ih_flags |= IMAGE_F_COMPRESSED_LZMA2 (0x400)",
+      "policy": {
+        "classical_only": "Image(Compressed)",
+        "hybrid": "Image(Compressed)",
+        "pq_only": "Image(Compressed)"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "ff087a7aa6d8a3175deb0139038e416478211dd714d4b9f6b61d7bc437a5b970",
+      "tlv_end": 3512,
+      "unprotected_tlv_lens": "32 32 64 16 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3"
+    },
+    "keelsign-hybrid-flag-encrypted.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3512,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: ih_flags |= IMAGE_F_ENCRYPTED_AES128 (0x04)",
+      "digest_hex": "8b60685e10c74b0d53cdb3c5dc569230d26dbb51f582af64ea3f01bc5c000323",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 4,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "ih_flags |= IMAGE_F_ENCRYPTED_AES128 (0x04)",
+      "policy": {
+        "classical_only": "Image(Encrypted)",
+        "hybrid": "Image(Encrypted)",
+        "pq_only": "Image(Encrypted)"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "a2c26c0aae1591a4f3572e0f8504ede8d24259756a14e62b02557a2b5e4091a4",
+      "tlv_end": 3512,
+      "unprotected_tlv_lens": "32 32 64 16 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3"
+    },
+    "keelsign-hybrid-flag-non-bootable.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3512,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: ih_flags |= IMAGE_F_NON_BOOTABLE (0x10)",
+      "digest_hex": "9f1fc1427bc3e7c507ee86257c03c7dd4e9f42a7e9fff9ccfeff8ad4cab3a030",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 16,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "ih_flags |= IMAGE_F_NON_BOOTABLE (0x10)",
+      "policy": {
+        "classical_only": "Image(NonBootable)",
+        "hybrid": "Image(NonBootable)",
+        "pq_only": "Image(NonBootable)"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "af1865036bd7efeb4686ec7ebadd0509326d5400468748fb80ba68d912726f0a",
+      "tlv_end": 3512,
+      "unprotected_tlv_lens": "32 32 64 16 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3"
+    },
+    "keelsign-hybrid-keyhash-only.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3444,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: ED25519 TLV removed: KEYHASH alone",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "ED25519 TLV removed: KEYHASH alone",
+      "policy": {
+        "classical_only": "Ed25519(Missing)",
+        "hybrid": "Ed25519(Missing)",
+        "pq_only": "Ok"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "7dce6d65505dabb7ba3b4cbb9f1bb66b53efa0c70691ce72197b9f58af88cd08",
+      "tlv_end": 3444,
+      "unprotected_tlv_lens": "32 32 16 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x4ba0 0x4ba3"
+    },
+    "keelsign-hybrid-missing-key-id.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3492,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: key-ID TLV (0x4BA0) removed",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "key-ID TLV (0x4BA0) removed",
+      "policy": {
+        "classical_only": "Ok",
+        "hybrid": "MissingKeyId",
+        "pq_only": "MissingKeyId"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "563f59929a371d9c7f71f27913b7f3a4fbfc17cd6dcc60fb0fe787068ebbd3f2",
+      "tlv_end": 3492,
+      "unprotected_tlv_lens": "32 32 64 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba3"
+    },
+    "keelsign-hybrid-missing-pq.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 2212,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: LMS/HSS signature TLV (0x4BA3) removed",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "LMS/HSS signature TLV (0x4BA3) removed",
+      "policy": {
+        "classical_only": "Ok",
+        "hybrid": "MissingPqSignature",
+        "pq_only": "MissingPqSignature"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "655ab375eaf7634367d23b6307bec9b3a3ef7ec437093c40114d015380fa85f1",
+      "tlv_end": 2212,
+      "unprotected_tlv_lens": "32 32 64 16",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0"
+    },
+    "keelsign-hybrid-no-sha256.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3476,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: SHA256 TLV removed",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "SHA256 TLV removed",
+      "policy": {
+        "classical_only": "Image(MissingSha256Tlv)",
+        "hybrid": "Image(MissingSha256Tlv)",
+        "pq_only": "Image(MissingSha256Tlv)"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "93caad620aed2c128858225914533759ced628283b2a5645847de9ae89799691",
+      "tlv_end": 3476,
+      "unprotected_tlv_lens": "32 64 16 1296",
+      "unprotected_tlvs": "0x0001 0x0024 0x4ba0 0x4ba3"
+    },
+    "keelsign-hybrid-protected-tlvs.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3557,
+      "description": "hybrid Ed25519 + LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, HSS L=1, with protected SEC_CNT and vendor TLV 0x10A0",
+      "digest_hex": "14bc390be01003e0c0a84e577c1156d8423f93b68337bcf0df0e9ffc189add83",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "expect_verify_pq": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 45,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "42a79323dda5ff2dc6ea45ec4abf1b1f",
+      "policy": {
+        "classical_only": "Ok",
+        "hybrid": "Ok",
+        "pq_only": "Ok"
+      },
+      "protected_tlv_lens": "4 29",
+      "protected_tlvs": "0x0050 0x10a0",
+      "public_key_hex": "00000001000000050000000459b86423b4709078c925c48d2cafef19281f8cacd70125f3ba3a3545a5c1d40c2a2c6cea6af479fd909e158123118a5c",
+      "sha256": "623aacec2ddb74a90cb9534679cdbc4e9352280fd9c36266f7a0c9b499d9ab0c",
+      "signature_lens": "1296",
+      "tlv_end": 3557,
+      "unprotected_tlv_lens": "32 32 64 16 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3",
+      "verifiable": true
+    },
+    "keelsign-hybrid-reserved-tlv-protected.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3536,
+      "description": "invalid: hybrid Ed25519 + LMS M32_H5 with a keelsign key-ID-typed TLV 0x4BA0 in the protected area (imgtool --custom-tlv)",
+      "digest_hex": "803522d01ccf4e23ea46e30520211a1ac5c705d40dfd171d615940ec16648745",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "expect_verify_pq": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 24,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01201ac6476348bc30e867aa31e7006e",
+      "policy": {
+        "classical_only": "Image(KeelsignTlvProtected(0x4BA0))",
+        "hybrid": "Image(KeelsignTlvProtected(0x4BA0))",
+        "pq_only": "Image(KeelsignTlvProtected(0x4BA0))"
+      },
+      "protected_tlv_lens": "16",
+      "protected_tlvs": "0x4ba0",
+      "public_key_hex": "00000001000000050000000496673647054244555e5b7bb4adbde02ba917454d0e1cfe5df9e917769f476c2b9d5d8975f625996dbf5105667c5eba0d",
+      "sha256": "4bd4d047e96ca7c795b0853321c7addfa99548bd75c4251cb6b1ffc44fbb6b4d",
+      "signature_lens": "1296",
+      "tlv_end": 3536,
+      "unprotected_tlv_lens": "32 32 64 16 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3",
+      "verifiable": true
+    },
+    "keelsign-hybrid-sha384-only.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3528,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: SHA256 TLV replaced by a SHA384 TLV (0x11) of the hashed bytes",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "SHA256 TLV replaced by a SHA384 TLV (0x11) of the hashed bytes",
+      "policy": {
+        "classical_only": "Image(MissingSha256Tlv)",
+        "hybrid": "Image(MissingSha256Tlv)",
+        "pq_only": "Image(MissingSha256Tlv)"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "65a4354ab15b246f64e9de48980761cd66404a8463df4c3ee28a2017b74c5b1a",
+      "tlv_end": 3528,
+      "unprotected_tlv_lens": "48 32 64 16 1296",
+      "unprotected_tlvs": "0x0011 0x0001 0x0024 0x4ba0 0x4ba3"
+    },
+    "keelsign-hybrid-short-ed25519.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3511,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: ED25519 TLV value truncated to 63 bytes",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "ED25519 TLV value truncated to 63 bytes",
+      "policy": {
+        "classical_only": "Ed25519(InvalidSignatureLength)",
+        "hybrid": "Ed25519(InvalidSignatureLength)",
+        "pq_only": "Ok"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "4845c66054946cdfda66835c091ffcad1853fc8ac4dcdd008b045d83584cfd67",
+      "tlv_end": 3511,
+      "unprotected_tlv_lens": "32 32 63 16 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3"
+    },
+    "keelsign-hybrid-sig-pure.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3517,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: SIG_PURE TLV (0x25) = 01 appended",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "SIG_PURE TLV (0x25) = 01 appended",
+      "policy": {
+        "classical_only": "Image(SigPure)",
+        "hybrid": "Image(SigPure)",
+        "pq_only": "Image(SigPure)"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "5b53d1aa0c3924f099467fea0fdb1efa0f653f1ff264a410ae4fa709ef1f61ca",
+      "tlv_end": 3517,
+      "unprotected_tlv_lens": "32 32 64 16 1296 1",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3 0x0025"
+    },
+    "keelsign-hybrid-two-ed25519.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3616,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: the KEYHASH + ED25519 pair duplicated",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "the KEYHASH + ED25519 pair duplicated",
+      "policy": {
+        "classical_only": "Ed25519(Multiple)",
+        "hybrid": "Ed25519(Multiple)",
+        "pq_only": "Ok"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "695c12dea5971dfe7d6e3cab3bb490c2b2f76f71d109c02c5ecae6cb296e3f4e",
+      "tlv_end": 3616,
+      "unprotected_tlv_lens": "32 32 64 32 64 16 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x0001 0x0024 0x4ba0 0x4ba3"
+    },
+    "keelsign-hybrid-two-sec-cnt.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3565,
+      "derived_from": "keelsign-hybrid-protected-tlvs.bin",
+      "description": "mutation of keelsign-hybrid-protected-tlvs.bin: protected SEC_CNT duplicated (ih_protect_tlv_size and it_tlv_tot re-encoded)",
+      "digest_hex": "d76a893509fe35aa5f1404ff892d0ac282076cb6dcc58767c9a76512bb373948",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 53,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "42a79323dda5ff2dc6ea45ec4abf1b1f",
+      "mutation": "protected SEC_CNT duplicated (ih_protect_tlv_size and it_tlv_tot re-encoded)",
+      "policy": {
+        "classical_only": "Image(MultipleSecurityCounters)",
+        "hybrid": "Image(MultipleSecurityCounters)",
+        "pq_only": "Image(MultipleSecurityCounters)"
+      },
+      "protected_tlv_lens": "4 4 29",
+      "protected_tlvs": "0x0050 0x0050 0x10a0",
+      "public_key_hex": "00000001000000050000000459b86423b4709078c925c48d2cafef19281f8cacd70125f3ba3a3545a5c1d40c2a2c6cea6af479fd909e158123118a5c",
+      "sha256": "6cb3a0b0d0f47fd5555e4245eb9d7b8947a70a037d2ee5afababf022433e3c0b",
+      "tlv_end": 3565,
+      "unprotected_tlv_lens": "32 32 64 16 1296",
+      "unprotected_tlvs": "0x0010 0x0001 0x0024 0x4ba0 0x4ba3"
+    },
+    "keelsign-hybrid-two-sha256.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3548,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: SHA256 TLV duplicated",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "SHA256 TLV duplicated",
+      "policy": {
+        "classical_only": "Image(MultipleSha256Tlvs)",
+        "hybrid": "Image(MultipleSha256Tlvs)",
+        "pq_only": "Image(MultipleSha256Tlvs)"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "fa68c53b04074f869061b15627b24ad6df268e748097c29f22cd0b3d4eb3972a",
+      "tlv_end": 3548,
+      "unprotected_tlv_lens": "32 32 32 64 16 1296",
+      "unprotected_tlvs": "0x0010 0x0010 0x0001 0x0024 0x4ba0 0x4ba3"
+    },
+    "keelsign-hybrid-unpaired-ed25519.bin": {
+      "algorithm": "LmsHss",
+      "bytes": 3476,
+      "derived_from": "keelsign-hybrid-ed25519-lms.bin",
+      "description": "mutation of keelsign-hybrid-ed25519-lms.bin: KEYHASH TLV removed: the ED25519 TLV follows the SHA256 TLV",
+      "digest_hex": "e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1",
+      "ed25519": true,
+      "expect_parse": "Ok",
+      "header": {
+        "flags": 0,
+        "hdr_size": 512,
+        "img_size": 1536,
+        "protect_tlv_size": 0,
+        "version": "1.2.3+4"
+      },
+      "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
+      "key_id_hex": "01ad5539dd9a92ec0524d7f8dba66fa3",
+      "mutation": "KEYHASH TLV removed: the ED25519 TLV follows the SHA256 TLV",
+      "policy": {
+        "classical_only": "Ed25519(Unpaired)",
+        "hybrid": "Ed25519(Unpaired)",
+        "pq_only": "Ok"
+      },
+      "protected_tlv_lens": "",
+      "protected_tlvs": "",
+      "public_key_hex": "000000010000000500000004d0bb7e285c88fd4146e6483bfe0507948d100102a878a6e3c1977ae1835fc29b4c254088e6fcd1ca182060ba9b1f73c8",
+      "sha256": "d1212cb6cbde54e22d686477ff4b298246a77ca3cb41beee95ca5341992adeb1",
+      "tlv_end": 3476,
+      "unprotected_tlv_lens": "32 64 16 1296",
+      "unprotected_tlvs": "0x0010 0x0024 0x4ba0 0x4ba3"
     },
     "keelsign-lms-m32-h5.bin": {
       "algorithm": "LmsHss",
@@ -129,7 +822,13 @@
         "version": "1.2.3+4"
       },
       "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
       "key_id_hex": "4796cd74df2ec5e2bce1f88598bbcc1f",
+      "policy": {
+        "classical_only": "Ed25519(Missing)",
+        "hybrid": "Ed25519(Missing)",
+        "pq_only": "Ok"
+      },
       "protected_tlv_lens": "",
       "protected_tlvs": "",
       "public_key_hex": "0000000100000005000000047b6845092e596e395f31a236803249bb11b63a11db626b6cd7f9454129f27ab7a87f2b987c77a51f7ee36fdb1c58cc0a",
@@ -156,7 +855,13 @@
         "version": "1.2.3+4"
       },
       "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
       "key_id_hex": "7c00207e36816370cd4ddecf93226998",
+      "policy": {
+        "classical_only": "Ed25519(Missing)",
+        "hybrid": "Ed25519(Missing)",
+        "pq_only": "Ok"
+      },
       "protected_tlv_lens": "4 29",
       "protected_tlvs": "0x0050 0x10a0",
       "public_key_hex": "000000010000000500000004d21bc81cddbed63d809ce2070981cb9ce7171efe7b2e79b6d62e77a214aa3b01830b4b3dd6e354fc3c08f05430258727",
@@ -183,7 +888,13 @@
         "version": "1.2.3+4"
       },
       "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
       "key_id_hex": "c7db8a9e6628b97767a73195fcbd1f6d",
+      "policy": {
+        "classical_only": "Ed25519(Missing)",
+        "hybrid": "Ed25519(Missing)",
+        "pq_only": "UnsupportedAlgorithm(MlDsa44)"
+      },
       "protected_tlv_lens": "",
       "protected_tlvs": "",
       "public_key_hex": "db62d8f381f03d5447e49f75235e0a4d25c4366e7c4dc1523c8753480baf9de04a2ac4cf5a17676081454c7f7a6f0868d220accfdeef7e615a034feecd0300fdecbccca5c316c88863fa0d15a283b2f382e42abb50cd3a6594887fa200bdeb77418db59840ed74d2771ee5e0353c9f33f906032e1ed6b5f60e59e9a78bc9944e7827d8ebe690e653b6527f911980669be09547e46e92eae8d41c728edfeb5688d4f3b93283a9ca584273dd39b53e168cd3d70e791d6a7127a618922e188246266c681a6fadaf26ceefade0c424f08c34b8f8c638fc7c1e2b8cf5defbe09025f3bca645d577eb6534e81bc0d5daf8837d8e48f0aaff0a01405ed12d94634c9a58edd94238d2ec793bb90e7bd900ff19af1174fddc1a2b6a596107a2f8e50a2d87c2154f812b7eb5d9ff760344153dff3be720c3da128ad165caab84c435b8cce9ed71094872dc8e367f87734bd3f17fb994c5b2805703397060cf9d137b3c78ef73878bcc11a1137608d8e62e606ce554efdd0e262ba7d220e6a847ed2ce8a40190b6cc564097e2c254dc7d0a25d8ea3964dafa65893339df609aed97b5da9b3576069cdcbd9f7023b960e2fc42801d984a97710cf1e6e4845cb6a2bafd8b7b0c7da0b91bba04279fa98a357c8d10d9dcb021c0ad811b42a0a8066642b5ab9e1f993e565d6d19adea22eef9e6c6bbbd29df592a586452f5e2af04ccfc4660c58ff3190154efd76b5a86e9f2e83f93dfbf21f28dcaf01bf13eeabc592bb76ee04cbe85229e121f3e4b4e6bb9e3ac598a5570961e961f421c2a37eb601b205392b05089e062fc2a0d92faf27d5cca42177cfa520ca61cd4c56054951ac84f772a49ea8ca7633ecdeb53a4bf12598672fe78b513c820e0f7f61dda32d41e6c00f36780d0d5a780ebbf442f18e54b67852cd6e1e0e74df4faa7df0fde4446e5c960f7edbe64fedb68b07a61efd24fe4d4fcecd0b31da6aa32735be7829c26ea6271510c4c037d7392551139a9c78adf5e3134ea04793c44bd211240a74299c8d7c6e05c033a633815c54247dbf9fb336e60ff041c38455ee9faee4b3ae596501feb63fa2ef5652eeec5542fc5f8be9a9848bd8904406fcc50a01b6a466960e2aee4ea606e43ae282bca441f0f57e2ade14b0053c02fc49e4e24bb9019dad0f5a372674ff623dd492f7adb0cb69c5f7d258035ef4786fd0fd4d3534cfb8d09fa426a8d22b4f68756d52afaf98039294b8317519a734d175faffce5f580fe2659876681e3165cde674f6015123374567bc8d416ebfc9273c9a4f41c5dd9520dfa731474c39ece0579568b29556603b1c777571eeab62279008033c0e9196ffa307dd3973f47472872dd5c9e7bc53553c31b6b17d7373561b25a2cc64f8536cdbf99fd5f1e708b213fb0b96816f97d5a439eae92a77b8d09384c5a27d6e47075e255881aee185b28c915e360c5bd51203ff0b400803cf827062f13a8213d4edf697800629a15b00ff403f258c13b4f293815d733519b2e63a98b90fc17cdda14a392026ce2c6a9ba397ed189d9306ef9beff8b6bd8b3a0f6b0acf037108e916e8ced9265b5093fe74685b0ac5c213bcd2fed42af39fd96e15dbd7801448768c4ec5aa0f56209e40f00e86e74a6c2490261e665cfdcd2d1818b36e32d967666835c7f345f9b9d482b2772e732223d798268247e1e2ca6acf8071914064ddbe1f500f49f650a6590b7eb82b62885856dd52098daf34369727b2b661923cd5a6c55ce43d17b7f5d9687fcc0f83d1da13c660145182339a4ee8782d1e5829d098953da91a192e0097afe59696480852c11a2855572c3a6b2867a7e20167cb8b195a0989e548d",
@@ -210,7 +921,13 @@
         "version": "1.2.3+4"
       },
       "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
       "key_id_hex": "3c06ca90cca77e17e207b738a4e55096",
+      "policy": {
+        "classical_only": "Ed25519(Missing)",
+        "hybrid": "Ed25519(Missing)",
+        "pq_only": "UnsupportedAlgorithm(MlDsa65)"
+      },
       "protected_tlv_lens": "",
       "protected_tlvs": "",
       "public_key_hex": "307dc8271a528707a59d784f8110643c89124b6c93bfae8988257f06d4fbf29d12a377e43810723c3aa3abc54ce03bd4151fd6fe868575a7fee2d5c497c3bd9b2a44e85b5490112dbfabcbe9c3a8d416856ec4e4ce7309379f42b9689267a42a035ad7167b526c6270c1b0de9b097a82d4e2bb5b9cd877c45c436141bd426dbc210cf5fe4eec47e06ad8b87e8c8c1d58ef34dffd2ce3737c7b8d5320b3adb235181b9bfa4c7e5b595ec6164aed4887abe66b87030a323cdcb8334a9c171d7c3dc8138abbc6243a1face7ce9ff16b01e65461122f836002590336d1a2be0512e5985539b901cc7e6daf5e43a9507b11f6154bf5892093443b020062ee0240608efda42d51a079dc05a2375bd484d741e317be6ced59fd5a9e76db7ce03093250ade64c85aff99331e843928e70d3278748599f64c3a039919e0da41832cb0b10c8dfc6fbe3c4a05a3ab8dfb156f08ffa0ac4e9bd722920f2124411f5d42187bf4b9780d0fcd17c4148d5e9859d9226363f40f6d509dbfa6d21cfe36a1b29e06757fc245c807f4ca3e9d54eec8c9e63511f583e39fa0a9475931e050e7ec15980c87cca6248c0fc7c0f0f9d1207647ca25df31eee89da62abd150cb8c8946270620056bb89867893e299dcb55f684d1dbc98e04049411846cd9ed1edcf99fd04a129251f50527844ab0361f12681e2857d2959218bf82a1b82b05d6b5b8b6e8b4a2526259940e0dffe2f3a64a360aa5d3d2ef74bbf24e65f475eb5607bdad712151a72847df651be2a705fc17baa20771bc618333ba5d219c89c84fd7761e105ac37880cafaec1a27eeaa94628e0903141bb57b5cc5c00fe5ec961152947e7ccfa57a50cde23f08dfc8b69703080abee6191d7d8e3e12df1ac8bff11ba9585f6c7f2f6f1a6b01e0cb8a6f38d40cbc0b828ab54b85046e4443ef380ece7e3d47d736091c588d7597e90648eae81627aff71bef619276dfc8b5b434fede4e09d808e2f3d216abe8da715e1465a84c6e9b9e6bf88cfd073d0f4d24ab2ae231ab1f1290fefe1f2951bf0a8461fd3f01038071b0a5a61a3a1b8c482544eb87e671e06730fd59cb0592093888c684ac41ffba69333ad2aa1ccceab9edc7a2960605e7fab5fa22d8c75fe8f678be11e9aa784f8bad2874adada6f30d3313859de8d0537ae57fe04368d5535be32e94821b32701ba5aee691efdd9be2e611537d90f994233d82fe31c260bb96848eff57749a4d64f47c9082db725b34e50bff7ddf7ac1d5da9b5ef160aced10bf59e89e2266632979a78ee7c093ab5c2a07bd2e2da043e79a4f3d977d5bad3cc9c63f15a3a696d872d3010c936b13d267487e4e637289e8ec1e8a9a8b7d8f8f201d106282bce5ff7908542ede8e75721b99dde33a99d382e5a1bc1a3ecd6738e0419b9d6e0053c29deae4edd1d2ce076bfdd31355af336e9f9b9ca6a3aa6f50f076f3359a8392a24658a73bbb1552cf671a1e45b8118a8b265f305626ee2f57b632481295435152b90fb7c76ac98e28501623668e61446a27cead0926c53cee472346010538ac319da0bd8c1e48579379f431161e3b5b49551d013b4a5a9be7f9aa94f3da25da045b66759569eb12b18c8d6fedf2c6515709ef219af267cd82a48ebc376ccc956fb6e1c2d0707ee4743f0dbdd24d9d2ed41712c2283d4ce1cc2b8e3b7739e55f29c9fdd36b77fa4325c9b8c1075358f5bc16e00a85671c355f88442c215bf9ec4c411241910d5ed91a0535fb9e3142830e2e14950e884210cb01b04125d08dfeb201e052c11daab35dc6189a27ee67bf388a80437e26dd23138273deebfd70a1689388e33b8d7658200971075b72d5d2be34f51e0504fded0c32a6ba0d0dc600ec7d5097ada56f2c44891e8ccfe868e90c7a22f1d3f7c36b72c1d9ebb7e0d4396ef1dff8366fb16f8e78491e84c55cede4c99692659787222dbd0170ce0f5f1b23d78bc2a943560d7c9a4c9ae67fce7e985280f563e0679872a09659a4bb54c37889c6808082b00d6a644ce69188cf5c176c146dd5ca39ae0443413439cb69ffa3e0c6fb263537666bffd1dbfd9e2cc2e4343ebc5d663738a89d771a41c528c0609fba3c4ca245c972884be0e2e2b6aabd00e1f3da0a4a6774bd553750183aab7f6eee6b479766766c726635ebf235be2f587e88b963ad1711617cf0844e242d1ac97f35a83a3b381256ebfc8045ad5a1d88de7a669dcf7987cbc466456908b53359bdbc6ab3d8c0567f7b31f8049d17b732b345ff87623acf53edef70947970b295c50116d73707668677739b875dcae9b39d2c3fedf688c18cef31d41761afa893ecf1361e6e8644f2e0306422946b8b4105a818ea2a3c88f298f1661f3b22a905061903be6083b005964595d55de48656470f6f5d23fd1a307c3b0f5bd54149bb236339e48afaee1464ad053f2c72e9ea336f5470ff5d4821886e1ed2110b7404df00682d299ddcec454ea6ead13d45d85ffc31051d8bf0581fad8c0421b6cebb1934e95fd16c2bb9d042433d4f06d8087396e0f9a61eec219f4c4c79bb281feb5e6be89452a78734b79eadfec9b57c05a8e1630a5cd3c6fbb5b1a7a610c5433fbe8d88b8899b9b7c8f969ab6d8ba5c11e3ae54b6ed24ad09bd50c8f73e7bfde1f71872ec5dc52aad95dd13020fcaa4905d280dfc2d2d66ad1324eef64ed1e1eb908c7c127bfdc01c7b771151866fa33a6b464ba6df12bfd40813a7629a7f9b397cdb2bd3afa501a98f4aa49683fb923",
@@ -235,8 +952,14 @@
         "version": "1.2.3+4"
       },
       "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
       "key": "keys/ecdsa-p256-test-key.pem",
       "keyhash_hex": "1b1a70191fb7cfeab87188d256a25727f93b079b9b59533009905a6052689a46",
+      "policy": {
+        "classical_only": "Ed25519(Missing)",
+        "hybrid": "Ed25519(Missing)",
+        "pq_only": "MissingPqSignature"
+      },
       "protected_tlv_lens": "4 91 12",
       "protected_tlvs": "0x0050 0x0060 0x0040",
       "sha256": "bb768144f70fc570fcda6a0b7b127fda4b04892148d92e2959a73274d17883e1",
@@ -262,8 +985,14 @@
         "version": "1.2.3+4"
       },
       "imgtool_verify": true,
+      "in_policy_matrix_bin": false,
       "key": "keys/ed25519-test-key.pem",
       "keyhash_hex": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190",
+      "policy": {
+        "classical_only": "Ok",
+        "hybrid": "MissingPqSignature",
+        "pq_only": "MissingPqSignature"
+      },
       "protected_tlv_lens": "4 91 12",
       "protected_tlvs": "0x0050 0x0060 0x0040",
       "sha256": "8717e00526cdde01e8760799083d61eb8b66ee9c3833eb6264a5a3a3c35b18b7",
@@ -288,8 +1017,14 @@
         "version": "1.2.3+4"
       },
       "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
       "key": "keys/ed25519-test-key.pem",
       "keyhash_hex": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190",
+      "policy": {
+        "classical_only": "Ok",
+        "hybrid": "MissingPqSignature",
+        "pq_only": "MissingPqSignature"
+      },
       "protected_tlv_lens": "4 91 12",
       "protected_tlvs": "0x0050 0x0060 0x0040",
       "sha256": "8725c3eb730f6d9e9bc1c5ed0323fe4d570c51866bfc98a5afda8f69db98cac2",
@@ -313,8 +1048,14 @@
         "version": "1.2.3+4"
       },
       "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
       "key": "keys/ed25519-test-key.pem",
       "keyhash_hex": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190",
+      "policy": {
+        "classical_only": "Ok",
+        "hybrid": "MissingPqSignature",
+        "pq_only": "MissingPqSignature"
+      },
       "protected_tlv_lens": "4 91 12",
       "protected_tlvs": "0x0050 0x0060 0x0040",
       "sha256": "f07dad7b90f1780e87a1d759e4f761cf1fc429f5826bc27384c98bc5188cc46b",
@@ -338,8 +1079,14 @@
         "version": "1.2.3+4"
       },
       "imgtool_verify": true,
+      "in_policy_matrix_bin": true,
       "key": "keys/rsa2048-test-key.pem",
       "keyhash_hex": "243b3b79ba834d441a927be78ec33fa759527030006ffa110815de892b3988af",
+      "policy": {
+        "classical_only": "Ed25519(Missing)",
+        "hybrid": "Ed25519(Missing)",
+        "pq_only": "MissingPqSignature"
+      },
       "protected_tlv_lens": "4 91 12",
       "protected_tlvs": "0x0050 0x0060 0x0040",
       "sha256": "841270474c16648da0eb50b5737ddc900307ce9724e9e97b3879b0e2c2a68178",
@@ -363,8 +1110,14 @@
         "version": "1.2.3+4"
       },
       "imgtool_verify": false,
+      "in_policy_matrix_bin": true,
       "key": "keys/ed25519-test-key.pem",
       "keyhash_hex": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190",
+      "policy": {
+        "classical_only": "Parse(BadMagic)",
+        "hybrid": "Parse(BadMagic)",
+        "pq_only": "Parse(BadMagic)"
+      },
       "protected_tlv_lens": "4 91 12",
       "protected_tlvs": "0x0050 0x0060 0x0040",
       "sha256": "7c10a3f14e3c8d533f34bbb6cc1927bb15d1ef2eb116d4473a586d6635419188",
@@ -373,6 +1126,43 @@
       "tlv_end": 2315,
       "unprotected_tlv_lens": "32 32 64",
       "unprotected_tlvs": "0x0010 0x0001 0x0024"
+    }
+  },
+  "policy_matrix": {
+    "codes": {
+      "0": "Ok",
+      "1": "Parse(BadMagic)",
+      "10": "Ed25519(Unpaired)",
+      "11": "Ed25519(InvalidSignatureLength)",
+      "12": "Ed25519(SignatureInvalid)",
+      "13": "Image(Encrypted)",
+      "14": "Image(Compressed)",
+      "15": "Image(NonBootable)",
+      "16": "Image(KeelsignTlvProtected(0x4BA0))",
+      "17": "Image(SigPure)",
+      "18": "Image(MissingSha256Tlv)",
+      "19": "Image(MultipleSha256Tlvs)",
+      "2": "MissingPqSignature",
+      "20": "Image(MultipleSecurityCounters)",
+      "21": "Image(DigestMismatch)",
+      "3": "MissingKeyId",
+      "4": "MultiplePqSignatures",
+      "5": "SignatureInvalid",
+      "6": "UnsupportedAlgorithm(MlDsa44)",
+      "7": "UnsupportedAlgorithm(MlDsa65)",
+      "8": "Ed25519(Missing)",
+      "9": "Ed25519(Multiple)"
+    },
+    "policies": [
+      "classical_only",
+      "pq_only",
+      "hybrid"
+    ],
+    "policy-matrix.bin": {
+      "bytes": 7295,
+      "count": 33,
+      "note": "KSPM v1 index of the policy matrix for benches/policy-kat (no image bytes)",
+      "sha256": "fcc1c791001c200e0e8af9bba1a91291914f80410682d069ee10eb9dfa3d528d"
     }
   },
   "signatures": {

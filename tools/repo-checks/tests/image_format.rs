@@ -2,7 +2,10 @@
 //! agrees with keelsign-verify/src/tlv.rs, and that the sample images in
 //! tests/fixtures/images/ are script-generated and match their manifest.
 
-use repo_checks::{IMAGE_FIXTURES, python_script, run_capture, sha256_hex, workspace_root};
+use repo_checks::{
+    IMAGE_FIXTURES, POLICY_KEYS, POLICY_MATRIX_BIN, python_script, run_capture, sha256_hex,
+    workspace_root,
+};
 use std::fs;
 
 const REQUIRED_HEADINGS: [&str; 14] = [
@@ -571,6 +574,24 @@ fn image_fixtures_match_manifest() {
                 json_field(entry, "decoded_bytes")
             );
             entry
+        } else if name == POLICY_MATRIX_BIN {
+            // SHA-46: the KSPM v1 index, one case per `in_policy_matrix_bin` output.
+            let entry = json_object(json_object(&manifest, "policy_matrix"), name);
+            assert_eq!(bytes.len().to_string(), json_field(entry, "bytes"));
+            assert_eq!(&bytes[..4], b"KSPM", "{name}: magic");
+            assert_eq!(
+                u16::from_le_bytes([bytes[4], bytes[5]]),
+                1,
+                "{name}: version"
+            );
+            let count = u16::from_le_bytes([bytes[6], bytes[7]]);
+            assert_eq!(count.to_string(), json_field(entry, "count"));
+            assert_eq!(
+                usize::from(count),
+                outputs.matches("\"in_policy_matrix_bin\": true").count(),
+                "{name}: one case per in_policy_matrix_bin output"
+            );
+            entry
         } else {
             let entry = json_object(outputs, name);
             assert_eq!(
@@ -597,13 +618,49 @@ fn image_fixtures_match_manifest() {
             "{name}: sha256 differs from MANIFEST.json; regenerate with scripts/gen_image_fixtures.py"
         );
     }
+    let images: Vec<&str> = IMAGE_FIXTURES
+        .iter()
+        .copied()
+        .filter(|n| n.ends_with(".bin") && *n != POLICY_MATRIX_BIN)
+        .collect();
     assert_eq!(
         outputs.matches("\"sha256\":").count(),
-        IMAGE_FIXTURES
-            .iter()
-            .filter(|n| n.ends_with(".bin"))
-            .count(),
+        images.len(),
         "MANIFEST.json lists exactly the fixture images"
+    );
+    // SHA-46: every output carries its three policy cells and whether policy-matrix.bin
+    // indexes it; the mutations name their base and what they change.
+    assert_eq!(outputs.matches("\"policy\": {").count(), images.len());
+    for name in &images {
+        let entry = json_object(outputs, name);
+        let policy = json_object(entry, "policy");
+        for key in POLICY_KEYS {
+            assert!(
+                !json_field(policy, key).is_empty(),
+                "{name}: policy cell `{key}`"
+            );
+        }
+        let in_index = json_field(entry, "in_policy_matrix_bin");
+        assert_eq!(
+            in_index,
+            if *name == "mcuboot-ed25519-200k.bin" {
+                "false"
+            } else {
+                "true"
+            },
+            "{name}"
+        );
+        if entry.contains("\"derived_from\": ") {
+            let base = json_field(entry, "derived_from");
+            assert!(images.contains(&base), "{name}: base {base}");
+            assert!(!json_field(entry, "mutation").is_empty(), "{name}");
+            assert_eq!(json_field(entry, "imgtool_verify"), "false", "{name}");
+        }
+    }
+    assert_eq!(
+        outputs.matches("\"derived_from\": ").count(),
+        18,
+        "the eighteen SHA-46 mutations"
     );
     // SHA-42: the 200 KB image for the chunked digest, with its own body and slot size.
     let big = json_object(outputs, "mcuboot-ed25519-200k.bin");

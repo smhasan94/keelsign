@@ -36,6 +36,34 @@ Images (all: header size 0x200, version 1.2.3+4, the same 1,536-byte body):
     do not verify (`verifiable: false`) until a real ML-DSA signer is pinned.
   * keelsign-dual-pq-invalid.bin: one key ID and two PQ signature TLVs (LMS, then
     ML-DSA-44 filler); must fail with MultiplePqSignatures.
+  * keelsign-hybrid-ed25519-mldsa44.bin (SHA-46): imgtool Ed25519 plus an ML-DSA-44
+    filler half (real Ed25519, `verifiable: false`).
+  * keelsign-hybrid-protected-tlvs.bin (SHA-46): the hybrid layout with protected
+    SEC_CNT 7 and vendor TLV 0x10A0.
+  * keelsign-hybrid-reserved-tlv-protected.bin (SHA-46): the hybrid layout plus imgtool
+    `--custom-tlv 0x4ba0 <16 bytes>`, a keelsign-block TLV in the protected area (inside
+    M; both signatures are valid over that M); verify rejects it.
+
+Policy mutations (SHA-46): deterministic edits of keelsign-hybrid-ed25519-lms.bin (and
+one of keelsign-hybrid-protected-tlvs.bin) as regenerated in the same run, listed in
+MUTATIONS with what they change. They are not re-signed: imgtool would reject most of
+them (`imgtool_verify: false`), and the manifest records `derived_from` and `mutation`.
+The key fields are copied from the base so tests can build its trusted key.
+
+Policy expectations (SHA-46): every output's MANIFEST.json entry has a `policy` object,
+the verdict of `keelsign_verify::verify` under each policy (`classical_only`,
+`pq_only`, `hybrid`), with `DefaultBackend::new()`, the image's own PQ key (if any) and
+the Ed25519 test key trusted, and the `ed25519` feature on. The strings are the table
+POLICY_CODES; docs/policy.md's matrix, keelsign-verify/tests/policy_matrix.rs and
+benches/policy-kat are checked against them.
+
+policy-matrix.bin ("KSPM v1", little-endian) is the index benches/policy-kat runs on
+the boards: b"KSPM", u16 version (1), u16 count, then per case u8 name_len, name (UTF-8,
+the manifest name), u8 pq_alg (0 none, 1 MlDsa44, 2 MlDsa65, 3 LmsHss), u16 pk_len,
+the PQ public key, and one u8 expectation code per policy (ClassicalOnly, PqOnly,
+Hybrid): the index of the verdict string in POLICY_CODES. It holds every output with
+`in_policy_matrix_bin: true` (all but the 200 KB image), sorted by name, and no image
+bytes.
 
 Golden MCUboot images (SHA-35), plain imgtool output with no keelsign TLVs, for the
 keelsign-verify image parser. All are signed with `--public-key-format hash`, security
@@ -182,7 +210,8 @@ GOLDEN = [
 ]
 
 # name, description, PQ signatures ("lms:<label>" / "mldsa44" / "mldsa65"), LMS parameter
-# sets per level, protected extras, Ed25519, expected verify_pq result.
+# sets per level, protected extras (SEC_CNT and the vendor TLV), Ed25519, expected
+# verify_pq result.
 LMS_M32_H5 = ["LMS_SHA256_M32_H5"]
 IMAGES = [
     ("keelsign-lms-m32-h5.bin", "LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, HSS L=1",
@@ -202,7 +231,254 @@ IMAGES = [
     ("keelsign-dual-pq-invalid.bin",
      "invalid: one key ID and two PQ signature TLVs (LMS M32_H5, then ML-DSA-44 filler)",
      ["lms", "mldsa44"], LMS_M32_H5, False, False, "MultiplePqSignatures"),
+    # SHA-46 policy matrix.
+    ("keelsign-hybrid-ed25519-mldsa44.bin",
+     "hybrid: imgtool Ed25519 (KEYHASH + ED25519) plus an ML-DSA-44 filler signature (does not verify)",
+     ["mldsa44"], None, False, True, "UnsupportedAlgorithm"),
+    ("keelsign-hybrid-protected-tlvs.bin",
+     "hybrid Ed25519 + LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, HSS L=1, with protected SEC_CNT and vendor TLV 0x10A0",
+     ["lms"], LMS_M32_H5, True, True, "Ok"),
+    ("keelsign-hybrid-reserved-tlv-protected.bin",
+     "invalid: hybrid Ed25519 + LMS M32_H5 with a keelsign key-ID-typed TLV 0x4BA0 in the protected area (imgtool --custom-tlv)",
+     ["lms"], LMS_M32_H5, False, True, "Ok"),
 ]
+
+# Extra imgtool `--custom-tlv` TLVs (protected area) per image (SHA-46).
+EXTRA_PROTECTED = {
+    "keelsign-hybrid-reserved-tlv-protected.bin": [
+        (0x4BA0, hashlib.sha256(b"keelsign SHA-46 reserved TLV in the protected area").digest()[:16]),
+    ],
+}
+
+TLV_SHA384 = 0x11
+TLV_SIG_PURE = 0x25
+IMAGE_F_ENCRYPTED_AES128 = 0x04
+IMAGE_F_NON_BOOTABLE = 0x10
+IMAGE_F_COMPRESSED_LZMA2 = 0x400
+HYBRID_BASE = "keelsign-hybrid-ed25519-lms.bin"
+HYBRID_PROTECTED_BASE = "keelsign-hybrid-protected-tlvs.bin"
+
+
+def _tlv_index(tlvs, kind):
+    found = [i for i, (k, _) in enumerate(tlvs) if k == kind]
+    if len(found) != 1:
+        sys.exit(f"mutation: expected exactly one TLV {kind:#06x}, found {len(found)}")
+    return found[0]
+
+
+def _flip_value(kind, at):
+    def mutate(image):
+        tlvs = image["unprotected"]
+        i = _tlv_index(tlvs, kind)
+        value = bytearray(tlvs[i][1])
+        value[at] ^= 0x01
+        tlvs[i] = (kind, bytes(value))
+    return mutate
+
+
+def _remove(kind):
+    def mutate(image):
+        tlvs = image["unprotected"]
+        del tlvs[_tlv_index(tlvs, kind)]
+    return mutate
+
+
+def _duplicate(*kinds):
+    def mutate(image):
+        tlvs = image["unprotected"]
+        first = _tlv_index(tlvs, kinds[0])
+        run_ = tlvs[first:first + len(kinds)]
+        if [k for k, _ in run_] != list(kinds):
+            sys.exit(f"mutation: TLVs {kinds} are not adjacent")
+        tlvs[first + len(kinds):first + len(kinds)] = run_
+    return mutate
+
+
+def _truncate(kind, length):
+    def mutate(image):
+        tlvs = image["unprotected"]
+        i = _tlv_index(tlvs, kind)
+        tlvs[i] = (kind, tlvs[i][1][:length])
+    return mutate
+
+
+def _set_flags(flag):
+    def mutate(image):
+        head = bytearray(image["head"])
+        (flags,) = struct.unpack_from("<I", head, 16)
+        struct.pack_into("<I", head, 16, flags | flag)
+        image["head"] = bytes(head)
+        image["flags"] = flags | flag
+    return mutate
+
+
+def _flip_body(image):
+    head = bytearray(image["head"])
+    head[image["hdr_size"]] ^= 0x01
+    image["head"] = bytes(head)
+
+
+def _sha384_only(image):
+    data = encode_image(image)
+    hashed = data[: image["hdr_size"] + image["img_size"] + image["prot_size"]]
+    tlvs = image["unprotected"]
+    tlvs[_tlv_index(tlvs, TLV_SHA256)] = (TLV_SHA384, hashlib.sha384(hashed).digest())
+
+
+def _append_sig_pure(image):
+    image["unprotected"].append((TLV_SIG_PURE, b"\x01"))
+
+
+def _duplicate_protected_sec_cnt(image):
+    prot = image["protected"]
+    i = [k for k, _ in prot].index(TLV_SEC_CNT)
+    prot.insert(i + 1, prot[i])
+    size = len(encode_tlvs(prot, TLV_PROT_INFO_MAGIC))
+    head = bytearray(image["head"])
+    struct.pack_into("<H", head, 10, size)
+    image["head"] = bytes(head)
+    image["prot_size"] = size
+
+
+# name, base, mutation, description (SHA-46). Deterministic edits of the base image as
+# regenerated in the same run; nothing is re-signed.
+MUTATIONS = [
+    ("keelsign-hybrid-bad-ed25519.bin", HYBRID_BASE, _flip_value(TLV_ED25519, 0),
+     "ED25519 TLV value byte 0 ^= 0x01"),
+    ("keelsign-hybrid-bad-pq.bin", HYBRID_BASE, _flip_value(0x4BA3, -1),
+     "LMS/HSS signature TLV (0x4BA3) last byte ^= 0x01"),
+    ("keelsign-hybrid-missing-pq.bin", HYBRID_BASE, _remove(0x4BA3),
+     "LMS/HSS signature TLV (0x4BA3) removed"),
+    ("keelsign-hybrid-missing-key-id.bin", HYBRID_BASE, _remove(0x4BA0),
+     "key-ID TLV (0x4BA0) removed"),
+    ("keelsign-hybrid-unpaired-ed25519.bin", HYBRID_BASE, _remove(TLV_KEYHASH),
+     "KEYHASH TLV removed: the ED25519 TLV follows the SHA256 TLV"),
+    ("keelsign-hybrid-keyhash-only.bin", HYBRID_BASE, _remove(TLV_ED25519),
+     "ED25519 TLV removed: KEYHASH alone"),
+    ("keelsign-hybrid-two-ed25519.bin", HYBRID_BASE, _duplicate(TLV_KEYHASH, TLV_ED25519),
+     "the KEYHASH + ED25519 pair duplicated"),
+    ("keelsign-hybrid-short-ed25519.bin", HYBRID_BASE, _truncate(TLV_ED25519, 63),
+     "ED25519 TLV value truncated to 63 bytes"),
+    ("keelsign-hybrid-bad-body.bin", HYBRID_BASE, _flip_body,
+     "body byte 0 ^= 0x01"),
+    ("keelsign-hybrid-bad-sha256.bin", HYBRID_BASE, _flip_value(TLV_SHA256, 0),
+     "SHA256 TLV value byte 0 ^= 0x01"),
+    ("keelsign-hybrid-no-sha256.bin", HYBRID_BASE, _remove(TLV_SHA256),
+     "SHA256 TLV removed"),
+    ("keelsign-hybrid-two-sha256.bin", HYBRID_BASE, _duplicate(TLV_SHA256),
+     "SHA256 TLV duplicated"),
+    ("keelsign-hybrid-sha384-only.bin", HYBRID_BASE, _sha384_only,
+     "SHA256 TLV replaced by a SHA384 TLV (0x11) of the hashed bytes"),
+    ("keelsign-hybrid-sig-pure.bin", HYBRID_BASE, _append_sig_pure,
+     "SIG_PURE TLV (0x25) = 01 appended"),
+    ("keelsign-hybrid-flag-encrypted.bin", HYBRID_BASE, _set_flags(IMAGE_F_ENCRYPTED_AES128),
+     "ih_flags |= IMAGE_F_ENCRYPTED_AES128 (0x04)"),
+    ("keelsign-hybrid-flag-compressed.bin", HYBRID_BASE, _set_flags(IMAGE_F_COMPRESSED_LZMA2),
+     "ih_flags |= IMAGE_F_COMPRESSED_LZMA2 (0x400)"),
+    ("keelsign-hybrid-flag-non-bootable.bin", HYBRID_BASE, _set_flags(IMAGE_F_NON_BOOTABLE),
+     "ih_flags |= IMAGE_F_NON_BOOTABLE (0x10)"),
+    ("keelsign-hybrid-two-sec-cnt.bin", HYBRID_PROTECTED_BASE, _duplicate_protected_sec_cnt,
+     "protected SEC_CNT duplicated (ih_protect_tlv_size and it_tlv_tot re-encoded)"),
+]
+
+# The verdict strings of the policy matrix, numbered: the expectation codes of
+# policy-matrix.bin (mirrored by benches/policy-kat's `Expect`). A string is
+# `Ok`, a flat `keelsign_verify::Error` variant, or a wrapped one as Rust's Debug prints
+# it, except that a TLV type is printed as 0x%04X.
+POLICY_CODES = [
+    "Ok",
+    "Parse(BadMagic)",
+    "MissingPqSignature",
+    "MissingKeyId",
+    "MultiplePqSignatures",
+    "SignatureInvalid",
+    "UnsupportedAlgorithm(MlDsa44)",
+    "UnsupportedAlgorithm(MlDsa65)",
+    "Ed25519(Missing)",
+    "Ed25519(Multiple)",
+    "Ed25519(Unpaired)",
+    "Ed25519(InvalidSignatureLength)",
+    "Ed25519(SignatureInvalid)",
+    "Image(Encrypted)",
+    "Image(Compressed)",
+    "Image(NonBootable)",
+    "Image(KeelsignTlvProtected(0x4BA0))",
+    "Image(SigPure)",
+    "Image(MissingSha256Tlv)",
+    "Image(MultipleSha256Tlvs)",
+    "Image(MultipleSecurityCounters)",
+    "Image(DigestMismatch)",
+]
+
+POLICIES = ("classical_only", "pq_only", "hybrid")
+
+
+def _cells(classical_only, pq_only, hybrid):
+    return {"classical_only": classical_only, "pq_only": pq_only, "hybrid": hybrid}
+
+
+def _all(verdict):
+    return _cells(verdict, verdict, verdict)
+
+
+# An Ed25519-only golden passes the classical half under Hybrid (its pair is valid), so
+# the PQ half decides.
+_ED_ONLY_GOLDEN = _cells("Ok", "MissingPqSignature", "MissingPqSignature")
+_OTHER_GOLDEN = _cells("Ed25519(Missing)", "MissingPqSignature", "Ed25519(Missing)")
+_PQ_ONLY_LMS = _cells("Ed25519(Missing)", "Ok", "Ed25519(Missing)")
+
+# The expected verify verdicts of every output under (ClassicalOnly, PqOnly, Hybrid):
+# DefaultBackend::new(), the image's own PQ key (if any) and the Ed25519 test key
+# trusted, the `ed25519` feature on. The ML-DSA halves are fillers until SHA-44, and
+# DefaultBackend answers ML-DSA with UnsupportedAlgorithm whether or not `ml-dsa` is on.
+POLICY = {
+    "keelsign-lms-m32-h5.bin": _PQ_ONLY_LMS,
+    "keelsign-hss2-m32-h5h5.bin": _PQ_ONLY_LMS,
+    "keelsign-lms-protected-tlvs.bin": _PQ_ONLY_LMS,
+    "keelsign-hybrid-ed25519-lms.bin": _all("Ok"),
+    "keelsign-mldsa44.bin": _cells("Ed25519(Missing)", "UnsupportedAlgorithm(MlDsa44)",
+                                   "Ed25519(Missing)"),
+    "keelsign-mldsa65.bin": _cells("Ed25519(Missing)", "UnsupportedAlgorithm(MlDsa65)",
+                                   "Ed25519(Missing)"),
+    "keelsign-dual-pq-invalid.bin": _cells("Ed25519(Missing)", "MultiplePqSignatures",
+                                           "Ed25519(Missing)"),
+    "keelsign-hybrid-ed25519-mldsa44.bin": _cells("Ok", "UnsupportedAlgorithm(MlDsa44)",
+                                                  "UnsupportedAlgorithm(MlDsa44)"),
+    "keelsign-hybrid-protected-tlvs.bin": _all("Ok"),
+    "keelsign-hybrid-reserved-tlv-protected.bin": _all("Image(KeelsignTlvProtected(0x4BA0))"),
+    "keelsign-hybrid-bad-ed25519.bin": _cells("Ed25519(SignatureInvalid)", "Ok",
+                                              "Ed25519(SignatureInvalid)"),
+    "keelsign-hybrid-bad-pq.bin": _cells("Ok", "SignatureInvalid", "SignatureInvalid"),
+    "keelsign-hybrid-missing-pq.bin": _cells("Ok", "MissingPqSignature", "MissingPqSignature"),
+    "keelsign-hybrid-missing-key-id.bin": _cells("Ok", "MissingKeyId", "MissingKeyId"),
+    "keelsign-hybrid-unpaired-ed25519.bin": _cells("Ed25519(Unpaired)", "Ok", "Ed25519(Unpaired)"),
+    "keelsign-hybrid-keyhash-only.bin": _cells("Ed25519(Missing)", "Ok", "Ed25519(Missing)"),
+    "keelsign-hybrid-two-ed25519.bin": _cells("Ed25519(Multiple)", "Ok", "Ed25519(Multiple)"),
+    "keelsign-hybrid-short-ed25519.bin": _cells("Ed25519(InvalidSignatureLength)", "Ok",
+                                                "Ed25519(InvalidSignatureLength)"),
+    "keelsign-hybrid-bad-body.bin": _all("Image(DigestMismatch)"),
+    "keelsign-hybrid-bad-sha256.bin": _all("Image(DigestMismatch)"),
+    "keelsign-hybrid-no-sha256.bin": _all("Image(MissingSha256Tlv)"),
+    "keelsign-hybrid-two-sha256.bin": _all("Image(MultipleSha256Tlvs)"),
+    "keelsign-hybrid-sha384-only.bin": _all("Image(MissingSha256Tlv)"),
+    "keelsign-hybrid-sig-pure.bin": _all("Image(SigPure)"),
+    "keelsign-hybrid-flag-encrypted.bin": _all("Image(Encrypted)"),
+    "keelsign-hybrid-flag-compressed.bin": _all("Image(Compressed)"),
+    "keelsign-hybrid-flag-non-bootable.bin": _all("Image(NonBootable)"),
+    "keelsign-hybrid-two-sec-cnt.bin": _all("Image(MultipleSecurityCounters)"),
+    "mcuboot-rsa2048.bin": _OTHER_GOLDEN,
+    "mcuboot-ecdsa-p256.bin": _OTHER_GOLDEN,
+    "mcuboot-ed25519.bin": _ED_ONLY_GOLDEN,
+    "mcuboot-ed25519-padded.bin": _ED_ONLY_GOLDEN,
+    "rejected/mcuboot-ed25519-bigendian.bin": _all("Parse(BadMagic)"),
+    "mcuboot-ed25519-200k.bin": _ED_ONLY_GOLDEN,
+}
+
+# Outputs left out of policy-matrix.bin (the on-target index): the 200 KB image, which
+# the SHA-42 board test already reads from flash.
+NOT_IN_POLICY_MATRIX_BIN = {"mcuboot-ed25519-200k.bin"}
+POLICY_MATRIX_BIN = "policy-matrix.bin"
+PQ_ALG_CODES = {None: 0, "MlDsa44": 1, "MlDsa65": 2, "LmsHss": 3}
 
 
 def load_lms_generator():
@@ -268,7 +544,7 @@ def tool_versions(imgtool):
     return {"imgtool": version, "cryptography": cryptography, "imgtool_requirement": f"imgtool=={IMGTOOL_VERSION}"}
 
 
-def imgtool_sign(imgtool, tmp, name, body, protected, ed25519_key):
+def imgtool_sign(imgtool, tmp, name, body, protected, ed25519_key, extra_protected=()):
     raw = tmp / f"{name}.body"
     out = tmp / f"{name}.signed.bin"
     raw.write_bytes(body)
@@ -277,6 +553,8 @@ def imgtool_sign(imgtool, tmp, name, body, protected, ed25519_key):
     if protected:
         cmd += ["--security-counter", str(SECURITY_COUNTER),
                 "--custom-tlv", hex(PROTECTED_VENDOR_TLV), "0x" + PROTECTED_VENDOR_VALUE.hex()]
+    for tag, value in extra_protected:
+        cmd += ["--custom-tlv", hex(tag), "0x" + value.hex()]
     if ed25519_key:
         cmd += ["--key", str(ed25519_key), "--public-key-format", "hash"]
     run(cmd + [str(raw), str(out)])
@@ -570,12 +848,14 @@ def generate(out_dir, imgtool, resign=False):
         "outputs": {},
     }
 
+    outputs = {}
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         hsslms = lms.vendor_hsslms(lms.fetch("hsslms"), tmp)
         for name, description, pq, lms_levels, protected, ed25519, expect in IMAGES:
             stem = name.removesuffix(".bin")
-            signed = imgtool_sign(imgtool, tmp, stem, body, protected, key_path if ed25519 else None)
+            signed = imgtool_sign(imgtool, tmp, stem, body, protected, key_path if ed25519 else None,
+                                  EXTRA_PROTECTED.get(name, ()))
             image = decode_image(signed)
             if encode_image(image) != signed:
                 sys.exit(f"{name}: imgtool output does not round-trip through the codec")
@@ -611,6 +891,7 @@ def generate(out_dir, imgtool, resign=False):
             if decode_image(data)["unprotected"] != image["unprotected"] or digest_of(data, image) != m:
                 sys.exit(f"{name}: appending the keelsign TLVs changed the image")
             (out_dir / name).write_bytes(data)
+            outputs[name] = data
             imgtool_verify(imgtool, out_dir / name, key_path if ed25519 else None)
 
             if ed25519:
@@ -639,10 +920,108 @@ def generate(out_dir, imgtool, resign=False):
                 **layout_fields(decode_image(data)),
             }
 
+        generate_mutations(out_dir, outputs, manifest)
         generate_golden(out_dir, imgtool, lms, tmp, body, manifest, resign)
 
+    add_policy(out_dir, manifest)
     (out_dir / "MANIFEST.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     return manifest
+
+
+def generate_mutations(out_dir, outputs, manifest):
+    """The SHA-46 policy mutations of the hybrid images, from the bytes written in this run."""
+    for name, base, mutate, description in MUTATIONS:
+        image = decode_image(outputs[base])
+        mutate(image)
+        data = encode_image(image)
+        decoded = decode_image(data)
+        if data == outputs[base]:
+            sys.exit(f"{name}: the mutation changed nothing")
+        (out_dir / name).write_bytes(data)
+        outputs[name] = data
+        base_entry = manifest["outputs"][base]
+        manifest["outputs"][name] = {
+            "description": f"mutation of {base}: {description}",
+            "derived_from": base,
+            "mutation": description,
+            "bytes": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "algorithm": base_entry["algorithm"],
+            "public_key_hex": base_entry["public_key_hex"],
+            "key_id_hex": base_entry["key_id_hex"],
+            "ed25519": base_entry["ed25519"],
+            "digest_hex": digest_of(data, decoded).hex(),
+            "protected_tlvs": " ".join(f"{k:#06x}" for k, _ in decoded["protected"] or []),
+            "unprotected_tlvs": " ".join(f"{k:#06x}" for k, _ in decoded["unprotected"]),
+            "expect_parse": "Ok",
+            "imgtool_verify": False,
+            **layout_fields(decoded),
+        }
+
+
+def add_policy(out_dir, manifest):
+    """The `policy` cells of every output and policy-matrix.bin (SHA-46)."""
+    outputs = manifest["outputs"]
+    if set(POLICY) != set(outputs):
+        sys.exit(f"POLICY and the outputs differ: {sorted(set(POLICY) ^ set(outputs))}")
+    cases = []
+    for name, entry in sorted(outputs.items()):
+        cells = POLICY[name]
+        if tuple(cells) != POLICIES or any(v not in POLICY_CODES for v in cells.values()):
+            sys.exit(f"{name}: bad policy cells {cells}")
+        entry["policy"] = dict(cells)
+        entry["in_policy_matrix_bin"] = name not in NOT_IN_POLICY_MATRIX_BIN
+        if entry["in_policy_matrix_bin"]:
+            cases.append((name, entry))
+    index = bytearray(b"KSPM" + struct.pack("<HH", 1, len(cases)))
+    for name, entry in cases:
+        raw_name = name.encode()
+        pk = bytes.fromhex(entry.get("public_key_hex", ""))
+        index += struct.pack("<B", len(raw_name)) + raw_name
+        index += struct.pack("<BH", PQ_ALG_CODES[entry.get("algorithm")], len(pk)) + pk
+        index += bytes(POLICY_CODES.index(entry["policy"][p]) for p in POLICIES)
+    # Self-check: the index decodes back to the manifest.
+    if decode_policy_matrix(bytes(index)) != [
+        (name, entry.get("algorithm"), entry.get("public_key_hex", ""), [entry["policy"][p] for p in POLICIES])
+        for name, entry in cases
+    ]:
+        sys.exit("policy-matrix.bin does not decode back to the manifest")
+    (out_dir / POLICY_MATRIX_BIN).write_bytes(bytes(index))
+    manifest["policy_matrix"] = {
+        POLICY_MATRIX_BIN: {
+            "note": "KSPM v1 index of the policy matrix for benches/policy-kat (no image bytes)",
+            "bytes": len(index),
+            "sha256": hashlib.sha256(index).hexdigest(),
+            "count": len(cases),
+        },
+        "codes": {str(i): verdict for i, verdict in enumerate(POLICY_CODES)},
+        "policies": list(POLICIES),
+    }
+
+
+def decode_policy_matrix(data):
+    """[(name, algorithm, public key hex, [verdict per policy])] of a KSPM v1 index."""
+    if data[:4] != b"KSPM":
+        raise ValueError("not a KSPM index")
+    version, count = struct.unpack_from("<HH", data, 4)
+    if version != 1:
+        raise ValueError(f"KSPM version {version}")
+    algorithms = {v: k for k, v in PQ_ALG_CODES.items()}
+    off, cases = 8, []
+    for _ in range(count):
+        n = data[off]
+        name = data[off + 1:off + 1 + n].decode()
+        off += 1 + n
+        alg, pk_len = struct.unpack_from("<BH", data, off)
+        off += 3
+        pk = data[off:off + pk_len]
+        off += pk_len
+        codes = data[off:off + 3]
+        off += 3
+        cases.append((name, algorithms[alg], pk.hex(), [POLICY_CODES[c] for c in codes]))
+    if off != len(data):
+        raise ValueError("trailing bytes in the KSPM index")
+    return cases
 
 
 def generate_golden(out_dir, imgtool, lms, tmp, body, manifest, resign):
@@ -763,7 +1142,8 @@ def run_bytes(cmd):
 def committed_files():
     sigs = [sig for _, _, sig in GOLDEN_KEYS.values() if sig]
     return (["MANIFEST.json", KEY_PEM, KEY_SPKI, RSA_KEY_PEM, ECDSA_KEY_PEM] + sigs
-            + [name for name, *_ in IMAGES] + [name for name, *_ in GOLDEN])
+            + [name for name, *_ in IMAGES] + [name for name, *_ in GOLDEN]
+            + [name for name, *_ in MUTATIONS] + [POLICY_MATRIX_BIN])
 
 
 def without_tools(manifest_text):
@@ -809,6 +1189,23 @@ def check(imgtool):
         listed = dumpinfo_tlvs(imgtool, path)
         if listed != expected:
             sys.exit(f"{name}: imgtool dumpinfo lists {listed}, MANIFEST.json {expected}")
+    # 1c. The SHA-46 mutations decode and re-encode byte-identically (they are not
+    #     imgtool-verifiable by design), and policy-matrix.bin decodes to MANIFEST.json.
+    for name, *_ in MUTATIONS:
+        data = (FIXTURE_DIR / name).read_bytes()
+        try:
+            image = decode_image(data)
+        except ValueError as e:
+            sys.exit(f"{name}: does not decode: {e}")
+        if encode_image(image) != data:
+            sys.exit(f"{name}: decode + re-encode is not byte-identical")
+    indexed = decode_policy_matrix((FIXTURE_DIR / POLICY_MATRIX_BIN).read_bytes())
+    expected = [
+        (name, entry.get("algorithm"), entry.get("public_key_hex", ""), [entry["policy"][p] for p in POLICIES])
+        for name, entry in sorted(manifest["outputs"].items()) if entry["in_policy_matrix_bin"]
+    ]
+    if indexed != expected:
+        sys.exit(f"{POLICY_MATRIX_BIN} does not match the MANIFEST.json policy cells")
     # 2. A fresh regeneration (with the committed signatures) matches the committed files.
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
@@ -828,8 +1225,9 @@ def check(imgtool):
     if differ:
         sys.exit(f"fixtures differ from a fresh regeneration: {', '.join(differ)}")
     little = sum(1 for *_, endian, _expect in GOLDEN if endian == "little")
-    print(f"{len(IMAGES) + len(GOLDEN)} images decode and re-encode byte-identically and "
-          f"{len(IMAGES) + little} little-endian ones pass imgtool verify")
+    print(f"{len(IMAGES) + len(GOLDEN) + len(MUTATIONS)} images decode and re-encode byte-identically and "
+          f"{len(IMAGES) + little} little-endian signed ones pass imgtool verify")
+    print(f"{POLICY_MATRIX_BIN} ({len(indexed)} cases) matches the MANIFEST.json policy cells")
     print(f"imgtool dumpinfo TLV listings match MANIFEST.json for {little} golden images")
     print("fixtures match a fresh regeneration")
 
