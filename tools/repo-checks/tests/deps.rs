@@ -129,6 +129,23 @@ fn ml_dsa_pinned_exact_and_patched() {
         );
     }
 
+    // SHA-49: the keelsign host CLI's ml-dsa dependency (key generation), pinned the same
+    // way.
+    let manifest = read("keelsign/Cargo.toml");
+    let line = manifest
+        .lines()
+        .find(|l| l.starts_with("ml-dsa = {"))
+        .expect("keelsign must depend on ml-dsa");
+    for needle in [
+        format!("version = \"={ML_DSA_PIN}\""),
+        "default-features = false".to_owned(),
+    ] {
+        assert!(
+            line.contains(&needle),
+            "keelsign: ml-dsa must have `{needle}`: `{line}`"
+        );
+    }
+
     for lockfile in LOCKFILES {
         let lock = read(lockfile);
         let versions: Vec<String> = lock_packages(&lock)
@@ -237,6 +254,21 @@ fn ed25519_dalek_pinned_exact() {
         assert!(
             line.contains(&needle),
             "ed25519-dalek must have `{needle}`: `{line}`"
+        );
+    }
+    // SHA-49: the keelsign host CLI's ed25519-dalek dependency, pinned the same way.
+    let manifest = read("keelsign/Cargo.toml");
+    let line = manifest
+        .lines()
+        .find(|l| l.starts_with("ed25519-dalek = {"))
+        .expect("keelsign must depend on ed25519-dalek");
+    for needle in [
+        format!("version = \"={ED25519_DALEK_PIN}\""),
+        "default-features = false".to_owned(),
+    ] {
+        assert!(
+            line.contains(&needle),
+            "keelsign: ed25519-dalek must have `{needle}`: `{line}`"
         );
     }
     // Every lockfile that builds keelsign-verify with `ed25519` resolves exactly these.
