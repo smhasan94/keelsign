@@ -65,6 +65,7 @@
 //!
 //! [spec]: https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md
 
+use core::cmp::Ordering;
 use core::fmt;
 use core::ops::Range;
 
@@ -193,8 +194,14 @@ impl core::error::Error for ParseError {}
 
 /// `struct image_version`: `major.minor.revision+build_num`.
 ///
-/// It deliberately has no ordering: comparing versions (anti-rollback) is policy
-/// (SHA-46).
+/// It deliberately implements no [`Ord`]: whether `build_num` takes part in a comparison
+/// is a device decision, so the caller picks one of the two explicit comparators for its
+/// anti-rollback check (SHA-46, docs/policy.md):
+///
+/// - [`ImageVersion::cmp_ignoring_build_num`]: `(major, minor, revision)` only, MCUboot's
+///   default `boot_version_cmp`;
+/// - [`ImageVersion::cmp_with_build_num`]: then `build_num`, MCUboot built with
+///   `MCUBOOT_VERSION_CMP_USE_BUILD_NUMBER`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ImageVersion {
     /// `iv_major`.
@@ -205,6 +212,22 @@ pub struct ImageVersion {
     pub revision: u16,
     /// `iv_build_num`.
     pub build_num: u32,
+}
+
+impl ImageVersion {
+    /// Compare `major`, then `minor`, then `revision`; `build_num` is ignored, so
+    /// `1.2.3+4` and `1.2.3+9` are [`Ordering::Equal`]. This is MCUboot's default
+    /// `boot_version_cmp`, used for its downgrade prevention.
+    pub fn cmp_ignoring_build_num(&self, other: &ImageVersion) -> Ordering {
+        (self.major, self.minor, self.revision).cmp(&(other.major, other.minor, other.revision))
+    }
+
+    /// Compare `major`, `minor`, `revision`, then `build_num`: MCUboot's `boot_version_cmp`
+    /// when built with `MCUBOOT_VERSION_CMP_USE_BUILD_NUMBER`.
+    pub fn cmp_with_build_num(&self, other: &ImageVersion) -> Ordering {
+        self.cmp_ignoring_build_num(other)
+            .then(self.build_num.cmp(&other.build_num))
+    }
 }
 
 /// The header's `ih_flags` (`IMAGE_F_*`), exposed but not acted on (SHA-46).
@@ -514,6 +537,8 @@ impl<'a> From<Tlv<'a>> for (u16, &'a [u8]) {
 /// A validated TLV area (protected or unprotected).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TlvArea<'a> {
+    /// The whole area, its info header included.
+    bytes: &'a [u8],
     /// The TLVs, after the info header.
     tlvs: &'a [u8],
     /// Offset of the info header in the image, and of the area's end.
@@ -531,6 +556,15 @@ impl<'a> TlvArea<'a> {
     /// Whether this is the protected area.
     pub fn is_protected(&self) -> bool {
         self.protected
+    }
+
+    /// The area's bytes as parsed, its 4-byte info header included: exactly
+    /// [`range`](Self::range) of the image. For the protected area these are the bytes
+    /// the image digest `M` ends with, and
+    /// [`image_digest`](crate::digest::image_digest) hashes them from here rather than
+    /// re-reading them from storage (SHA-46).
+    pub fn bytes(&self) -> &'a [u8] {
+        self.bytes
     }
 
     /// The area's TLVs, in order. Never fails: the area was validated when the image was
@@ -752,11 +786,11 @@ impl<'a> Image<'a> {
     /// - The bytes hashed over [`Image::hashed_range`] start with the header bytes in
     ///   `raw`: the header must not be re-read from storage that could have changed
     ///   between parsing and hashing. [`image_digest`](crate::digest::image_digest) hashes
-    ///   [`Image::raw_header`] for this reason. Only the header is pinned:
-    ///   [`image_digest`](crate::digest::image_digest) re-reads the protected TLV bytes
-    ///   from the reader, so the bytes hashed are not the `tlv_bytes` copy that
-    ///   [`Image::protected`] exposes (as in MCUboot); policy on protected TLV contents
-    ///   (SHA-46) must allow for that.
+    ///   [`Image::raw_header`] for this reason, and likewise hashes the protected TLV
+    ///   area from the `tlv_bytes` copy ([`TlvArea::bytes`]) rather than re-reading it
+    ///   (SHA-46): the header and protected TLVs that [`Image::header`] and
+    ///   [`Image::protected`] expose (the version, the security counter) are exactly the
+    ///   bytes hashed. Only the body is streamed from storage, as in MCUboot.
     pub fn parse_parts(raw: RawHeader, tlv_bytes: &'a [u8]) -> Result<Image<'a>, ParseError> {
         let header = raw.header;
         let tlv_offset = header.tlv_offset()?;
@@ -866,15 +900,17 @@ fn area(
     let end = start
         .checked_add(u32::from(tlv_tot))
         .ok_or(ParseError::SizeOverflow)?;
-    let tlvs = bytes
-        .get(TLV_INFO_SIZE..usize::from(tlv_tot))
+    let whole = bytes
+        .get(..usize::from(tlv_tot))
         .ok_or(ParseError::Truncated)?;
+    let tlvs = whole.get(TLV_INFO_SIZE..).ok_or(ParseError::Truncated)?;
     let mut rest = tlvs;
     while !rest.is_empty() {
         let (_, _, next) = split_tlv(rest)?;
         rest = next;
     }
     Ok(TlvArea {
+        bytes: whole,
         tlvs,
         start,
         end,
@@ -2307,13 +2343,67 @@ mod tests {
         );
         assert!(size_of::<TlvKind>() <= 4, "{}", size_of::<TlvKind>());
         assert!(size_of::<Tlv<'_>>() <= 3 * size_of::<usize>());
-        assert!(size_of::<TlvArea<'_>>() <= 4 * size_of::<usize>());
+        // Two slices (the whole area, SHA-46, and its TLVs), two offsets and a flag.
+        assert!(
+            size_of::<TlvArea<'_>>() <= 4 * size_of::<usize>() + 16,
+            "{}",
+            size_of::<TlvArea<'_>>()
+        );
         assert!(
             // The TLV areas, the header and its 32 raw bytes (SHA-42).
-            size_of::<Image<'_>>() <= 12 * size_of::<usize>() + 32,
+            size_of::<Image<'_>>() <= 16 * size_of::<usize>() + 32 + 24,
             "{}",
             size_of::<Image<'_>>()
         );
+    }
+
+    #[test]
+    fn version_cmp_ignoring_build_num_is_mcuboot_default_and_with_build_num_orders_builds() {
+        use core::cmp::Ordering::{Equal, Greater, Less};
+        let v = |major, minor, revision, build_num| ImageVersion {
+            major,
+            minor,
+            revision,
+            build_num,
+        };
+        let base = v(1, 2, 3, 4);
+        // (other, ignoring build_num, with build_num), each read as `base.cmp(other)`.
+        let cases = [
+            (v(1, 2, 3, 4), Equal, Equal),
+            (v(1, 2, 3, 9), Equal, Less),
+            (v(1, 2, 3, 0), Equal, Greater),
+            (v(1, 2, 4, 0), Less, Less),
+            (v(1, 2, 2, u32::MAX), Greater, Greater),
+            (v(1, 3, 0, 0), Less, Less),
+            (v(1, 1, u16::MAX, u32::MAX), Greater, Greater),
+            (v(2, 0, 0, 0), Less, Less),
+            (v(0, u8::MAX, u16::MAX, u32::MAX), Greater, Greater),
+        ];
+        for (other, ignoring, with) in cases {
+            assert_eq!(base.cmp_ignoring_build_num(&other), ignoring, "{other:?}");
+            assert_eq!(base.cmp_with_build_num(&other), with, "{other:?}");
+            // Antisymmetric.
+            assert_eq!(other.cmp_ignoring_build_num(&base), ignoring.reverse());
+            assert_eq!(other.cmp_with_build_num(&base), with.reverse());
+        }
+        // Lexicographic: revision outranks build_num, minor outranks revision, major
+        // outranks minor, whatever the lower fields hold.
+        assert_eq!(
+            v(1, 0, 1, 0).cmp_with_build_num(&v(1, 0, 0, u32::MAX)),
+            Greater
+        );
+        assert_eq!(
+            v(1, 1, 0, 0).cmp_ignoring_build_num(&v(1, 0, 9, 0)),
+            Greater
+        );
+        assert_eq!(
+            v(2, 0, 0, 0).cmp_ignoring_build_num(&v(1, 9, 9, 9)),
+            Greater
+        );
+        // Equal under both comparators exactly when equal as values (build_num included
+        // only by the second).
+        assert_eq!(v(1, 2, 3, 4).cmp_with_build_num(&v(1, 2, 3, 4)), Equal);
+        assert_eq!(v(1, 2, 3, 4), v(1, 2, 3, 4));
     }
 
     #[test]
