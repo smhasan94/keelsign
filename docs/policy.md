@@ -77,6 +77,70 @@ stack chain of a hybrid verify is about 12.8 KB, of which roughly 8 KB is Ed2551
 NAF lookup tables and frames), see the same
 [section](benchmarks.md#hybrid-verify-entry-point-sha-46).
 
+## The `ml-dsa` feature
+
+ML-DSA-44 and ML-DSA-65 signatures need the `ml-dsa` feature of `keelsign-verify` (off by
+default, SHA-44), which pulls in `ml-dsa` `=0.1.1` without default features (`no_std`,
+no heap, no `alloc`/`getrandom`/`pkcs8`) and checks each signature with
+`keelsign_verify::mldsa::verify`: pure FIPS 204 `ML-DSA.Verify` over `M` with the context
+`MLDSA_CONTEXT` ([docs/image-format.md](image-format.md#ml-dsa-context)), never
+HashML-DSA. `keelsign_verify::mldsa::is_enabled()` and `Algorithm::is_enabled` say which
+build is running.
+
+- **Without the feature**, the dispatcher answers `UnsupportedAlgorithm(MlDsa44)` or
+  `UnsupportedAlgorithm(MlDsa65)` after the key lookup and before any backend runs, under
+  every backend. Only the cells whose post-quantum half reaches the ML-DSA backend change;
+  image rules, the Ed25519 half and the key lookup (`KeyNotTrusted`) still come first.
+  These are the cells without the feature (the manifest's `policy_without_ml_dsa`; every
+  other cell is as in the [Policy matrix](#policy-matrix)):
+
+| Image | ClassicalOnly | PqOnly | Hybrid |
+|---|---|---|---|
+| `keelsign-hybrid-ed25519-mldsa44.bin` | `Ok` | `UnsupportedAlgorithm(MlDsa44)` | `UnsupportedAlgorithm(MlDsa44)` |
+| `keelsign-mldsa44-bad-body-rehashed.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa44)` | `Ed25519(Missing)` |
+| `keelsign-mldsa44-bad-hint.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa44)` | `Ed25519(Missing)` |
+| `keelsign-mldsa44-bad-protected-rehashed.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa44)` | `Ed25519(Missing)` |
+| `keelsign-mldsa44-bad-sig.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa44)` | `Ed25519(Missing)` |
+| `keelsign-mldsa44-foreign-sig.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa44)` | `Ed25519(Missing)` |
+| `keelsign-mldsa44-protected-tlvs.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa44)` | `Ed25519(Missing)` |
+| `keelsign-mldsa44-short-sig.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa44)` | `Ed25519(Missing)` |
+| `keelsign-mldsa44.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa44)` | `Ed25519(Missing)` |
+| `keelsign-mldsa65-bad-body-rehashed.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa65)` | `Ed25519(Missing)` |
+| `keelsign-mldsa65-bad-hint.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa65)` | `Ed25519(Missing)` |
+| `keelsign-mldsa65-bad-protected-rehashed.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa65)` | `Ed25519(Missing)` |
+| `keelsign-mldsa65-bad-sig.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa65)` | `Ed25519(Missing)` |
+| `keelsign-mldsa65-foreign-sig.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa65)` | `Ed25519(Missing)` |
+| `keelsign-mldsa65-protected-tlvs.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa65)` | `Ed25519(Missing)` |
+| `keelsign-mldsa65-short-sig.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa65)` | `Ed25519(Missing)` |
+| `keelsign-mldsa65.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa65)` | `Ed25519(Missing)` |
+
+- **`DefaultBackend::new()`** verifies ML-DSA-44/65 (`DefaultBackend::allows_ml_dsa()` is
+  `true`). **`DefaultBackend::cnsa_2_0()` refuses ML-DSA** with `UnsupportedParameterSet`
+  (`allows_ml_dsa()` is `false`): ML-DSA-44 and ML-DSA-65 are never CNSA 2.0 algorithms
+  ([docs/image-format.md](image-format.md)), so the strict backend accepts single-tree LMS
+  only.
+- **Error mapping** of the ML-DSA backend (the backend slot of step 10 in
+  [Error precedence](#error-precedence)):
+
+  | Failure | Variant |
+  |---|---|
+  | public key not 1,312 / 1,952 bytes (only through `Backend::verify` called directly; `TrustedKeys::new` already refuses it) | `InvalidPublicKey` |
+  | signature not 2,420 / 3,309 bytes (truncated or trailing bytes) | `MalformedSignature` |
+  | signature does not decode: malformed hint encoding, or `‖z‖∞ ≥ γ1 − β` (the FIPS 204 norm bound, which `ml-dsa` checks while decoding) | `MalformedSignature` |
+  | the verification equation fails (wrong key, message or context, tampered `c̃` or `z`) | `SignatureInvalid` |
+  | key ID not in the set / of the wrong length / for another algorithm | `KeyNotTrusted` / `InvalidKeyId` / `KeyAlgorithmMismatch` (dispatcher) |
+  | body or protected TLV tampered | `Image(DigestMismatch)`, before any signature; with the SHA256 TLV recomputed, `SignatureInvalid` |
+
+- **What the signature covers.** An ML-DSA signature covers `M` only, like MCUboot's own
+  signatures: the unprotected TLV area is outside it. Moving a signature to another image
+  with the same `M` (same header, body and protected TLVs) therefore verifies by design;
+  a signature taken from an image with a different `M` is `SignatureInvalid`
+  (`keelsign-mldsa44-foreign-sig.bin`, `keelsign-mldsa65-foreign-sig.bin`).
+- **Stack.** The verify runs on the stack: about 93 KB (ML-DSA-44) and 153 KB (ML-DSA-65)
+  for the verify frame alone, far over the 32 KB device budget. See
+  [docs/benchmarks.md](benchmarks.md#ml-dsa-verify-sha-44); SHA-169 owns a low-stack
+  verify.
+
 ## Image rules
 
 These rules hold under every policy (`Error::Image(ImageError::…)`). MCUboot sources are
@@ -157,33 +221,37 @@ rule) that failed; the flat variants are the post-quantum half and the read.
 
 Every image in `tests/fixtures/images/` (generated by `scripts/gen_image_fixtures.py`)
 under every policy, with `DefaultBackend::new()`, the image's own PQ key (if it has one)
-and the Ed25519 test key trusted, and the `ed25519` feature on. A cell is `Ok` or the
+and the Ed25519 test key trusted, and the `ed25519` and `ml-dsa` features on. A cell is `Ok` or the
 error, as Rust's `Debug` prints it (a TLV type as `0x%04X`). The cells are the `policy`
 objects of `MANIFEST.json`; `keelsign-verify/tests/policy_matrix.rs` runs every cell
 (also from a NOR flash), `benches/policy-kat` runs the cells of `policy-matrix.bin` on the
 host and on both boards, and a repo check keeps this table equal to the manifest.
 
-The ML-DSA rows fail closed with `UnsupportedAlgorithm` with the `ml-dsa` feature off and
-on until the ML-DSA backend lands (SHA-44, which re-signs these images and updates their
-cells). An Ed25519-only MCUboot image passes the Ed25519 half under `Hybrid`, so the
-post-quantum half decides (`MissingPqSignature`).
+The cells are those with the `ml-dsa` feature on as well (the host test configuration).
+Without it, the cells whose post-quantum half reaches the ML-DSA backend are
+`UnsupportedAlgorithm` instead (SHA-44): the table in
+[The ml-dsa feature](#the-ml-dsa-feature) lists them, and the manifest records them as
+`policy_without_ml_dsa`. An Ed25519-only MCUboot image passes the Ed25519 half under
+`Hybrid`, so the post-quantum half decides (`MissingPqSignature`).
 
 | Image | ClassicalOnly | PqOnly | Hybrid | Notes |
 |---|---|---|---|---|
-| `keelsign-dual-pq-invalid.bin` | `Ed25519(Missing)` | `MultiplePqSignatures` | `Ed25519(Missing)` | invalid: one key ID and two PQ signature TLVs (LMS M32_H5, then ML-DSA-44 filler) |
+| `keelsign-dual-pq-invalid.bin` | `Ed25519(Missing)` | `MultiplePqSignatures` | `Ed25519(Missing)` | invalid: one key ID and two PQ signature TLVs (LMS M32_H5, then ML-DSA-44) |
 | `keelsign-hss2-m32-h5h5.bin` | `Ed25519(Missing)` | `Ok` | `Ed25519(Missing)` | HSS L=2, both levels LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 |
 | `keelsign-hybrid-bad-body.bin` | `Image(DigestMismatch)` | `Image(DigestMismatch)` | `Image(DigestMismatch)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: body byte 0 ^= 0x01 |
 | `keelsign-hybrid-bad-ed25519.bin` | `Ed25519(SignatureInvalid)` | `Ok` | `Ed25519(SignatureInvalid)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: ED25519 TLV value byte 0 ^= 0x01 |
 | `keelsign-hybrid-bad-pq.bin` | `Ok` | `SignatureInvalid` | `SignatureInvalid` | mutation of `keelsign-hybrid-ed25519-lms.bin`: LMS/HSS signature TLV (0x4BA3) last byte ^= 0x01 |
 | `keelsign-hybrid-bad-sha256.bin` | `Image(DigestMismatch)` | `Image(DigestMismatch)` | `Image(DigestMismatch)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: SHA256 TLV value byte 0 ^= 0x01 |
 | `keelsign-hybrid-ed25519-lms.bin` | `Ok` | `Ok` | `Ok` | hybrid: imgtool Ed25519 (KEYHASH + ED25519) plus LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, HSS L=1 |
-| `keelsign-hybrid-ed25519-mldsa44.bin` | `Ok` | `UnsupportedAlgorithm(MlDsa44)` | `UnsupportedAlgorithm(MlDsa44)` | hybrid: imgtool Ed25519 (KEYHASH + ED25519) plus an ML-DSA-44 filler signature (does not verify) |
+| `keelsign-hybrid-ed25519-mldsa44.bin` | `Ok` | `Ok` | `Ok` | hybrid: imgtool Ed25519 (KEYHASH + ED25519) plus an ML-DSA-44 signature under the ML-DSA-44 test key (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
 | `keelsign-hybrid-flag-compressed.bin` | `Image(Compressed)` | `Image(Compressed)` | `Image(Compressed)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: `IMAGE_F_COMPRESSED_LZMA2` (0x400) set in `ih_flags` |
 | `keelsign-hybrid-flag-encrypted.bin` | `Image(Encrypted)` | `Image(Encrypted)` | `Image(Encrypted)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: `IMAGE_F_ENCRYPTED_AES128` (0x04) set in `ih_flags` |
 | `keelsign-hybrid-flag-non-bootable.bin` | `Image(NonBootable)` | `Image(NonBootable)` | `Image(NonBootable)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: `IMAGE_F_NON_BOOTABLE` (0x10) set in `ih_flags` |
 | `keelsign-hybrid-keyhash-only.bin` | `Ed25519(Missing)` | `Ok` | `Ed25519(Missing)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: ED25519 TLV removed: KEYHASH alone |
 | `keelsign-hybrid-missing-key-id.bin` | `Ok` | `MissingKeyId` | `MissingKeyId` | mutation of `keelsign-hybrid-ed25519-lms.bin`: key-ID TLV (0x4BA0) removed |
 | `keelsign-hybrid-missing-pq.bin` | `Ok` | `MissingPqSignature` | `MissingPqSignature` | mutation of `keelsign-hybrid-ed25519-lms.bin`: LMS/HSS signature TLV (0x4BA3) removed |
+| `keelsign-hybrid-mldsa44-missing-pq.bin` | `Ok` | `MissingPqSignature` | `MissingPqSignature` | mutation of `keelsign-hybrid-ed25519-mldsa44.bin`: ML-DSA-44 signature TLV (0x4BA1) removed |
+| `keelsign-hybrid-mldsa44-stripped-pq.bin` | `Ok` | `MissingPqSignature` | `MissingPqSignature` | mutation of `keelsign-hybrid-ed25519-mldsa44.bin`: key-ID TLV (0x4BA0) and ML-DSA-44 signature TLV (0x4BA1) removed: a plain imgtool Ed25519 image |
 | `keelsign-hybrid-no-sha256.bin` | `Image(MissingSha256Tlv)` | `Image(MissingSha256Tlv)` | `Image(MissingSha256Tlv)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: SHA256 TLV removed |
 | `keelsign-hybrid-protected-tlvs.bin` | `Ok` | `Ok` | `Ok` | hybrid Ed25519 + LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, HSS L=1, with protected SEC_CNT and vendor TLV 0x10A0 |
 | `keelsign-hybrid-reserved-tlv-protected.bin` | `Image(KeelsignTlvProtected(0x4BA0))` | `Image(KeelsignTlvProtected(0x4BA0))` | `Image(KeelsignTlvProtected(0x4BA0))` | invalid: hybrid Ed25519 + LMS M32_H5 with a keelsign key-ID-typed TLV 0x4BA0 in the protected area (imgtool --custom-tlv) |
@@ -196,8 +264,25 @@ post-quantum half decides (`MissingPqSignature`).
 | `keelsign-hybrid-unpaired-ed25519.bin` | `Ed25519(Unpaired)` | `Ok` | `Ed25519(Unpaired)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: KEYHASH TLV removed: the ED25519 TLV follows the SHA256 TLV |
 | `keelsign-lms-m32-h5.bin` | `Ed25519(Missing)` | `Ok` | `Ed25519(Missing)` | LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, HSS L=1 |
 | `keelsign-lms-protected-tlvs.bin` | `Ed25519(Missing)` | `Ok` | `Ed25519(Missing)` | LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, HSS L=1, with protected SEC_CNT and vendor TLV 0x10A0 |
-| `keelsign-mldsa44.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa44)` | `Ed25519(Missing)` | ML-DSA-44 filler signature and public key (length-correct, does not verify) |
-| `keelsign-mldsa65.bin` | `Ed25519(Missing)` | `UnsupportedAlgorithm(MlDsa65)` | `Ed25519(Missing)` | ML-DSA-65 filler signature and public key (length-correct, does not verify) |
+| `keelsign-mldsa44-bad-body-rehashed.bin` | `Ed25519(Missing)` | `SignatureInvalid` | `Ed25519(Missing)` | mutation of `keelsign-mldsa44.bin`: body byte 0 ^= 0x01, SHA256 TLV recomputed (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa44-bad-body.bin` | `Image(DigestMismatch)` | `Image(DigestMismatch)` | `Image(DigestMismatch)` | mutation of `keelsign-mldsa44.bin`: body byte 0 ^= 0x01 |
+| `keelsign-mldsa44-bad-hint.bin` | `Ed25519(Missing)` | `MalformedSignature` | `Ed25519(Missing)` | mutation of `keelsign-mldsa44.bin`: ML-DSA-44 signature TLV (0x4BA1) last byte := 0xFF (hint count > omega) (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa44-bad-key-id.bin` | `Ed25519(Missing)` | `KeyNotTrusted` | `Ed25519(Missing)` | mutation of `keelsign-mldsa44.bin`: key-ID TLV (0x4BA0) byte 0 ^= 0x01 |
+| `keelsign-mldsa44-bad-protected-rehashed.bin` | `Ed25519(Missing)` | `SignatureInvalid` | `Ed25519(Missing)` | mutation of `keelsign-mldsa44-protected-tlvs.bin`: protected SEC_CNT value byte 0 ^= 0x01, SHA256 TLV recomputed (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa44-bad-protected.bin` | `Image(DigestMismatch)` | `Image(DigestMismatch)` | `Image(DigestMismatch)` | mutation of `keelsign-mldsa44-protected-tlvs.bin`: protected SEC_CNT value byte 0 ^= 0x01 |
+| `keelsign-mldsa44-bad-sig.bin` | `Ed25519(Missing)` | `SignatureInvalid` | `Ed25519(Missing)` | mutation of `keelsign-mldsa44.bin`: ML-DSA-44 signature TLV (0x4BA1) byte 0 (c~) ^= 0x01 (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa44-foreign-sig.bin` | `Ed25519(Missing)` | `SignatureInvalid` | `Ed25519(Missing)` | mutation of `keelsign-mldsa44.bin`: ML-DSA-44 signature TLV (0x4BA1) replaced by the one of keelsign-mldsa44-protected-tlvs.bin (same key, other M) (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa44-protected-tlvs.bin` | `Ed25519(Missing)` | `Ok` | `Ed25519(Missing)` | ML-DSA-44 under the ML-DSA-44 test key, with protected SEC_CNT and vendor TLV 0x10A0 (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa44-short-sig.bin` | `Ed25519(Missing)` | `MalformedSignature` | `Ed25519(Missing)` | mutation of `keelsign-mldsa44.bin`: ML-DSA-44 signature TLV (0x4BA1) truncated to 2,419 bytes (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa44.bin` | `Ed25519(Missing)` | `Ok` | `Ed25519(Missing)` | ML-DSA-44 signature (pure, keelsign context) under the ML-DSA-44 test key (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa65-bad-body-rehashed.bin` | `Ed25519(Missing)` | `SignatureInvalid` | `Ed25519(Missing)` | mutation of `keelsign-mldsa65.bin`: body byte 0 ^= 0x01, SHA256 TLV recomputed (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa65-bad-hint.bin` | `Ed25519(Missing)` | `MalformedSignature` | `Ed25519(Missing)` | mutation of `keelsign-mldsa65.bin`: ML-DSA-65 signature TLV (0x4BA2) last byte := 0xFF (hint count > omega) (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa65-bad-protected-rehashed.bin` | `Ed25519(Missing)` | `SignatureInvalid` | `Ed25519(Missing)` | mutation of `keelsign-mldsa65-protected-tlvs.bin`: protected SEC_CNT value byte 0 ^= 0x01, SHA256 TLV recomputed (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa65-bad-sig.bin` | `Ed25519(Missing)` | `SignatureInvalid` | `Ed25519(Missing)` | mutation of `keelsign-mldsa65.bin`: ML-DSA-65 signature TLV (0x4BA2) byte 0 (c~) ^= 0x01 (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa65-foreign-sig.bin` | `Ed25519(Missing)` | `SignatureInvalid` | `Ed25519(Missing)` | mutation of `keelsign-mldsa65.bin`: ML-DSA-65 signature TLV (0x4BA2) replaced by the one of keelsign-mldsa65-protected-tlvs.bin (same key, other M) (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa65-protected-tlvs.bin` | `Ed25519(Missing)` | `Ok` | `Ed25519(Missing)` | ML-DSA-65 under the ML-DSA-65 test key, with protected SEC_CNT and vendor TLV 0x10A0 (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa65-short-sig.bin` | `Ed25519(Missing)` | `MalformedSignature` | `Ed25519(Missing)` | mutation of `keelsign-mldsa65.bin`: ML-DSA-65 signature TLV (0x4BA2) truncated to 3,308 bytes (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
+| `keelsign-mldsa65.bin` | `Ed25519(Missing)` | `Ok` | `Ed25519(Missing)` | ML-DSA-65 signature (pure, keelsign context) under the ML-DSA-65 test key (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
 | `mcuboot-ecdsa-p256.bin` | `Ed25519(Missing)` | `MissingPqSignature` | `Ed25519(Missing)` | imgtool ECDSA P-256, SEC_CNT, BOOT_RECORD and DEPENDENCY |
 | `mcuboot-ed25519-200k.bin` | `Ok` | `MissingPqSignature` | `MissingPqSignature` | as mcuboot-ed25519.bin with a 204,800-byte body in a 0x40000-byte slot (chunked digest, SHA-42) (not in `policy-matrix.bin`) |
 | `mcuboot-ed25519-padded.bin` | `Ok` | `MissingPqSignature` | `MissingPqSignature` | as mcuboot-ed25519.bin, padded to a 0x2000-byte slot with the boot trailer (--pad) |

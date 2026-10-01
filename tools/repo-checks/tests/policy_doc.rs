@@ -6,11 +6,12 @@ use repo_checks::{POLICY_KEYS, workspace_root};
 use std::collections::BTreeMap;
 use std::fs;
 
-const REQUIRED_HEADINGS: [&str; 10] = [
+const REQUIRED_HEADINGS: [&str; 11] = [
     "# Verify policies (SHA-46)",
     "## Policies",
     "## Key sets",
     "## The `ed25519` feature",
+    "## The `ml-dsa` feature",
     "## Image rules",
     "## Error precedence",
     "## Policy matrix",
@@ -89,6 +90,12 @@ fn json_field<'a>(object: &'a str, field: &str) -> &'a str {
 
 /// Image name -> [ClassicalOnly, PqOnly, Hybrid] from MANIFEST.json.
 fn manifest_cells() -> BTreeMap<String, Vec<String>> {
+    manifest_cells_of("policy")
+}
+
+/// Image name -> the cells of the entry's object `object` (`policy`, or
+/// `policy_without_ml_dsa` where the entry has it) from MANIFEST.json.
+fn manifest_cells_of(object: &str) -> BTreeMap<String, Vec<String>> {
     let manifest = read("tests/fixtures/images/MANIFEST.json");
     let outputs = json_object(&manifest, "outputs");
     let mut cells = BTreeMap::new();
@@ -99,7 +106,11 @@ fn manifest_cells() -> BTreeMap<String, Vec<String>> {
         else {
             continue;
         };
-        let policy = json_object(json_object(outputs, name), "policy");
+        let entry = json_object(outputs, name);
+        if !entry.contains(&format!("\"{object}\": {{")) {
+            continue;
+        }
+        let policy = json_object(entry, object);
         let row = POLICY_KEYS
             .iter()
             .map(|key| json_field(policy, key).to_owned())
@@ -172,6 +183,13 @@ fn policy_doc_has_required_sections() {
         "image.h:191-198",
         "SHA-44",
         "0x4BA0..=0x4BAF",
+        // SHA-44: the ml-dsa feature, the strict backend's refusal and the error mapping.
+        "allows_ml_dsa",
+        "`DefaultBackend::cnsa_2_0()` refuses ML-DSA",
+        "MalformedSignature",
+        "policy_without_ml_dsa",
+        "MLDSA_CONTEXT",
+        "SHA-169",
     ] {
         assert!(doc.contains(term), "docs/policy.md must mention `{term}`");
     }
@@ -194,7 +212,7 @@ fn policy_doc_has_required_sections() {
 fn matrix_table_matches_manifest() {
     let manifest = manifest_cells();
     let doc = doc_cells(&doc());
-    assert_eq!(manifest.len(), 34, "every MANIFEST.json output");
+    assert_eq!(manifest.len(), 53, "every MANIFEST.json output");
     let doc_names: Vec<&String> = doc.keys().collect();
     let manifest_names: Vec<&String> = manifest.keys().collect();
     assert_eq!(
@@ -206,6 +224,60 @@ fn matrix_table_matches_manifest() {
             &doc[name], cells,
             "{name}: doc cells != MANIFEST.json policy cells"
         );
+    }
+}
+
+/// SHA-44: the `ml-dsa` section's table is exactly the manifest's `policy_without_ml_dsa`
+/// cells (the cells that differ without the feature).
+#[test]
+fn ml_dsa_off_table_matches_manifest() {
+    let doc = doc();
+    let section = section(&doc, "## The `ml-dsa` feature");
+    let mut lines = section
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with('|'));
+    let header: Vec<String> = lines
+        .next()
+        .expect("off-cells table")
+        .trim_matches('|')
+        .split('|')
+        .map(|c| c.trim().to_owned())
+        .collect();
+    assert_eq!(header, ["Image", "ClassicalOnly", "PqOnly", "Hybrid"]);
+    let mut table = BTreeMap::new();
+    for line in lines {
+        if line.starts_with("|---") {
+            continue;
+        }
+        let row: Vec<String> = line
+            .trim_matches('|')
+            .split('|')
+            .map(|c| c.trim().trim_matches('`').to_owned())
+            .collect();
+        // The error-mapping table follows; it has two columns.
+        if row.len() != 4 {
+            break;
+        }
+        assert!(table.insert(row[0].clone(), row[1..4].to_vec()).is_none());
+    }
+    let manifest = manifest_cells_of("policy_without_ml_dsa");
+    assert_eq!(manifest.len(), 17, "the ML-DSA images whose cells change");
+    assert_eq!(
+        table, manifest,
+        "## The `ml-dsa` feature table != MANIFEST.json"
+    );
+    // Each differing cell is UnsupportedAlgorithm of the image's set.
+    let on = manifest_cells();
+    for (name, off) in &manifest {
+        for (i, cell) in off.iter().enumerate() {
+            if *cell != on[name][i] {
+                assert!(
+                    cell.starts_with("UnsupportedAlgorithm(MlDsa"),
+                    "{name}: {cell}"
+                );
+            }
+        }
     }
 }
 

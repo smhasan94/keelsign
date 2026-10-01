@@ -82,13 +82,30 @@ fn keelsign_verify_is_no_std_no_alloc_forbid_unsafe() {
 
     let sources = sources();
     // SHA-65: the LMS/HSS verifier and the default backend are covered by these rules;
-    // SHA-46: the Ed25519 half and the policy entry point too.
-    for required in ["lms.rs", "backend.rs", "ed25519.rs", "policy.rs"] {
+    // SHA-46: the Ed25519 half and the policy entry point too; SHA-44: the ML-DSA verifier.
+    for required in [
+        "lms.rs",
+        "backend.rs",
+        "ed25519.rs",
+        "policy.rs",
+        "mldsa.rs",
+    ] {
         assert!(
             sources.iter().any(|(name, _)| name == required),
             "keelsign-verify/src/{required} must exist"
         );
     }
+    // SHA-44: each ML-DSA parameter set verifies in its own non-inlined frame (about
+    // 93 KB / 153 KB); inlined, every verify (LMS/HSS included) would reserve it.
+    let mldsa = &sources
+        .iter()
+        .find(|(name, _)| name == "mldsa.rs")
+        .expect("mldsa.rs")
+        .1;
+    assert!(
+        mldsa.contains("#[inline(never)]\nfn verify_param<P: ml_dsa::MlDsaParams>("),
+        "keelsign-verify/src/mldsa.rs: `verify_param` must be `#[inline(never)]`"
+    );
     for (name, text) in sources {
         for forbidden in [
             "extern crate alloc",
@@ -133,7 +150,11 @@ fn keelsign_verify_is_no_std_no_alloc_forbid_unsafe() {
         manifest.contains("default = []"),
         "keelsign-verify has no default features"
     );
-    assert!(manifest.contains("ml-dsa = []"), "empty `ml-dsa` feature");
+    // SHA-44: the ML-DSA verifier is an optional, off-by-default feature.
+    assert!(
+        manifest.contains("ml-dsa = [\"dep:ml-dsa\"]"),
+        "`ml-dsa` feature enabling only `dep:ml-dsa`"
+    );
     // SHA-46: the Ed25519 half is an optional, off-by-default feature.
     assert!(
         manifest.contains("ed25519 = [\"dep:ed25519-dalek\"]"),
@@ -171,6 +192,14 @@ fn keelsign_verify_is_no_std_no_alloc_forbid_unsafe() {
             "ed25519-dalek = { version = \"=3.0.0\", default-features = false, optional = true }"
         ),
         "ed25519-dalek pinned to =3.0.0, optional, without default features"
+    );
+    // SHA-44: the ML-DSA verifier, pinned (CLAUDE.md advisories), optional, without
+    // default features (no alloc, getrandom, pkcs8).
+    assert!(
+        deps.contains(
+            "ml-dsa = { version = \"=0.1.1\", default-features = false, optional = true }"
+        ),
+        "ml-dsa pinned to =0.1.1, optional, without default features"
     );
 }
 

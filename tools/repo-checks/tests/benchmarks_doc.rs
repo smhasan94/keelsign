@@ -806,3 +806,104 @@ fn hybrid_verify_section_records_flash_delta() {
         );
     }
 }
+
+/// SHA-44: the ML-DSA verify section states the stack the `ml-dsa` feature needs (both
+/// static frames, over the 32 KB budget), names SHA-169, and records the results per
+/// board and set as values or `pending (hardware)`, with the reproduce commands.
+#[test]
+fn mldsa_verify_section_records_stack() {
+    let doc = doc();
+    let mldsa = section(&doc, "## ML-DSA verify (SHA-44)");
+    for term in [
+        "SHA-169",
+        "32 KB",
+        "32,768 B",
+        "`ml-dsa`",
+        "#[inline(never)]",
+        "mldsa::verify_param",
+        "mldsa_images_from_flash",
+        "MLDSA board=",
+        "stack_paint",
+        "CYCCNT",
+        "NorFlashReader",
+        "-Z emit-stack-sizes",
+        "passed=156/156",
+    ] {
+        assert!(
+            mldsa.contains(term),
+            "the ML-DSA verify section must mention `{term}`"
+        );
+    }
+    let stack = section(&doc, "### Stack the feature needs");
+    let results = section(&doc, "### ML-DSA verify results");
+    let rows = table_rows(results);
+    for board in BOARDS {
+        for set in SETS {
+            let row = rows
+                .iter()
+                .find(|r| r[0] == board && r[1] == set)
+                .unwrap_or_else(|| panic!("### ML-DSA verify results has no row {board} {set}"));
+            assert_eq!(row.len(), 8, "{board} {set}: {row:?}");
+            // The static frames (release, size) exceed the 32 KB budget, and the stated
+            // stack names the release frame.
+            for cell in &row[2..4] {
+                let bytes = parse_bytes(cell)
+                    .unwrap_or_else(|| panic!("{board} {set}: `{cell}` must be a byte count"));
+                assert!(bytes > 32_768, "{board} {set}: {cell} is not over 32 KB");
+            }
+            assert!(
+                stack.contains(row[2].trim_end_matches(" B")),
+                "### Stack the feature needs must state {}",
+                row[2]
+            );
+            // verify_with on / off, flash Δ release / size: two byte counts each.
+            for cell in &row[4..6] {
+                let parts: Vec<&str> = cell.split(" / ").collect();
+                assert_eq!(parts.len(), 2, "{board} {set}: `{cell}`");
+                for part in parts {
+                    assert!(
+                        parse_bytes(part).is_some_and(|b| b > 0),
+                        "{board} {set}: `{part}` must be a positive byte count"
+                    );
+                }
+            }
+            for cell in &row[6..8] {
+                assert!(
+                    cell == PENDING || !cell.is_empty() && !cell.contains("pending"),
+                    "{board} {set}: `{cell}` must be a value or `{PENDING}`"
+                );
+            }
+        }
+        // The flash detail rows add up and match the results table.
+        for (profile, at) in [("release", 0), ("size", 1)] {
+            let label = format!("{board} / {profile}");
+            let detail = rows
+                .iter()
+                .find(|r| r[0] == label)
+                .unwrap_or_else(|| panic!("no ML-DSA flash detail row `{label}`"));
+            let n: Vec<u64> = detail[1..4]
+                .iter()
+                .map(|c| c.replace(',', "").parse().unwrap())
+                .collect();
+            assert_eq!(n[1] - n[0], n[2], "{label}: {detail:?}");
+            let row = rows.iter().find(|r| r[0] == board).unwrap();
+            let delta: Vec<&str> = row[5].split(" / ").collect();
+            assert_eq!(parse_bytes(delta[at]), Some(n[2]), "{label}");
+        }
+    }
+    let reproduce = section(&doc, "### ML-DSA verify reproduce");
+    for command in [
+        "cargo test --release --locked --features ml-dsa --test mldsa_verify",
+        "cargo test --release --locked --features ml-dsa --test policy -- policy_matrix_from_flash",
+        "cargo build --release --locked --bins --features ml-dsa --target-dir target/mldsa",
+        "cargo +nightly rustc --release --locked --features ml-dsa --bin size_verify --target-dir target/nightly-mldsa -- -Z emit-stack-sizes",
+        "cargo test -p keelsign-verify --locked --features ml-dsa",
+    ] {
+        assert!(
+            reproduce.contains(command),
+            "### ML-DSA verify reproduce must list `{command}`"
+        );
+    }
+    // The SHA-34 decision points at this section.
+    assert!(section(&doc, "## Decision").contains("(#ml-dsa-verify-sha-44)"));
+}

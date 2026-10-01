@@ -1,4 +1,5 @@
-//! Dependency rules: the ml-dsa pin (CLAUDE.md), the ed25519-dalek pin (SHA-46) and the
+//! Dependency rules: the ml-dsa pin (CLAUDE.md; bench crates and, since SHA-44,
+//! keelsign-verify's `ml-dsa` feature, heap-free), the ed25519-dalek pin (SHA-46) and the
 //! scoped `unsafe` exception for the measurement-only `benches/stack-paint` crate.
 
 use repo_checks::{SHIPPED_CRATES, workspace_root};
@@ -111,6 +112,23 @@ fn ml_dsa_pinned_exact_and_patched() {
         "ml-dsa must disable default features (no alloc / getrandom): `{line}`"
     );
 
+    // SHA-44: keelsign-verify's optional `ml-dsa` dependency, pinned the same way.
+    let manifest = read("keelsign-verify/Cargo.toml");
+    let line = manifest
+        .lines()
+        .find(|l| l.starts_with("ml-dsa = {"))
+        .expect("keelsign-verify must depend on ml-dsa (the `ml-dsa` feature)");
+    for needle in [
+        format!("version = \"={ML_DSA_PIN}\""),
+        "default-features = false".to_owned(),
+        "optional = true".to_owned(),
+    ] {
+        assert!(
+            line.contains(&needle),
+            "keelsign-verify: ml-dsa must have `{needle}`: `{line}`"
+        );
+    }
+
     for lockfile in LOCKFILES {
         let lock = read(lockfile);
         let versions: Vec<String> = lock_packages(&lock)
@@ -122,6 +140,57 @@ fn ml_dsa_pinned_exact_and_patched() {
             versions,
             [ML_DSA_PIN],
             "{lockfile}: ml-dsa must resolve to exactly {ML_DSA_PIN}"
+        );
+    }
+}
+
+/// SHA-44 (AC5): keelsign-verify with `ml-dsa` on a Cortex-M target pulls in no `alloc`
+/// or `std` feature of ml-dsa or the crates it builds on, so ML-DSA verify is heap-free.
+#[test]
+fn ml_dsa_feature_tree_has_no_alloc() {
+    let root = workspace_root();
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let out = std::process::Command::new(cargo)
+        .current_dir(&root)
+        .args([
+            "tree",
+            "-p",
+            "keelsign-verify",
+            "--locked",
+            "--offline",
+            "--features",
+            "ml-dsa",
+            "-e",
+            "normal,features",
+            "--target",
+            "thumbv7em-none-eabihf",
+        ])
+        .output()
+        .expect("run cargo tree");
+    assert!(
+        out.status.success(),
+        "cargo tree failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let tree = String::from_utf8(out.stdout).expect("UTF-8");
+    assert!(
+        tree.contains("ml-dsa v0.1.1"),
+        "the feature pulls in ml-dsa:\n{tree}"
+    );
+    for krate in ["ml-dsa", "module-lattice", "hybrid-array", "signature"] {
+        for feature in ["alloc", "std"] {
+            let needle = format!("{krate} feature \"{feature}\"");
+            assert!(
+                !tree.contains(&needle),
+                "keelsign-verify --features ml-dsa enables `{needle}`:\n{tree}"
+            );
+        }
+    }
+    // No crate in the normal tree has an `alloc` or `std` feature on.
+    for line in tree.lines() {
+        assert!(
+            !line.contains(" feature \"alloc\"") && !line.contains(" feature \"std\""),
+            "heap or std feature in the keelsign-verify ml-dsa tree: {line}"
         );
     }
 }

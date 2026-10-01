@@ -3,8 +3,8 @@
 use repo_checks::{
     BENCHES, DIGEST_BENCH_FILES, DIGEST_ON_TARGET_TESTS, DIGEST_SIZE_BINS, DIGEST_STACK_LIMIT,
     Example, LMS_BENCH_FILES, LMS_ON_TARGET_TESTS, LMS_SIZE_BINS, LMS_STACK_LIMIT,
-    POLICY_BENCH_FILES, POLICY_ON_TARGET_TESTS, POLICY_SIZE_BINS, ScratchDir, cargo_in,
-    python_script, run_capture, run_ok, workspace_root,
+    MLDSA_ON_TARGET_TESTS, MLDSA_VERIFY_BENCH_FILES, POLICY_BENCH_FILES, POLICY_ON_TARGET_TESTS,
+    POLICY_SIZE_BINS, ScratchDir, cargo_in, python_script, run_capture, run_ok, workspace_root,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -81,6 +81,7 @@ fn bench_projects_exist() {
             .chain(&LMS_BENCH_FILES)
             .chain(&DIGEST_BENCH_FILES)
             .chain(&POLICY_BENCH_FILES)
+            .chain(&MLDSA_VERIFY_BENCH_FILES)
         {
             assert!(dir.join(rel).is_file(), "{}: missing {rel}", bench.name);
         }
@@ -124,6 +125,25 @@ fn bench_projects_exist() {
         assert!(
             verify.contains("features = [\"ed25519\"]"),
             "{}: keelsign-verify must enable the `ed25519` feature: `{verify}`",
+            bench.name
+        );
+        // SHA-44: ML-DSA is an off-by-default bench feature, so every feature-off build
+        // and recorded number stays as it was.
+        let features = toml_table(&cargo_toml, "[features]")
+            .unwrap_or_else(|| panic!("{}: needs a [features] table", bench.name));
+        assert!(
+            features.contains("\nml-dsa = [\"keelsign-verify/ml-dsa\"]"),
+            "{}: feature `ml-dsa = [\"keelsign-verify/ml-dsa\"]`",
+            bench.name
+        );
+        assert!(
+            !features.contains("default ="),
+            "{}: no default bench features",
+            bench.name
+        );
+        assert!(
+            !verify.contains("ml-dsa"),
+            "{}: keelsign-verify's `ml-dsa` only through the bench feature",
             bench.name
         );
         let hal = dependency_line(&cargo_toml, "embassy-nrf")
@@ -425,6 +445,44 @@ fn bench_tests_use_embedded_test_harness() {
                 bench.name
             );
         }
+
+        // SHA-44: ML-DSA verify from flash, a fifth embedded-test binary built only with
+        // the bench's `ml-dsa` feature.
+        assert!(
+            cargo_toml.contains(
+                "[[test]]\nname = \"mldsa_verify\"\nharness = false\nrequired-features = [\"ml-dsa\"]\n"
+            ),
+            "{}: tests/mldsa_verify.rs must be a `harness = false` test requiring `ml-dsa`",
+            bench.name
+        );
+        let mldsa = read_bench(bench, "tests/mldsa_verify.rs");
+        for needle in [
+            "#![no_std]",
+            "#![no_main]",
+            "#[embedded_test::tests]",
+            "#[init]",
+            "compile_error!",
+            "defmt_rtt as _",
+            "stack_paint",
+            "NorFlashReader",
+            "MLDSA board=",
+            "Policy::PqOnly",
+            "Policy::Hybrid",
+            "!mark.saturated",
+        ] {
+            assert!(
+                mldsa.contains(needle),
+                "{}: tests/mldsa_verify.rs must contain `{needle}`",
+                bench.name
+            );
+        }
+        for test in MLDSA_ON_TARGET_TESTS {
+            assert!(
+                mldsa.contains(&format!("fn {test}(")),
+                "{}: tests/mldsa_verify.rs must define the on-target test `{test}`",
+                bench.name
+            );
+        }
     }
 }
 
@@ -499,6 +557,10 @@ fn ci_builds_bench_tests_for_both_targets() {
         "--all-targets -- -D warnings",
         "cargo test --no-run --release --locked",
         "--bins",
+        // SHA-44: the same with the bench `ml-dsa` feature, in its own target dir.
+        "cargo clippy --locked --target ${{ matrix.target }} --all-targets --features ml-dsa --target-dir target/mldsa -- -D warnings",
+        "cargo test --no-run --release --locked --target ${{ matrix.target }} --features ml-dsa --target-dir target/mldsa",
+        "cargo build --release --locked --target ${{ matrix.target }} --bins --features ml-dsa --target-dir target/mldsa",
     ] {
         assert!(
             job.contains(needle),
@@ -526,6 +588,34 @@ fn cross_build(name: &str) {
             release.join(bin).display()
         );
     }
+    // SHA-44: with the bench `ml-dsa` feature, in its own target dir.
+    let mldsa_dir = target_dir.join("mldsa");
+    run_ok(cargo_in(&dir, &mldsa_dir).args([
+        "test",
+        "--no-run",
+        "--release",
+        "--locked",
+        "--features",
+        "ml-dsa",
+    ]));
+    run_ok(cargo_in(&dir, &mldsa_dir).args([
+        "build",
+        "--release",
+        "--locked",
+        "--bins",
+        "--features",
+        "ml-dsa",
+    ]));
+    let mldsa_release = mldsa_dir.join(bench.target).join("release");
+    assert!(mldsa_release.join("size_verify").is_file());
+    let mldsa_test = fs::read_dir(mldsa_release.join("deps"))
+        .expect("read deps dir")
+        .filter_map(Result::ok)
+        .any(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.starts_with("mldsa_verify-") && !name.contains('.')
+        });
+    assert!(mldsa_test, "expected the mldsa_verify test ELF");
     for test in ["kat", "lms", "image", "policy"] {
         let found = fs::read_dir(release.join("deps"))
             .expect("read deps dir")

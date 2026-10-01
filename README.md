@@ -8,8 +8,10 @@ format so MCUboot and embassy-boot users keep their existing update pipeline.
 functionality. Unreleased on `main`: `keelsign-verify` verifies MCUboot images through
 one entry point, `verify`, under a classical-only, PQ-only or hybrid policy
 ([docs/policy.md](docs/policy.md)): it reads them from flash, hashes them in chunks and
-verifies LMS/HSS and (with its `ed25519` feature) Ed25519 signatures; ML-DSA and the CLI
-are not there yet.
+verifies LMS/HSS, (with its `ed25519` feature) Ed25519 and (with its `ml-dsa` feature)
+ML-DSA-44/65 signatures. ML-DSA verify needs about 93 KB / 153 KB of stack, far over the
+32 KB device budget ([docs/benchmarks.md](docs/benchmarks.md#ml-dsa-verify-sha-44); a
+low-stack verify is SHA-169). The CLI is not there yet.
 
 ## Crates
 
