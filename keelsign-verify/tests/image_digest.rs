@@ -19,7 +19,7 @@ use keelsign_verify::{DEFAULT_CHUNK_LEN, image_digest};
 
 /// Every little-endian signed fixture image, as named in MANIFEST.json (the SHA-46
 /// policy mutations are not: some change the SHA256 TLV or the hashed bytes on purpose).
-const FIXTURES: [&str; 15] = [
+const FIXTURES: [&str; 17] = [
     "mcuboot-rsa2048.bin",
     "mcuboot-ecdsa-p256.bin",
     "mcuboot-ed25519.bin",
@@ -35,6 +35,8 @@ const FIXTURES: [&str; 15] = [
     "keelsign-hybrid-ed25519-mldsa44.bin",
     "keelsign-hybrid-protected-tlvs.bin",
     "keelsign-hybrid-reserved-tlv-protected.bin",
+    "keelsign-mldsa44-protected-tlvs.bin",
+    "keelsign-mldsa65-protected-tlvs.bin",
 ];
 
 fn fixture_dir() -> PathBuf {

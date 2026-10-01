@@ -9,6 +9,13 @@ publish = false
 # Standalone project: not part of the root workspace (see the root Cargo.toml `exclude`).
 [workspace]
 
+[features]
+# SHA-44: ML-DSA-44/65 in keelsign-verify (`tests/mldsa_verify.rs`, and the ML-DSA cells
+# of `tests/policy.rs` and the arms of `size_verify` built with it). Off by default so every
+# other test, bin and recorded number stays as without it; build it with
+# `--target-dir target/mldsa` to keep both builds side by side.
+ml-dsa = ["keelsign-verify/ml-dsa"]
+
 [dependencies]
 mldsa-kat = { path = "../mldsa-kat", features = ["cortex-m"] }
 lms-kat = { path = "../lms-kat" }
@@ -41,6 +48,12 @@ harness = false
 [[test]]
 name = "policy"
 harness = false
+
+# SHA-44: ML-DSA image verify from flash, timed and stack-painted. Needs `--features ml-dsa`.
+[[test]]
+name = "mldsa_verify"
+harness = false
+required-features = ["ml-dsa"]
 
 [[bin]]
 name = "size_baseline"

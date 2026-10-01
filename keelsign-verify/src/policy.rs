@@ -1195,6 +1195,45 @@ mod tests {
     }
 
     #[test]
+    fn verify_with_cnsa_2_0_refuses_ml_dsa_under_pq_only() {
+        for (name, data) in FIXTURES {
+            let Some((algorithm @ (Algorithm::MlDsa44 | Algorithm::MlDsa65), _)) =
+                manifest_key(name)
+            else {
+                continue;
+            };
+            let keys = leak_keys(name);
+            let mut reader = data;
+            let strict = verify_with(
+                &DefaultBackend::cnsa_2_0(),
+                &mut reader,
+                &keys,
+                Policy::PqOnly,
+                &mut [0; 4096],
+                &mut [0; 256],
+            );
+            let default = run(&DefaultBackend::new(), data, &keys, Policy::PqOnly);
+            if algorithm.is_enabled() {
+                // The default backend verifies it; the strict one refuses ML-DSA outright.
+                assert!(default.is_ok(), "{name}: {default:?}");
+                assert_eq!(strict, Err(Error::UnsupportedParameterSet), "{name}");
+            } else {
+                // Without the feature the dispatcher answers first, under both backends.
+                assert_eq!(
+                    default,
+                    Err(Error::UnsupportedAlgorithm(algorithm)),
+                    "{name}"
+                );
+                assert_eq!(
+                    strict,
+                    Err(Error::UnsupportedAlgorithm(algorithm)),
+                    "{name}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn verify_and_verify_with_default_agree_on_every_fixture() {
         let mut ok = 0;
         for (name, data) in FIXTURES {
@@ -1207,8 +1246,13 @@ mod tests {
                 ok += usize::from(a.is_ok());
             }
         }
-        // PqOnly: the four LMS/HSS images; with the feature, also the Ed25519 goldens and
-        // the hybrid image under ClassicalOnly, and the hybrid image under Hybrid.
-        assert_eq!(ok, if ed25519::is_enabled() { 4 + 4 + 1 } else { 4 });
+        // PqOnly: the four LMS/HSS images (and the two ML-DSA images with `ml-dsa`); with
+        // `ed25519`, also the Ed25519 goldens and the hybrid image under ClassicalOnly, and
+        // the hybrid image under Hybrid.
+        let ml_dsa = if crate::mldsa::is_enabled() { 2 } else { 0 };
+        assert_eq!(
+            ok,
+            if ed25519::is_enabled() { 4 + 4 + 1 } else { 4 } + ml_dsa
+        );
     }
 }

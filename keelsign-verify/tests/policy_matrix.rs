@@ -5,8 +5,9 @@
 //!
 //! The trusted keys of every image are its own post-quantum key (if the manifest has one)
 //! and the Ed25519 test key (`keys/ed25519-test-key.spki.der`). The manifest cells assume
-//! the `ed25519` feature; without it, `ClassicalOnly` and `Hybrid` must be
-//! `Ed25519(NotEnabled)` everywhere.
+//! the `ed25519` and `ml-dsa` features; without `ed25519`, `ClassicalOnly` and `Hybrid`
+//! must be `Ed25519(NotEnabled)` everywhere, and without `ml-dsa` the cells are the
+//! entry's `policy_without_ml_dsa` object where it has one (SHA-44).
 
 // Host test code, not no_std firmware: failing a test with a message is the point.
 #![allow(
@@ -21,8 +22,8 @@ use std::path::PathBuf;
 
 use embedded_storage::nor_flash::{ErrorType, NorFlashErrorKind, ReadNorFlash};
 use keelsign_verify::{
-    Algorithm, DEFAULT_CHUNK_LEN, Ed25519Error, Ed25519Key, Error, ImageError, NorFlashReader,
-    Policy, TrustedKey, TrustedKeys, VerifiedImage, verify,
+    Algorithm, DEFAULT_CHUNK_LEN, Ed25519Key, Error, ImageError, NorFlashReader, Policy,
+    TrustedKey, TrustedKeys, VerifiedImage, verify,
 };
 
 fn fixture_dir() -> PathBuf {
@@ -93,16 +94,28 @@ fn hex(text: &str) -> Vec<u8> {
         .collect()
 }
 
-/// The manifest cell of `policy`.
-fn cell(entry: &str, policy: Policy) -> String {
-    let key = match policy {
+fn policy_key(policy: Policy) -> &'static str {
+    match policy {
         Policy::ClassicalOnly => "classical_only",
         Policy::PqOnly => "pq_only",
         Policy::Hybrid => "hybrid",
         other => panic!("unknown policy {other:?}"),
-    };
+    }
+}
+
+/// The manifest cell of `policy` (the `ml-dsa`-on cell).
+fn cell(entry: &str, policy: Policy) -> String {
     let policy_object = &entry[entry.find("\"policy\": {").expect("policy object")..];
-    field(policy_object, key).unwrap()
+    field(policy_object, policy_key(policy)).unwrap()
+}
+
+/// The manifest cell of `policy` without the `ml-dsa` feature: the
+/// `policy_without_ml_dsa` object's, where the entry has one, else [`cell`].
+fn cell_without_ml_dsa(entry: &str, policy: Policy) -> String {
+    match entry.find("\"policy_without_ml_dsa\": {") {
+        Some(at) => field(&entry[at..], policy_key(policy)).unwrap(),
+        None => cell(entry, policy),
+    }
 }
 
 /// The verdict string the manifest uses: `Ok`, or the error as Debug prints it, with a
@@ -170,13 +183,20 @@ fn ed25519_on() -> bool {
     keelsign_verify::ed25519::is_enabled()
 }
 
-/// The expected verdict of a cell in this build: the manifest's, or `NotEnabled` for a
+fn ml_dsa_on() -> bool {
+    keelsign_verify::mldsa::is_enabled()
+}
+
+/// The expected verdict of a cell in this build: the manifest's (the
+/// `policy_without_ml_dsa` cell without the `ml-dsa` feature), or `NotEnabled` for a
 /// policy needing the `ed25519` feature when it is off.
 fn expected(entry: &str, policy: Policy) -> String {
     if policy.requires_ed25519() && !ed25519_on() {
         "Ed25519(NotEnabled)".to_owned()
-    } else {
+    } else if ml_dsa_on() {
         cell(entry, policy)
+    } else {
+        cell_without_ml_dsa(entry, policy)
     }
 }
 
@@ -184,7 +204,7 @@ fn expected(entry: &str, policy: Policy) -> String {
 fn every_manifest_image_matches_its_policy_cells() {
     let manifest = manifest();
     let names = output_names(&manifest);
-    assert_eq!(names.len(), 34, "{names:?}");
+    assert_eq!(names.len(), 53, "{names:?}");
     // TP1's six rows are in the matrix.
     for name in [
         "mcuboot-ed25519.bin",
@@ -193,6 +213,12 @@ fn every_manifest_image_matches_its_policy_cells() {
         "keelsign-hybrid-bad-ed25519.bin",
         "keelsign-hybrid-bad-pq.bin",
         "keelsign-hybrid-missing-pq.bin",
+        // SHA-44's ML-DSA rows.
+        "keelsign-mldsa44.bin",
+        "keelsign-mldsa65.bin",
+        "keelsign-hybrid-ed25519-mldsa44.bin",
+        "keelsign-mldsa44-foreign-sig.bin",
+        "keelsign-hybrid-mldsa44-stripped-pq.bin",
     ] {
         assert!(names.iter().any(|n| n == name), "{name} missing");
     }
@@ -207,7 +233,7 @@ fn every_manifest_image_matches_its_policy_cells() {
             cells += 1;
         }
     }
-    assert_eq!(cells, 34 * 3);
+    assert_eq!(cells, 53 * 3);
 }
 
 #[test]
@@ -275,6 +301,8 @@ fn verified_image_exposes_version_counter_digest_and_keys() {
         "mcuboot-ed25519-200k.bin",
         "keelsign-lms-protected-tlvs.bin",
         "keelsign-hybrid-protected-tlvs.bin",
+        "keelsign-mldsa44-protected-tlvs.bin",
+        "keelsign-mldsa65-protected-tlvs.bin",
     ];
     let ed = ed25519_test_key();
     let mut ok = 0;
@@ -365,6 +393,7 @@ fn value_range(data: &[u8], kind: u16) -> std::ops::Range<usize> {
 #[cfg(feature = "ed25519")]
 #[test]
 fn hybrid_halves_tampered_name_the_half() {
+    use keelsign_verify::Ed25519Error;
     use keelsign_verify::image::IMAGE_TLV_ED25519;
     use keelsign_verify::tlv::TLV_LMS_HSS_SIG;
 
@@ -441,52 +470,52 @@ fn hybrid_halves_tampered_name_the_half() {
 }
 
 #[test]
-fn ml_dsa_rows_are_unsupported_under_both_feature_states() {
+fn ml_dsa_rows_verify_with_the_feature_and_fail_closed_without_it() {
     let manifest = manifest();
-    for (name, alg) in [
-        ("keelsign-mldsa44.bin", Algorithm::MlDsa44),
-        ("keelsign-mldsa65.bin", Algorithm::MlDsa65),
-        ("keelsign-hybrid-ed25519-mldsa44.bin", Algorithm::MlDsa44),
-    ] {
-        let entry = entry(&manifest, name);
-        assert_eq!(field(&entry, "verifiable").as_deref(), Some("false"));
-        let data = read(name);
+    let mut differing = 0;
+    for name in output_names(&manifest) {
+        let entry = entry(&manifest, &name);
+        let alg = match field(&entry, "algorithm").as_deref() {
+            Some("MlDsa44") => Algorithm::MlDsa44,
+            Some("MlDsa65") => Algorithm::MlDsa65,
+            _ => {
+                assert!(
+                    !entry.contains("\"policy_without_ml_dsa\""),
+                    "{name}: only ML-DSA rows depend on the ml-dsa feature"
+                );
+                continue;
+            }
+        };
+        let data = read(&name);
         let keys = keys_for(&entry);
-        let note = format!("{name} (ml-dsa feature {})", cfg!(feature = "ml-dsa"));
-        // PqOnly: the filler ML-DSA half fails closed, with `ml-dsa` off (the dispatcher)
-        // and on (DefaultBackend, until SHA-44).
-        assert_eq!(
-            run(&data, &keys, Policy::PqOnly).map(|_| ()),
-            Err(Error::UnsupportedAlgorithm(alg)),
-            "{note}"
-        );
-        assert_eq!(
-            cell(&entry, Policy::PqOnly),
-            format!("UnsupportedAlgorithm({alg:?})")
-        );
-        let hybrid = run(&data, &keys, Policy::Hybrid).map(|_| ());
-        let classical = run(&data, &keys, Policy::ClassicalOnly).map(|_| ());
-        if !ed25519_on() {
-            assert_eq!(hybrid, Err(Error::Ed25519(Ed25519Error::NotEnabled)));
-            assert_eq!(classical, Err(Error::Ed25519(Ed25519Error::NotEnabled)));
-        } else if field(&entry, "ed25519").as_deref() == Some("true") {
-            // The real Ed25519 half verifies; the ML-DSA half fails closed.
-            assert_eq!(hybrid, Err(Error::UnsupportedAlgorithm(alg)), "{note}");
-            assert_eq!(classical, Ok(()), "{note}");
-        } else {
-            assert_eq!(hybrid, Err(Error::Ed25519(Ed25519Error::Missing)), "{note}");
-            assert_eq!(
-                classical,
-                Err(Error::Ed25519(Ed25519Error::Missing)),
-                "{note}"
-            );
+        for &policy in Policy::ALL {
+            let (on, off) = (cell(&entry, policy), cell_without_ml_dsa(&entry, policy));
+            if on != off {
+                differing += 1;
+                // Only a PQ-half cell the ML-DSA backend decides changes, and only to the
+                // dispatcher's UnsupportedAlgorithm.
+                assert!(policy.requires_pq(), "{name} {policy:?}");
+                assert!(
+                    ["Ok", "SignatureInvalid", "MalformedSignature"].contains(&on.as_str()),
+                    "{name} {policy:?}: {on}"
+                );
+                assert_eq!(off, format!("UnsupportedAlgorithm({alg:?})"), "{name}");
+            }
+            if !policy.requires_ed25519() || ed25519_on() {
+                let got = verdict(&run(&data, &keys, policy));
+                let want = if ml_dsa_on() { on } else { off };
+                assert_eq!(got, want, "{name} {policy:?} (ml-dsa {})", ml_dsa_on());
+            }
         }
     }
+    // 4 PqOnly images + the hybrid (PqOnly and Hybrid) + 12 backend negatives.
+    assert_eq!(differing, 4 + 2 + 12);
 }
 
 #[cfg(feature = "ed25519")]
 #[test]
 fn golden_ed25519_images_verify_under_classical_only() {
+    use keelsign_verify::Ed25519Error;
     use keelsign_verify::{DefaultBackend, verify_with};
 
     let manifest = manifest();

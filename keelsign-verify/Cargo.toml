@@ -9,10 +9,12 @@ repository.workspace = true
 
 [features]
 default = []
-# ML-DSA-44/65 signature verification. Empty for now: SHA-44 attaches `dep:ml-dsa`
-# (pinned per CLAUDE.md). With it off, ML-DSA signatures fail with
-# `Error::UnsupportedAlgorithm`.
-ml-dsa = []
+# ML-DSA-44/65 signature verification (SHA-44): pure FIPS 204 `ML-DSA.Verify` with
+# `MLDSA_CONTEXT`, through `ml-dsa` (pinned per CLAUDE.md). Off by default; with it off,
+# ML-DSA signatures fail with `Error::UnsupportedAlgorithm`. Its verify needs about
+# 98 KB (ML-DSA-44) / 158 KB (ML-DSA-65) of stack on stable, far over the 32 KB device
+# budget (docs/benchmarks.md; SHA-169 owns a low-stack verify).
+ml-dsa = ["dep:ml-dsa"]
 # The Ed25519 half of a hybrid image (SHA-46): `Policy::ClassicalOnly` and
 # `Policy::Hybrid` verify MCUboot's ED25519 TLV with `ed25519-dalek`'s `verify_strict`.
 # Off by default; without it those two policies fail closed with
@@ -30,10 +32,20 @@ embedded-storage = { version = "=0.3.2", default-features = false }
 # default features off (no `fast` tables, no `zeroize`: nothing secret in a verifier);
 # u32 serial backend on Cortex-M; forbid(unsafe_code). Shares sha2 0.11.0.
 ed25519-dalek = { version = "=3.0.0", default-features = false, optional = true }
+# ML-DSA-44/65 verification for the `ml-dsa` feature (SHA-44). Pinned to a release that
+# includes the fixes for CVE-2026-24850 (GHSA-5x2r-hc65-25f9, fixed in 0.1.0-rc.4),
+# GHSA-h37v-hp6w-2pp8 (fixed in 0.1.0-rc.5) and CVE-2026-22705 (fixed in 0.1.0-rc.3); see
+# CLAUDE.md. Default features off: no `alloc` (all state on the stack), no
+# `getrandom`/`rand_core` (verify only), no `pkcs8` (raw FIPS 204 keys), no `zeroize`.
+ml-dsa = { version = "=0.1.1", default-features = false, optional = true }
 
 [dev-dependencies]
 # Property tests of the image parser (SHA-35). Host tests only; without `fork`/`timeout`.
 proptest = { version = "=1.11.0", default-features = false, features = ["std"] }
+# The KSMD fixture parser and runner of SHA-34's ML-DSA known-answer fixtures (NIST ACVP
+# sigVer and Wycheproof), for tests/mldsa_kat.rs (SHA-44, TP4). Unpublished and path-only,
+# so `cargo publish` strips it.
+mldsa-kat = { path = "../benches/mldsa-kat" }
 
 [lints]
 workspace = true

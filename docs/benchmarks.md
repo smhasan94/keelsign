@@ -250,6 +250,10 @@ frame may differ slightly, but not by anything close to that 2.9× margin.
 The board runs still fill in the cycles and the measured peak stack in
 [Results](#results) for the record (the `pending (hardware)` cells).
 
+SHA-44 put ML-DSA verify into `keelsign-verify` behind the off-by-default `ml-dsa` feature
+anyway, with this decision unchanged: its stack is recorded in
+[ML-DSA verify (SHA-44)](#ml-dsa-verify-sha-44).
+
 ## Follow-ups
 
 Filed in Linear (project keelsign):
@@ -602,13 +606,16 @@ The policies and the matrix are specified in [docs/policy.md](policy.md).
   are own-frame sizes without a call graph, so the chain is an estimate, far under the
   32,768 B limit of the LMS tests.
 - **On target** (`tests/policy.rs`, needs the board): `policy_matrix_from_flash` runs
-  every case of `policy-matrix.bin` (33 images, every one in `tests/fixtures/images/` but
-  the 200 KB image) under every policy through `policy_kat::run_fixture`, each image read
+  every case of `policy-matrix.bin` (52 images since SHA-44, every one in
+  `tests/fixtures/images/` but the 200 KB image) under every policy through `policy_kat::run_fixture`, each image read
   through `NorFlashReader` over `&mut` the board flash at its `.rodata` address (nRF52840:
   the address; RP2350: the address minus the XIP base `0x1000_0000`), with
   `DefaultBackend::new()`, a 4 KiB TLV buffer and a 256 B chunk. It logs
-  `POLICY board=… case=… policy=… expect=… got=… result=ok` for each of the 99 cells and
-  `POLICY board=nrf52840 passed=99/99` (or `board=rp2350`), and fails on any mismatch.
+  `POLICY board=… case=… policy=… expect=… got=… result=ok` for each of the 156 cells and
+  `POLICY board=nrf52840 passed=156/156` (or `board=rp2350`), and fails on any mismatch.
+  With the bench `ml-dsa` feature the ML-DSA cells verify; without it they expect the
+  `ml-dsa`-off verdicts (`policy-matrix.bin` KSPM v2 carries both), so both builds give
+  `passed=156/156`.
 
 ### Hybrid results
 
@@ -655,7 +662,8 @@ cd benches/nrf52840-mldsa
 cargo test --release --locked --test policy -- policy_matrix_from_flash
 ```
 
-Expect `POLICY board=nrf52840 passed=99/99` and no `result=FAIL` line.
+Expect `POLICY board=nrf52840 passed=156/156` and no `result=FAIL` line, with and without
+`--features ml-dsa`.
 
 Flash footprint (no board):
 
@@ -673,4 +681,169 @@ Static frames (nightly only, not run in CI):
 cd benches/nrf52840-mldsa
 cargo +nightly rustc --release --locked --bin size_verify --target-dir target/nightly -- -Z emit-stack-sizes
 python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/release/size_verify --top 16
+```
+
+## ML-DSA verify (SHA-44)
+
+`keelsign-verify` verifies ML-DSA-44/65 behind its off-by-default `ml-dsa` feature
+(`keelsign_verify::mldsa`: pure FIPS 204 `ML-DSA.Verify` over `M` with `MLDSA_CONTEXT`,
+through `ml-dsa` `=0.1.1` without default features, so no heap). This section records
+what enabling the feature costs on the two boards. The SHA-34 [Decision](#decision)
+stands: the stack is far over the 32 KB device budget, and
+[SHA-169](https://linear.app/shakooky/issue/SHA-169) owns a low-stack verify.
+
+### ML-DSA verify method
+
+- **Bench feature**: both bench projects have a Cargo feature `ml-dsa =
+  ["keelsign-verify/ml-dsa"]`, off by default, built into its own target dir
+  (`--target-dir target/mldsa`). Without it every other test, bin and recorded number in
+  this document is built exactly as before.
+- **Static frame**: nightly `-Z emit-stack-sizes` own-frame sizes of `size_verify` built
+  `--features ml-dsa` (its `verify` then contains the ML-DSA arms), read by
+  `scripts/stack_frames.py`. Each parameter set verifies in its own
+  `#[inline(never)]` frame, `keelsign_verify::mldsa::verify_param<P>`, so the
+  `verify_with` chain (`size_verify::verify_hybrid`, with the 4 KiB TLV buffer and the
+  256 B chunk) stays within 8 B of its feature-off size and an LMS/HSS or Ed25519 verify does not
+  reserve the ML-DSA stack. (Inlined, the planning measurement put the merged dispatcher
+  frame at 156,448 B for every verify.)
+- **Flash Δ**: `size_verify` built `--features ml-dsa` minus the same bin without it
+  (`elf_sizes.py --baseline`): the ML-DSA verifier and everything it pulls in.
+- **On target** (`tests/mldsa_verify.rs`, needs the board and `--features ml-dsa`):
+  `mldsa_images_from_flash` verifies the five valid ML-DSA images of the policy matrix
+  (`keelsign-mldsa44.bin`, `keelsign-mldsa65.bin`, both `-protected-tlvs` variants under
+  `Policy::PqOnly`, `keelsign-hybrid-ed25519-mldsa44.bin` under `Policy::Hybrid`), each read
+  through `NorFlashReader` at its `.rodata` address with the keys from `policy-matrix.bin`,
+  a 4 KiB TLV buffer and a 256 B chunk on the measured frame. Each verify runs between
+  `stack_paint::paint` and `stack_paint::high_water` and is timed with `CYCCNT`; the test
+  logs `MLDSA board=… image=… set=… policy=… result=Ok cycles=… us=… peak_stack=…
+  saturated=false` per image and `MLDSA board=nrf52840 passed=5/5` (or `board=rp2350`).
+  It fails on any verdict other than `Ok` or a saturated paint; it does not assert the
+  32 KB budget, whose breach is the documented finding, not a test failure.
+
+### Stack the feature needs
+
+**With the stable compiler the repository builds with (`rust-toolchain.toml`: stable,
+Rust 1.91.1), `ml-dsa` needs 97,544 B (ML-DSA-44) / 158,192 B (ML-DSA-65) of stack for
+the `mldsa::verify_param` frame alone (release), on top of the `verify_with` chain (about
+4.9 KB with the buffers, plus a few KB of ML-DSA callees). Budget with these figures.**
+They are the prologues of the two `verify_param` instances in the stable release
+`size_verify --features ml-dsa`, identical on both boards: ML-DSA-44 reserves
+`sub.w sp, sp, #0x17c00` + `sub sp, #0xe4` after pushing nine registers (36 B), ML-DSA-65
+`#0x26800` + `#0x1cc` + 36 B (disassembled with `objdump -d`; the instance is identified by
+its key-length compare, `cmp.w r1, #0x520` = 1,312 or `#0x7a0` = 1,952). The nightly
+`-Z emit-stack-sizes` frames of the same code (`rustc 1.101.0-nightly (c1070d693
+2026-09-28)`) are 93,456 / 153,080 B in release and 73,872 / 118,952 B at
+`opt-level = "s"`; the results table below records those, as SHA-34 did. Either way that is
+far over the 32 KB (32,768 B) on-device budget of the SHA-34 decision rule. Both sets fit
+in the stack the test binaries have (261,048 B on the nRF52840, 522,960 B on the RP2350).
+ML-DSA-65 leaves roughly 85 KB free on the nRF52840: 261,048 B minus the 158,192 B stable
+frame minus about 17 KB for the `verify_with` chain with its 4 KiB TLV buffer and 256 B
+chunk, the ML-DSA callees and the test harness. So the board runs can measure them, but a
+real 256 KB-RAM bootloader cannot spare 158 KB beside its application. Integrators who
+enable `ml-dsa` on a device must budget that stack themselves until
+[SHA-169](https://linear.app/shakooky/issue/SHA-169) lands.
+
+### ML-DSA verify results
+
+Static frames and flash are measured without the boards (stable Rust 1.91.1 for flash,
+nightly `rustc 1.101.0-nightly (c1070d693 2026-09-28)` for the frames: the "Static frame"
+columns are nightly `-Z emit-stack-sizes` figures; the stable release prologues, the
+figures to budget with, are 97,544 / 158,192 B, see
+[Stack the feature needs](#stack-the-feature-needs)); peak stack and cycles need
+the boards (`tests/mldsa_verify.rs`).
+
+| Board | Set | Static frame release | Static frame size | `verify_with` frame (ml-dsa on / off, release) | Flash Δ ml-dsa (release / size) | Peak stack (measured) | Cycles |
+|---|---|---|---|---|---|---|---|
+| nrf52840 | ML-DSA-44 | 93,456 B | 73,872 B | 4,912 B / 4,904 B | 55,232 B / 13,832 B | pending (hardware) | pending (hardware) |
+| nrf52840 | ML-DSA-65 | 153,080 B | 118,952 B | 4,912 B / 4,904 B | 55,232 B / 13,832 B | pending (hardware) | pending (hardware) |
+| rp2350 | ML-DSA-44 | 93,456 B | 73,872 B | 4,912 B / 4,904 B | 55,176 B / 13,828 B | pending (hardware) | pending (hardware) |
+| rp2350 | ML-DSA-65 | 153,080 B | 118,952 B | 4,912 B / 4,904 B | 55,176 B / 13,828 B | pending (hardware) | pending (hardware) |
+
+The frames are identical on both boards and match SHA-34's `verify_case` (93,448 /
+153,072 B) within 8 B. The flash Δ is one figure for both sets: one `size_verify` carries
+both arms. Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
+
+| Board / profile | `size_verify` flash (ml-dsa off) | `size_verify` flash (ml-dsa on) | Δ ml-dsa |
+|---|---|---|---|
+| nrf52840 / release | 120,108 | 175,340 | 55,232 |
+| nrf52840 / size | 103,952 | 117,784 | 13,832 |
+| rp2350 / release | 121,188 | 176,364 | 55,176 |
+| rp2350 / size | 104,604 | 118,432 | 13,828 |
+
+Feature-off drift. The SHA-46 hybrid and SHA-65 LMS/HSS tables above keep the figures of
+their tickets, and they no longer reproduce at this commit. With the feature off, the same
+commands now give a SHA-46 hybrid delta of 74,736 / 59,380 B (nrf52840 release / size) and
+74,656 / 59,372 B (rp2350), against 74,376 / 59,144 and 74,264 / 59,152 B at `861abce`
+(the SHA-46 tip). The LMS/HSS delta is now 7,216 / 5,384 B (nrf52840) and 7,224 / 5,384 B
+(rp2350), against 6,836 / 5,236 and 6,844 / 5,236 B at `861abce`. (The
+[LMS results](#lms-results) table still shows the SHA-240 figures, which had already
+drifted by `861abce`.) The `verify_hybrid` frame in the [Hybrid method](#hybrid-method)
+text, 4,896 B, is now 4,904 B with the feature off.
+
+There are two causes:
+
+- **Code drift of about 360–380 B.** A symbol comparison (`nm -S`) of the feature-off
+  nrf52840 release ELFs between `861abce` and this commit attributes it as follows:
+  - `size_lms`, +380 B: `DefaultBackend::verify` +120 B (the ML-DSA arm and the
+    `cnsa_2_0()` refusal), `keelsign_verify::lms::walk` +256 B (its source is unchanged:
+    a fat-LTO inlining and layout difference) and `lms_kat::verify_with_keys` +4 B.
+  - `size_verify`, +360 B in its delta: `DefaultBackend::verify` +120 B,
+    `verify_pq_with` +16 B, `lms::walk` +236 B, `size_verify::verify_hybrid` −24 B, and
+    14 B net in the two bins' `main` (362 B in all; alignment padding takes back 2 B).
+  - No `mldsa` or `ml_dsa` symbol is in either feature-off ELF.
+- **Bigger absolute sizes.** `size_verify` and `size_verify_baseline` both grow because
+  `policy-matrix.bin`, which both carry in `.rodata`, went from 7,295 B to 37,633 B (KSPM
+  v2: 19 more images and the off-cells). This cancels out of the deltas.
+
+The digest and the SHA-34 ML-DSA bins are unchanged.
+[SHA-275](https://linear.app/shakooky/issue/SHA-275) refreshes those tables.
+
+### ML-DSA verify reproduce
+
+Every command block starts from the repository root. For the Pico 2 W use
+`benches/rp2350-mldsa`, board `rp2350` and target `thumbv8m.main-none-eabihf`.
+
+Host tests (no board):
+
+```sh
+cargo test -p keelsign-verify --locked --features ml-dsa
+cargo test -p keelsign-verify --locked --features ed25519,ml-dsa
+cargo test -p policy-kat --locked --features keelsign-verify/ml-dsa
+```
+
+On-target (manual procedure, needs the board):
+
+```sh
+cd benches/nrf52840-mldsa
+cargo test --release --locked --features ml-dsa --test mldsa_verify
+cargo test --release --locked --features ml-dsa --test policy -- policy_matrix_from_flash
+cargo test --release --locked --test policy -- policy_matrix_from_flash
+```
+
+Expect five `MLDSA … result=Ok … saturated=false` lines and `MLDSA board=nrf52840
+passed=5/5`, then `POLICY board=nrf52840 passed=156/156` from both policy runs. Copy each
+set's largest `peak_stack=` and its `cycles=` into the results table.
+
+Flash footprint (no board):
+
+```sh
+cd benches/nrf52840-mldsa
+cargo build --release --locked --bins
+cargo build --profile size --locked --bins
+cargo build --release --locked --bins --features ml-dsa --target-dir target/mldsa
+cargo build --profile size --locked --bins --features ml-dsa --target-dir target/mldsa
+python3 ../../scripts/elf_sizes.py --label nrf52840/release/ml-dsa --baseline target/thumbv7em-none-eabihf/release/size_verify target/thumbv7em-none-eabihf/release/size_verify target/mldsa/thumbv7em-none-eabihf/release/size_verify
+python3 ../../scripts/elf_sizes.py --label nrf52840/size/ml-dsa --baseline target/thumbv7em-none-eabihf/size/size_verify target/thumbv7em-none-eabihf/size/size_verify target/mldsa/thumbv7em-none-eabihf/size/size_verify
+```
+
+Static frames (nightly only, not run in CI):
+
+```sh
+cd benches/nrf52840-mldsa
+cargo +nightly rustc --release --locked --features ml-dsa --bin size_verify --target-dir target/nightly-mldsa -- -Z emit-stack-sizes
+python3 ../../scripts/stack_frames.py target/nightly-mldsa/thumbv7em-none-eabihf/release/size_verify --top 8 --match keelsign_verify
+cargo +nightly rustc --profile size --locked --features ml-dsa --bin size_verify --target-dir target/nightly-mldsa -- -Z emit-stack-sizes
+python3 ../../scripts/stack_frames.py target/nightly-mldsa/thumbv7em-none-eabihf/size/size_verify --top 8 --match keelsign_verify
+cargo +nightly rustc --release --locked --bin size_verify --target-dir target/nightly -- -Z emit-stack-sizes
+python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/release/size_verify --top 8 --match keelsign_verify
 ```

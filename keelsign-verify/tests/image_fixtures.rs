@@ -33,7 +33,7 @@ const TLV_ED25519: u16 = 0x0024;
 
 /// Every signed keelsign fixture image, as named in MANIFEST.json (the SHA-46 policy
 /// mutations and their verdicts are in `tests/policy_matrix.rs`).
-const FIXTURES: [&str; 10] = [
+const FIXTURES: [&str; 12] = [
     "keelsign-lms-m32-h5.bin",
     "keelsign-hss2-m32-h5h5.bin",
     "keelsign-lms-protected-tlvs.bin",
@@ -44,6 +44,8 @@ const FIXTURES: [&str; 10] = [
     "keelsign-hybrid-ed25519-mldsa44.bin",
     "keelsign-hybrid-protected-tlvs.bin",
     "keelsign-hybrid-reserved-tlv-protected.bin",
+    "keelsign-mldsa44-protected-tlvs.bin",
+    "keelsign-mldsa65-protected-tlvs.bin",
 ];
 
 /// The SHA-46 image with a keelsign TLV in the protected area on purpose.
@@ -255,21 +257,23 @@ fn every_fixture_walks_and_selects_expected_tlvs() {
             Algorithm::MlDsa65 => Some(3309),
             _ => None,
         };
+        assert_eq!(field(&entry, "verifiable"), "true", "{name}");
+        assert_eq!(expect, "Ok", "{name}");
         if let Some(len) = expected_len {
             assert_eq!(selected.signature.len(), len, "{name}");
             assert_eq!(Some(public_key.len()), alg.public_key_len(), "{name}");
-            assert_eq!(field(&entry, "verifiable"), "false", "{name}");
-            // ML-DSA is not verified yet (SHA-44): off, the dispatcher refuses it; on,
-            // DefaultBackend does. Both give UnsupportedAlgorithm.
-            assert_eq!(expect, "UnsupportedAlgorithm", "{name}");
+            // ML-DSA verifies with the `ml-dsa` feature (SHA-44); without it the
+            // dispatcher refuses it.
+            let want = if alg.is_enabled() {
+                Ok(())
+            } else {
+                Err(Error::UnsupportedAlgorithm(alg))
+            };
             assert_eq!(
                 verify_image(&image, alg, &public_key, &digest),
-                Err(Error::UnsupportedAlgorithm(alg)),
+                want,
                 "{name}"
             );
-        } else {
-            assert_eq!(field(&entry, "verifiable"), "true", "{name}");
-            assert_eq!(expect, "Ok", "{name}");
         }
     }
 }
@@ -279,7 +283,7 @@ fn lms_fixtures_verify_through_verify_pq() {
     let mut verified = 0;
     for name in FIXTURES {
         let entry = manifest_entry(name);
-        if field(&entry, "verifiable") != "true" {
+        if field(&entry, "algorithm") != "LmsHss" || field(&entry, "expect_verify_pq") != "Ok" {
             continue;
         }
         let data = read(name);
@@ -320,7 +324,7 @@ fn hss2_image_is_unsupported_under_cnsa_2_0_and_single_tree_images_verify() {
     let (mut single_tree, mut two_level) = (0, 0);
     for name in FIXTURES {
         let entry = manifest_entry(name);
-        if field(&entry, "verifiable") != "true" {
+        if field(&entry, "algorithm") != "LmsHss" || field(&entry, "expect_verify_pq") != "Ok" {
             continue;
         }
         let data = read(name);

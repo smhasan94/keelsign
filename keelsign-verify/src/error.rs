@@ -38,15 +38,23 @@ pub enum Error {
     /// The LMS/HSS backend ([`lms`](crate::lms)) returns it for a typecode pair outside its
     /// [`ParameterPolicy`](crate::lms::ParameterPolicy) at any level, or an unsupported
     /// number of HSS levels, before hashing anything.
+    ///
+    /// [`DefaultBackend::cnsa_2_0`](crate::DefaultBackend::cnsa_2_0) returns it for every
+    /// ML-DSA-44/65 signature (never CNSA 2.0 algorithms).
     UnsupportedParameterSet,
     /// The signature is shorter or longer than its parameter sets dictate (truncated, or
     /// with trailing bytes), or its structure does not match the public key (for HSS,
     /// a level count other than the key's).
+    ///
+    /// For ML-DSA ([`mldsa`](crate::mldsa)) also a signature that does not decode: a
+    /// malformed hint encoding, or `‖z‖∞ ≥ γ1 − β` (the FIPS 204 norm bound surfaces here
+    /// because `ml-dsa` checks it while decoding).
     MalformedSignature,
     /// The trusted public key is not a valid encoding for its parameter set (for LMS/HSS,
-    /// too short or not exactly `4 + 24 + m` bytes).
+    /// too short or not exactly `4 + 24 + m` bytes; for ML-DSA, not 1,312 / 1,952 bytes).
     InvalidPublicKey,
-    /// The signature does not verify under the selected key.
+    /// The signature does not verify under the selected key (for ML-DSA: wrong key,
+    /// message or context, or a tampered `c̃` or `z`).
     SignatureInvalid,
     /// The image does not parse ([`Image::read_from`](crate::image::Image::read_from)).
     Parse(ParseError),

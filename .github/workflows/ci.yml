@@ -61,6 +61,10 @@ jobs:
       - name: cargo test (keelsign-verify, ed25519 + ml-dsa)
         run: cargo test -p keelsign-verify --locked --features ed25519,ml-dsa
 
+      # SHA-44: the policy-matrix runner with the ML-DSA cells live (KSPM v2 on-set).
+      - name: cargo test (policy-kat, keelsign-verify/ml-dsa)
+        run: cargo test -p policy-kat --locked --features keelsign-verify/ml-dsa
+
       # Only the packaging tests: the other ignored repo-checks tests need the thumb
       # targets, probe-rs and flip-link; the cross-build job covers the example builds.
       - name: repo checks (network)
@@ -178,3 +182,18 @@ jobs:
       - name: build flash-footprint bins
         if: ${{ matrix.bench }}
         run: cargo build --release --locked --target ${{ matrix.target }} --bins
+
+      # SHA-44: the bench `ml-dsa` feature (tests/mldsa_verify.rs, the ML-DSA cells of
+      # tests/policy.rs, size_verify with the ML-DSA arms), in its own target dir so the
+      # feature-off builds above stay as they are.
+      - name: cargo clippy (all targets, ml-dsa)
+        if: ${{ matrix.bench }}
+        run: cargo clippy --locked --target ${{ matrix.target }} --all-targets --features ml-dsa --target-dir target/mldsa -- -D warnings
+
+      - name: build on-target tests (ml-dsa)
+        if: ${{ matrix.bench }}
+        run: cargo test --no-run --release --locked --target ${{ matrix.target }} --features ml-dsa --target-dir target/mldsa
+
+      - name: build flash-footprint bins (ml-dsa)
+        if: ${{ matrix.bench }}
+        run: cargo build --release --locked --target ${{ matrix.target }} --bins --features ml-dsa --target-dir target/mldsa

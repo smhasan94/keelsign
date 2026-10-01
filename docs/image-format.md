@@ -262,8 +262,9 @@ MLDSA_CONTEXT = b"keelsign-mcuboot-image-v1"   (25 bytes)
 Every keelsign ML-DSA signature uses this FIPS 204 context string (at most 255 bytes).
 draft-connolly-cfrg-ml-dsa-security-considerations-02 §2.2.2 recommends a fixed context
 string per protocol use: it separates keelsign image signatures from any other signature
-made with the same ML-DSA key. The ML-DSA backend (SHA-44) passes it to
-`verify_with_context`; a new image-format version would get a new context string.
+made with the same ML-DSA key. `keelsign_verify::mldsa` (SHA-44, the `ml-dsa` feature)
+passes it to `verify_with_context`; a new image-format version would get a new context
+string.
 
 ## Accepted LMS parameter sets and CNSA 2.0
 
@@ -418,8 +419,7 @@ Each row was checked against the cited source at the stated commit.
   LMS/HSS parameter set is the trusted public key's.
 - ML-DSA-87 and SLH-DSA.
 - MCUboot PR #2707's `IMAGE_TLV_LMS` (`0x26`) compatibility mode (follow-up).
-- The image parser (SHA-35), digest computation (SHA-42), the ML-DSA backend (SHA-44),
-  the CLI (SHA-49, SHA-51), per-board partition numbers (SHA-58) and the MCUboot
+- The image parser (SHA-35), digest computation (SHA-42), the CLI (SHA-49, SHA-51), per-board partition numbers (SHA-58) and the MCUboot
   allow-list glue (SHA-62); the verify policies (SHA-46) are in
   [docs/policy.md](policy.md).
 
@@ -429,7 +429,14 @@ Each row was checked against the cited source at the stated commit.
 [`scripts/gen_image_fixtures.py`](../scripts/gen_image_fixtures.py): imgtool 2.4.0 output
 (header, protected TLVs, SHA256 TLV and, for the hybrid image, the Ed25519 KEYHASH and
 ED25519 TLVs, made with a committed Ed25519 **test key** from a fixed public seed) plus the
-keelsign TLVs, with LMS/HSS signatures from the pinned independent signer hsslms 0.1.3.
+keelsign TLVs, with LMS/HSS signatures from the pinned independent signer hsslms 0.1.3
+and ML-DSA signatures (SHA-44) from the pinned independent signer dilithium-py 1.4.0
+(pure ML-DSA over `M` with `MLDSA_CONTEXT`, the FIPS 204 deterministic variant). The
+ML-DSA signatures are made with two **test keys**, one per parameter set, whose seeds are
+SHA-256 of fixed public labels; `MANIFEST.json` `keys` records each seed and public key
+(`mldsa-test-key:mldsa44`, `mldsa-test-key:mldsa65`), and
+`keelsign-verify/tests/mldsa_images.rs` checks every committed ML-DSA key and signature
+byte for byte against RustCrypto `ml-dsa`'s deterministic signer from the same seed.
 `MANIFEST.json` records every file's size and SHA-256 and the imgtool and cryptography
 versions. `keelsign-verify/tests/image_fixtures.rs` parses them with
 `keelsign_verify::image` and verifies them.
@@ -439,15 +446,26 @@ eighteen deterministic mutations, all written by the same script:
 
 | File | Notes |
 |---|---|
-| `keelsign-hybrid-ed25519-mldsa44.bin` | imgtool Ed25519 plus an ML-DSA-44 filler half (does not verify until SHA-44) |
+| `keelsign-hybrid-ed25519-mldsa44.bin` | imgtool Ed25519 plus an ML-DSA-44 half under the ML-DSA-44 test key |
 | `keelsign-hybrid-protected-tlvs.bin` | the hybrid layout with protected `SEC_CNT` 7 and vendor TLV `0x10A0` |
 | `keelsign-hybrid-reserved-tlv-protected.bin` | the hybrid layout plus a `0x4BA0` TLV in the protected area (`imgtool sign --custom-tlv`); rejected |
 | `keelsign-hybrid-*.bin` (18 more) | mutations of `keelsign-hybrid-ed25519-lms.bin` (one of `keelsign-hybrid-protected-tlvs.bin`), not re-signed; `MANIFEST.json` records `derived_from` and `mutation` |
-| `policy-matrix.bin` | the "KSPM v1" index of the matrix (names, PQ keys, expected verdicts; no image bytes) that `benches/policy-kat` runs on the host and the boards |
+| `policy-matrix.bin` | the "KSPM v2" index of the matrix (names, PQ keys, expected verdicts with the `ml-dsa` feature on and off; no image bytes) that `benches/policy-kat` runs on the host and the boards |
+
+The ML-DSA verifier (SHA-44) adds two signed images and seventeen mutations:
+
+| File | Notes |
+|---|---|
+| `keelsign-mldsa44.bin`, `keelsign-mldsa65.bin` | ML-DSA-44 / ML-DSA-65 under the test keys (re-signed in SHA-44; before, length-correct fillers) |
+| `keelsign-mldsa44-protected-tlvs.bin`, `keelsign-mldsa65-protected-tlvs.bin` | the same with protected `SEC_CNT` 7 and vendor TLV `0x10A0`, so their `M` differs: the source of the "signature from another image" mutations |
+| `keelsign-mldsa{44,65}-*.bin` (15) | mutations: body and protected TLV tampered (with and without the SHA256 TLV recomputed), signature `c̃` flipped, hint count over ω, signature truncated, key ID flipped, signature taken from the `-protected-tlvs` image |
+| `keelsign-hybrid-mldsa44-missing-pq.bin`, `keelsign-hybrid-mldsa44-stripped-pq.bin` | `keelsign-hybrid-ed25519-mldsa44.bin` without its `0x4BA1` TLV, and without `0x4BA0` and `0x4BA1` |
 
 Every image's `MANIFEST.json` entry carries a `policy` object, its expected verdict under
 `classical_only`, `pq_only` and `hybrid`; docs/policy.md's matrix table,
 `keelsign-verify/tests/policy_matrix.rs` and `policy-matrix.bin` are checked against it.
+Where the verdict differs without the `ml-dsa` feature, the entry also has a
+`policy_without_ml_dsa` object ([docs/policy.md](policy.md#the-ml-dsa-feature)).
 
 The same directory holds golden MCUboot images for the image parser (SHA-35): plain
 imgtool 2.4.0 output, no keelsign TLVs, each with a security counter (7), a dependency
@@ -475,7 +493,9 @@ the TLV types and lengths per area, `M` (`digest_hex`), `tlv_end`, the expected 
 result (`expect_parse`) and whether `imgtool verify` applies (little-endian only).
 
 Tool prerequisite for regenerating (not for testing): `imgtool==2.4.0` in a virtual
-environment, passed with `--imgtool PATH` or found on `PATH`.
+environment, passed with `--imgtool PATH` or found on `PATH`. The script downloads the
+hsslms sdist and the dilithium-py wheel (both pinned by SHA-256, extracted into a
+temporary directory, never installed), so regenerating and `--check` need network access.
 
 ```sh
 python3 -m venv .venv-imgtool && .venv-imgtool/bin/pip install imgtool==2.4.0

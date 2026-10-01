@@ -52,6 +52,8 @@
 //!   [`verify_with`]`(&DefaultBackend::cnsa_2_0(), ..)` or
 //!   [`verify_pq_with`]`(&DefaultBackend::cnsa_2_0(), keys, tlvs, message)`. Only the
 //!   strict policy is CNSA 2.0-compliant (docs/image-format.md).
+//! - [`mldsa`] verifies ML-DSA-44/65 signatures (FIPS 204, pure, with
+//!   [`tlv::MLDSA_CONTEXT`]) with the `ml-dsa` feature.
 //!
 //! # Features
 //!
@@ -61,9 +63,14 @@
 //!   [`Policy::ClassicalOnly`] and [`Policy::Hybrid`] fail closed with
 //!   [`Error::Ed25519`]`(`[`Ed25519Error::NotEnabled`]`)` before anything is read;
 //!   [`Policy::PqOnly`] is unaffected.
-//! - `ml-dsa`: enables ML-DSA-44/65 in the dispatcher. Without it, ML-DSA signatures fail
-//!   with [`Error::UnsupportedAlgorithm`]; until SHA-44 lands, [`DefaultBackend`] also
-//!   answers ML-DSA with that error when the feature is on. LMS/HSS is always enabled.
+//! - `ml-dsa`: verifies ML-DSA-44/65 signatures ([`mldsa`], SHA-44: pure FIPS 204
+//!   `ML-DSA.Verify` with [`tlv::MLDSA_CONTEXT`], through `ml-dsa` with no heap) under
+//!   [`DefaultBackend::new`]; [`DefaultBackend::cnsa_2_0`] refuses ML-DSA with
+//!   [`Error::UnsupportedParameterSet`]. Without the feature, ML-DSA signatures fail with
+//!   [`Error::UnsupportedAlgorithm`]. Its verify needs about 98 KB (ML-DSA-44) / 158 KB
+//!   (ML-DSA-65) of stack, far over the 32 KB device budget: see docs/benchmarks.md,
+//!   "ML-DSA verify (SHA-44)" (SHA-169 owns a low-stack verify). LMS/HSS is always
+//!   enabled.
 #![no_std]
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -79,6 +86,7 @@ pub mod ed25519;
 mod error;
 pub mod image;
 pub mod lms;
+pub mod mldsa;
 pub mod policy;
 pub mod reader;
 pub mod tlv;

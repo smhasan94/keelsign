@@ -17,8 +17,14 @@ mode, key IDs and the hybrid Ed25519 layout) is specified in
 [docs/image-format.md](https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md)
 and the policies in
 [docs/policy.md](https://github.com/smhasan94/keelsign/blob/main/docs/policy.md). The
-ML-DSA backend comes in a later release. Both features are off by default: `ed25519`
-(needed for `ClassicalOnly` and `Hybrid`, which otherwise fail closed) and `ml-dsa`.
+ML-DSA-44/65 verifier (FIPS 204, pure ML-DSA with the keelsign context, through
+`ml-dsa` `=0.1.1` with no heap) comes with the `ml-dsa` feature; without it ML-DSA
+signatures fail closed with `UnsupportedAlgorithm`, and the strict
+`DefaultBackend::cnsa_2_0()` refuses ML-DSA in any build. ML-DSA verify needs about
+98 KB (ML-DSA-44) / 158 KB (ML-DSA-65) of stack on stable, far over a 32 KB device budget
+([docs/benchmarks.md](https://github.com/smhasan94/keelsign/blob/main/docs/benchmarks.md#ml-dsa-verify-sha-44));
+a low-stack verify is planned. Both features are off by default: `ed25519` (needed for
+`ClassicalOnly` and `Hybrid`, which otherwise fail closed) and `ml-dsa`.
 
 `keelsign-verify` will be the `no_std`, heap-free on-device verifier of the keelsign
 post-quantum firmware signing kit: it parses the MCUboot header and TLV area, hashes
