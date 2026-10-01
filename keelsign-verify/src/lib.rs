@@ -2,10 +2,17 @@
 //!
 //! **Pre-release: the API is unstable.** The image format (TLV IDs, signing mode, key
 //! ID, hybrid layout) is specified in [docs/image-format.md](https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md) and its constants
-//! are in [`tlv`]. This version holds the trusted-key set, the post-quantum signature
-//! dispatch and the LMS/HSS verifier; TLV-area parsing, image hashing, the ML-DSA backend
-//! and the hybrid Ed25519 policy land in later releases.
+//! are in [`tlv`]. This version holds the MCUboot image parser, the trusted-key set, the
+//! post-quantum signature dispatch and the LMS/HSS verifier; image hashing, the ML-DSA
+//! backend and the hybrid Ed25519 policy land in later releases.
 //!
+//! - [`image`] parses and validates an MCUboot image (header, protected and unprotected
+//!   TLV areas) without panicking on any input, and yields its TLVs;
+//!   [`image::TlvArea::pairs`] feeds [`select_pq_signature`] and [`verify_pq`]. PQ
+//!   selection MUST use the unprotected area, `image.unprotected().pairs()`: keelsign TLVs
+//!   are unprotected-only (docs/image-format.md), so keelsign TLVs in the protected area
+//!   are ignored for PQ selection (a PQ signature there is inside `M` and can never be a
+//!   valid signature over `M`; rejecting such images is a candidate SHA-46 policy rule).
 //! - [`TrustedKeys`] holds up to `N` borrowed public keys and finds one by key ID
 //!   ([`key_id_of`]).
 //! - [`verify_pq`] picks the single post-quantum signature TLV and the key-ID TLV out of
@@ -34,6 +41,7 @@ mod algorithm;
 mod backend;
 mod dispatch;
 mod error;
+pub mod image;
 pub mod lms;
 pub mod tlv;
 mod trusted_keys;

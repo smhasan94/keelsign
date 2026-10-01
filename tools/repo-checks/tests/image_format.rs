@@ -500,17 +500,69 @@ fn json_field<'a>(object: &'a str, field: &str) -> &'a str {
     rest[..end].trim().trim_matches('"')
 }
 
+/// Standard base64 (RFC 4648 section 4), padding and surrounding whitespace allowed.
+fn base64_decode(text: &[u8]) -> Vec<u8> {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::new();
+    let (mut acc, mut bits) = (0u32, 0);
+    for &c in text
+        .iter()
+        .filter(|c| !c.is_ascii_whitespace() && **c != b'=')
+    {
+        let v = ALPHABET
+            .iter()
+            .position(|&a| a == c)
+            .unwrap_or_else(|| panic!("not base64: {c:#04x}"));
+        acc = (acc << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    out
+}
+
 #[test]
 fn image_fixtures_match_manifest() {
     let manifest = image_manifest();
     let outputs = json_object(&manifest, "outputs");
     let keys = json_object(&manifest, "keys");
     let dir = workspace_root().join("tests/fixtures/images");
+    let signatures = json_object(&manifest, "signatures");
     for name in IMAGE_FIXTURES {
         let path = dir.join(name);
         let bytes = fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let entry = if name.starts_with("keys/") {
+            if name.ends_with(".pem") {
+                assert!(
+                    bytes.starts_with(b"# TEST KEY"),
+                    "{name}: a committed key must start with `# TEST KEY`"
+                );
+            }
             json_object(keys, name)
+        } else if name.starts_with("sigs/") {
+            // Fixed classical signatures (imgtool --sig-out), base64: RSA-2048 PSS is 256
+            // bytes, a DER ECDSA P-256 signature 70 to 72.
+            let decoded = base64_decode(&bytes);
+            let expected = if name.contains("rsa2048") {
+                256..=256
+            } else {
+                assert!(name.contains("ecdsa-p256"), "{name}: unknown signature");
+                70..=72
+            };
+            assert!(
+                expected.contains(&decoded.len()),
+                "{name}: {} decoded bytes",
+                decoded.len()
+            );
+            let entry = json_object(signatures, name);
+            assert_eq!(
+                decoded.len().to_string(),
+                json_field(entry, "decoded_bytes")
+            );
+            entry
         } else {
             let entry = json_object(outputs, name);
             assert_eq!(
@@ -518,8 +570,17 @@ fn image_fixtures_match_manifest() {
                 json_field(entry, "bytes"),
                 "{name}: size"
             );
-            // MCUboot image magic, little-endian.
-            assert_eq!(&bytes[..4], &[0x3d, 0xb8, 0xf3, 0x96], "{name}: magic");
+            if name.starts_with("rejected/") {
+                // Rejected images say why; the big-endian one has the magic byte-swapped.
+                assert_ne!(json_field(entry, "expect_parse"), "Ok", "{name}");
+                if json_field(entry, "endian") == "big" {
+                    assert_eq!(&bytes[..4], &[0x96, 0xf3, 0xb8, 0x3d], "{name}: magic");
+                }
+            } else {
+                // MCUboot image magic, little-endian.
+                assert_eq!(&bytes[..4], &[0x3d, 0xb8, 0xf3, 0x96], "{name}: magic");
+                assert_eq!(json_field(entry, "expect_parse"), "Ok", "{name}");
+            }
             entry
         };
         assert_eq!(
@@ -538,7 +599,7 @@ fn image_fixtures_match_manifest() {
     );
     // Only the fixture files (and the manifest) are in the directory.
     let mut on_disk: Vec<String> = Vec::new();
-    for sub in ["", "keys"] {
+    for sub in ["", "keys", "rejected", "sigs"] {
         for entry in fs::read_dir(dir.join(sub)).expect("read fixture dir") {
             let path = entry.expect("entry").path();
             if path.is_file() {
@@ -557,7 +618,8 @@ fn image_fixtures_match_manifest() {
     expected.sort();
     assert_eq!(on_disk, expected);
 
-    // The Ed25519 key is marked as a test key; KEYHASH is SHA-256 of its SPKI.
+    // The Ed25519 key is marked as a test key (and so are the others, above); KEYHASH is
+    // SHA-256 of its SPKI.
     let pem = read("tests/fixtures/images/keys/ed25519-test-key.pem");
     assert!(
         pem.starts_with("# TEST KEY"),
