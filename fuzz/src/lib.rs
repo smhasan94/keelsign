@@ -341,3 +341,119 @@ pub mod cov {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+
+    /// One `fuzz/corpus/MANIFEST.json` seed entry.
+    struct Seed {
+        name: String,
+        bytes: usize,
+        expect_parse: String,
+        expect_read_from_4k: String,
+    }
+
+    fn corpus_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("corpus")
+    }
+
+    /// The seeds of `fuzz/corpus/MANIFEST.json`. It is `json.dumps(indent=2)` output
+    /// from scripts/gen_fuzz_corpus.py: each seed is a `"name.bin": {` line at four
+    /// spaces, then one scalar field per line at six spaces.
+    fn seeds() -> Vec<Seed> {
+        let text = std::fs::read_to_string(corpus_dir().join("MANIFEST.json")).unwrap();
+        let mut seeds = Vec::new();
+        let mut fields: Vec<(String, String)> = Vec::new();
+        let mut name: Option<String> = None;
+        for line in text.lines() {
+            if let Some(n) = line
+                .strip_prefix("    \"")
+                .and_then(|l| l.strip_suffix("\": {"))
+            {
+                name = Some(n.to_owned());
+                fields.clear();
+            } else if let Some(field) = line.strip_prefix("      \"") {
+                let (key, value) = field.split_once("\": ").unwrap();
+                let value = value.trim_end_matches(',').trim_matches('"');
+                fields.push((key.to_owned(), value.to_owned()));
+            } else if line.starts_with("    }")
+                && let Some(n) = name.take()
+            {
+                let get = |k: &str| {
+                    let found = fields.iter().find(|(key, _)| key == k);
+                    found.unwrap_or_else(|| panic!("{n}: no {k}")).1.clone()
+                };
+                seeds.push(Seed {
+                    bytes: get("bytes").parse().unwrap(),
+                    expect_parse: get("expect_parse"),
+                    expect_read_from_4k: get("expect_read_from_4k"),
+                    name: n,
+                });
+            }
+        }
+        assert!(seeds.len() > 50, "{} seeds", seeds.len());
+        seeds
+    }
+
+    fn seed_bytes(seed: &Seed) -> Vec<u8> {
+        std::fs::read(corpus_dir().join("parse_image").join(&seed.name)).unwrap()
+    }
+
+    /// SHA-39 AC1 (supporting): every committed seed passes `check_parse_image`, the
+    /// fuzz target's whole body, without panicking.
+    #[test]
+    fn every_seed_passes_the_check() {
+        let mut ok = 0;
+        for seed in seeds() {
+            let report = check_parse_image(&seed_bytes(&seed));
+            ok += usize::from(report.parse.is_ok());
+        }
+        assert!(ok > 40, "{ok} seeds parse");
+    }
+
+    /// SHA-39 AC2 (supporting): every seed is the size its manifest entry records, and
+    /// `Image::parse` and `Image::read_from` (4 KiB buffer) give the recorded results.
+    #[test]
+    fn every_seed_matches_its_manifest_expectations() {
+        for seed in seeds() {
+            let data = seed_bytes(&seed);
+            assert_eq!(data.len(), seed.bytes, "{}", seed.name);
+            let report = check_parse_image(&data);
+            let parse = match report.parse {
+                Ok(()) => "Ok".to_owned(),
+                Err(e) => format!("{e:?}"),
+            };
+            assert_eq!(parse, seed.expect_parse, "{}", seed.name);
+            let read = match report.read_from_small {
+                Ok(()) => "Ok".to_owned(),
+                Err(e) => format!("{e:?}"),
+            };
+            assert_eq!(read, seed.expect_read_from_4k, "{}", seed.name);
+        }
+    }
+
+    /// SHA-39 TP2 (deterministic counterpart of `scripts/fuzz.sh coverage`): the
+    /// committed corpus reaches every `cov` arm: all 19 TLV kinds, all 8 `ParseError`
+    /// variants, and `Error::Parse` and `Error::TlvAreaTooLarge` from `read_from`.
+    #[test]
+    fn committed_corpus_reaches_every_tlv_kind_and_error_variant() {
+        let (mut kinds, mut parse, mut read) = (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
+        for seed in seeds() {
+            let report = check_parse_image(&seed_bytes(&seed));
+            kinds.extend(report.kinds.into_iter().map(cov::tlv_kind));
+            parse.insert(cov::parse_outcome(report.parse));
+            read.insert(cov::read_from_outcome(report.read_from_small));
+        }
+        assert_eq!(kinds, (0..cov::TLV_KIND_ARMS).collect(), "TLV kinds");
+        for arm in cov::PARSE_ERROR_ARMS {
+            assert!(parse.contains(&arm), "parse arm {arm}: {parse:?}");
+        }
+        for arm in cov::READ_FROM_ERROR_ARMS {
+            assert!(read.contains(&arm), "read_from arm {arm}: {read:?}");
+        }
+        assert!(!parse.contains(&usize::MAX) && !read.contains(&usize::MAX));
+    }
+}

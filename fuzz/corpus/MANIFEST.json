@@ -1,0 +1,451 @@
+{
+  "excluded": {
+    "tests/fixtures/images/mcuboot-ed25519-200k.bin": "205 KB, over the fuzzer's -max_len=8192; its header and TLV areas are those of mcuboot-ed25519.bin with a larger body",
+    "tests/fixtures/images/policy-matrix.bin": "not an image: the SHA-46 on-target index of the policy matrix"
+  },
+  "format": "seed inputs of the parse_image fuzz target (fuzz/fuzz_targets/parse_image.rs); expect_parse is Image::parse, expect_read_from_4k is Image::read_from with a 4096-byte TLV buffer, in Rust Debug notation",
+  "generator": "scripts/gen_fuzz_corpus.py",
+  "seeds": {
+    "fixture-keelsign-dual-pq-invalid.bin": {
+      "bytes": 5832,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "95be9e63506baf9486b24ae2f5762d0e1f73dcb471eded51d73ab5215775d47a",
+      "source": "tests/fixtures/images/keelsign-dual-pq-invalid.bin"
+    },
+    "fixture-keelsign-hss2-m32-h5h5.bin": {
+      "bytes": 4756,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "4f520995b91fedeeeff42c51b9fef88ec1a0468de930095cb9e9017c3a5d9dd7",
+      "source": "tests/fixtures/images/keelsign-hss2-m32-h5h5.bin"
+    },
+    "fixture-keelsign-hybrid-bad-body.bin": {
+      "bytes": 3512,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "7138893157bfa926a998bce9bb584b9f8cfc6e6f3c6af935c2630239c435b254",
+      "source": "tests/fixtures/images/keelsign-hybrid-bad-body.bin"
+    },
+    "fixture-keelsign-hybrid-bad-ed25519.bin": {
+      "bytes": 3512,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "75f346053ffe2c3af99d412a051610e28866e42fca1b673ce095ea54dbd3a2ec",
+      "source": "tests/fixtures/images/keelsign-hybrid-bad-ed25519.bin"
+    },
+    "fixture-keelsign-hybrid-bad-pq.bin": {
+      "bytes": 3512,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "5348870f36590d6c3b2e2ffb3931c9ed1f56f912af059d43297074c41c7fb95a",
+      "source": "tests/fixtures/images/keelsign-hybrid-bad-pq.bin"
+    },
+    "fixture-keelsign-hybrid-bad-sha256.bin": {
+      "bytes": 3512,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "37846111772c1455ab9c8c8896d4f596bf288c26d8ce989cfe9d545c42f8c874",
+      "source": "tests/fixtures/images/keelsign-hybrid-bad-sha256.bin"
+    },
+    "fixture-keelsign-hybrid-ed25519-lms.bin": {
+      "bytes": 3512,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "a90459d7adb3b4b12f1bdf8f07f68b1c6c91b4cf489e4b023385462a23c55295",
+      "source": "tests/fixtures/images/keelsign-hybrid-ed25519-lms.bin"
+    },
+    "fixture-keelsign-hybrid-ed25519-mldsa44.bin": {
+      "bytes": 4636,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "d9ec2f75c5758a049a5f3c4c53a4036aabb13a089f8afeea12a1e0814e96e745",
+      "source": "tests/fixtures/images/keelsign-hybrid-ed25519-mldsa44.bin"
+    },
+    "fixture-keelsign-hybrid-flag-compressed.bin": {
+      "bytes": 3512,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "ff087a7aa6d8a3175deb0139038e416478211dd714d4b9f6b61d7bc437a5b970",
+      "source": "tests/fixtures/images/keelsign-hybrid-flag-compressed.bin"
+    },
+    "fixture-keelsign-hybrid-flag-encrypted.bin": {
+      "bytes": 3512,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "a2c26c0aae1591a4f3572e0f8504ede8d24259756a14e62b02557a2b5e4091a4",
+      "source": "tests/fixtures/images/keelsign-hybrid-flag-encrypted.bin"
+    },
+    "fixture-keelsign-hybrid-flag-non-bootable.bin": {
+      "bytes": 3512,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "af1865036bd7efeb4686ec7ebadd0509326d5400468748fb80ba68d912726f0a",
+      "source": "tests/fixtures/images/keelsign-hybrid-flag-non-bootable.bin"
+    },
+    "fixture-keelsign-hybrid-keyhash-only.bin": {
+      "bytes": 3444,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "7dce6d65505dabb7ba3b4cbb9f1bb66b53efa0c70691ce72197b9f58af88cd08",
+      "source": "tests/fixtures/images/keelsign-hybrid-keyhash-only.bin"
+    },
+    "fixture-keelsign-hybrid-missing-key-id.bin": {
+      "bytes": 3492,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "563f59929a371d9c7f71f27913b7f3a4fbfc17cd6dcc60fb0fe787068ebbd3f2",
+      "source": "tests/fixtures/images/keelsign-hybrid-missing-key-id.bin"
+    },
+    "fixture-keelsign-hybrid-missing-pq.bin": {
+      "bytes": 2212,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "655ab375eaf7634367d23b6307bec9b3a3ef7ec437093c40114d015380fa85f1",
+      "source": "tests/fixtures/images/keelsign-hybrid-missing-pq.bin"
+    },
+    "fixture-keelsign-hybrid-mldsa44-missing-pq.bin": {
+      "bytes": 2212,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "4ea80373a3be5f8714daffb9d0efdf8d612e504df91f0f054015b81b802c1d26",
+      "source": "tests/fixtures/images/keelsign-hybrid-mldsa44-missing-pq.bin"
+    },
+    "fixture-keelsign-hybrid-mldsa44-stripped-pq.bin": {
+      "bytes": 2192,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "95c4a1d732641e9951a459294dea9488bcb4fc0e3e33db4e10cf5c9291668a7f",
+      "source": "tests/fixtures/images/keelsign-hybrid-mldsa44-stripped-pq.bin"
+    },
+    "fixture-keelsign-hybrid-no-sha256.bin": {
+      "bytes": 3476,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "93caad620aed2c128858225914533759ced628283b2a5645847de9ae89799691",
+      "source": "tests/fixtures/images/keelsign-hybrid-no-sha256.bin"
+    },
+    "fixture-keelsign-hybrid-protected-tlvs.bin": {
+      "bytes": 3557,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "623aacec2ddb74a90cb9534679cdbc4e9352280fd9c36266f7a0c9b499d9ab0c",
+      "source": "tests/fixtures/images/keelsign-hybrid-protected-tlvs.bin"
+    },
+    "fixture-keelsign-hybrid-reserved-tlv-protected.bin": {
+      "bytes": 3536,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "4bd4d047e96ca7c795b0853321c7addfa99548bd75c4251cb6b1ffc44fbb6b4d",
+      "source": "tests/fixtures/images/keelsign-hybrid-reserved-tlv-protected.bin"
+    },
+    "fixture-keelsign-hybrid-sha384-only.bin": {
+      "bytes": 3528,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "65a4354ab15b246f64e9de48980761cd66404a8463df4c3ee28a2017b74c5b1a",
+      "source": "tests/fixtures/images/keelsign-hybrid-sha384-only.bin"
+    },
+    "fixture-keelsign-hybrid-short-ed25519.bin": {
+      "bytes": 3511,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "4845c66054946cdfda66835c091ffcad1853fc8ac4dcdd008b045d83584cfd67",
+      "source": "tests/fixtures/images/keelsign-hybrid-short-ed25519.bin"
+    },
+    "fixture-keelsign-hybrid-sig-pure.bin": {
+      "bytes": 3517,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "5b53d1aa0c3924f099467fea0fdb1efa0f653f1ff264a410ae4fa709ef1f61ca",
+      "source": "tests/fixtures/images/keelsign-hybrid-sig-pure.bin"
+    },
+    "fixture-keelsign-hybrid-two-ed25519.bin": {
+      "bytes": 3616,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "695c12dea5971dfe7d6e3cab3bb490c2b2f76f71d109c02c5ecae6cb296e3f4e",
+      "source": "tests/fixtures/images/keelsign-hybrid-two-ed25519.bin"
+    },
+    "fixture-keelsign-hybrid-two-sec-cnt.bin": {
+      "bytes": 3565,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "6cb3a0b0d0f47fd5555e4245eb9d7b8947a70a037d2ee5afababf022433e3c0b",
+      "source": "tests/fixtures/images/keelsign-hybrid-two-sec-cnt.bin"
+    },
+    "fixture-keelsign-hybrid-two-sha256.bin": {
+      "bytes": 3548,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "fa68c53b04074f869061b15627b24ad6df268e748097c29f22cd0b3d4eb3972a",
+      "source": "tests/fixtures/images/keelsign-hybrid-two-sha256.bin"
+    },
+    "fixture-keelsign-hybrid-unpaired-ed25519.bin": {
+      "bytes": 3476,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "d1212cb6cbde54e22d686477ff4b298246a77ca3cb41beee95ca5341992adeb1",
+      "source": "tests/fixtures/images/keelsign-hybrid-unpaired-ed25519.bin"
+    },
+    "fixture-keelsign-lms-m32-h5.bin": {
+      "bytes": 3408,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "7ef64eca6f168a23a1545f52dc59e179d542d3a5011dde8faa674137f2c27971",
+      "source": "tests/fixtures/images/keelsign-lms-m32-h5.bin"
+    },
+    "fixture-keelsign-lms-protected-tlvs.bin": {
+      "bytes": 3453,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "50d504a38e88244ed2ed44ecd842c7faad6f91f9690d1eb7cd39026104c7eda1",
+      "source": "tests/fixtures/images/keelsign-lms-protected-tlvs.bin"
+    },
+    "fixture-keelsign-mldsa44-bad-body-rehashed.bin": {
+      "bytes": 4532,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "d4a8e4e5fe28505a9db99d84ca08efb68a39754d96d752e4524c2c0d0f28f0da",
+      "source": "tests/fixtures/images/keelsign-mldsa44-bad-body-rehashed.bin"
+    },
+    "fixture-keelsign-mldsa44-bad-body.bin": {
+      "bytes": 4532,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "f062aeeef4a22910d99d33b575a39d167f9d7bddec68a6da2e6f31232763e89e",
+      "source": "tests/fixtures/images/keelsign-mldsa44-bad-body.bin"
+    },
+    "fixture-keelsign-mldsa44-bad-hint.bin": {
+      "bytes": 4532,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "835fe9d5f37ab50593b5214e13a1b0ffdd625c5332c6b9d813ab49391304a23f",
+      "source": "tests/fixtures/images/keelsign-mldsa44-bad-hint.bin"
+    },
+    "fixture-keelsign-mldsa44-bad-key-id.bin": {
+      "bytes": 4532,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "1e919e35ac95df30b5728e44b2f4cc8c1b6c31426806deec041bb594450a4ad2",
+      "source": "tests/fixtures/images/keelsign-mldsa44-bad-key-id.bin"
+    },
+    "fixture-keelsign-mldsa44-bad-protected-rehashed.bin": {
+      "bytes": 4577,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "1f6da84f36d6e9399125f5ea2e370943b91fc98c28b030c418bf877dd4300a8d",
+      "source": "tests/fixtures/images/keelsign-mldsa44-bad-protected-rehashed.bin"
+    },
+    "fixture-keelsign-mldsa44-bad-protected.bin": {
+      "bytes": 4577,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "e9c9552690be448263603d2fc01388bd3f834ad02c2eff885e8f829fc567a4f0",
+      "source": "tests/fixtures/images/keelsign-mldsa44-bad-protected.bin"
+    },
+    "fixture-keelsign-mldsa44-bad-sig.bin": {
+      "bytes": 4532,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "05df941c571e33ba8da2f478a1b16b8a68234934461591ec1674e794d70abfbe",
+      "source": "tests/fixtures/images/keelsign-mldsa44-bad-sig.bin"
+    },
+    "fixture-keelsign-mldsa44-foreign-sig.bin": {
+      "bytes": 4532,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "a8b3d7e55ab1ada1ded58e12e722068507bc890e7777359c1c7e5a7ace104dd7",
+      "source": "tests/fixtures/images/keelsign-mldsa44-foreign-sig.bin"
+    },
+    "fixture-keelsign-mldsa44-protected-tlvs.bin": {
+      "bytes": 4577,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "6588b8766ceba721ca83b5172dee6f73b5ad91360dd77fa85adc6ac574fc4fc1",
+      "source": "tests/fixtures/images/keelsign-mldsa44-protected-tlvs.bin"
+    },
+    "fixture-keelsign-mldsa44-short-sig.bin": {
+      "bytes": 4531,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "c3b9d926bbdf0165da2c4faddb30a544cfecbd9092c5109d6162c5ac2b3d155d",
+      "source": "tests/fixtures/images/keelsign-mldsa44-short-sig.bin"
+    },
+    "fixture-keelsign-mldsa44.bin": {
+      "bytes": 4532,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "5622f112549660a38f09004a6912a963ff08732873b4069025c2d431c78bc431",
+      "source": "tests/fixtures/images/keelsign-mldsa44.bin"
+    },
+    "fixture-keelsign-mldsa65-bad-body-rehashed.bin": {
+      "bytes": 5421,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "3600c91242a69f606593c76b641202d704313701eda75f7a24ec5e9fbe75cca6",
+      "source": "tests/fixtures/images/keelsign-mldsa65-bad-body-rehashed.bin"
+    },
+    "fixture-keelsign-mldsa65-bad-hint.bin": {
+      "bytes": 5421,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "6b2e57804f9d6b22a9d6317633c63dfbf3e83d94e8904418b2d639a73b470393",
+      "source": "tests/fixtures/images/keelsign-mldsa65-bad-hint.bin"
+    },
+    "fixture-keelsign-mldsa65-bad-protected-rehashed.bin": {
+      "bytes": 5466,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "c15d4a3be83e818efe063a6ab1de38c5b9cd699e6e038702dd1b63265a9b50b2",
+      "source": "tests/fixtures/images/keelsign-mldsa65-bad-protected-rehashed.bin"
+    },
+    "fixture-keelsign-mldsa65-bad-sig.bin": {
+      "bytes": 5421,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "5261c80137d1725638c7f73aaa1300dbb65a90642941875ec1015516ed3f4065",
+      "source": "tests/fixtures/images/keelsign-mldsa65-bad-sig.bin"
+    },
+    "fixture-keelsign-mldsa65-foreign-sig.bin": {
+      "bytes": 5421,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "66d2c73c327e6907a5c83d1bfb02210813f0722409daeb4dff48f4e217813523",
+      "source": "tests/fixtures/images/keelsign-mldsa65-foreign-sig.bin"
+    },
+    "fixture-keelsign-mldsa65-protected-tlvs.bin": {
+      "bytes": 5466,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "6f74d6ed6b9e30f7bf89e83850bed9dff6af05ecc092d0dc655eb7a7e83571d8",
+      "source": "tests/fixtures/images/keelsign-mldsa65-protected-tlvs.bin"
+    },
+    "fixture-keelsign-mldsa65-short-sig.bin": {
+      "bytes": 5420,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "fee01a4e820262b12d2eb899522c540c35897a629adb0d0d7849183f39affed8",
+      "source": "tests/fixtures/images/keelsign-mldsa65-short-sig.bin"
+    },
+    "fixture-keelsign-mldsa65.bin": {
+      "bytes": 5421,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "5524702b7b8dacd6f137280538f95a082b7a851bba1a064371d205e17da6ecaa",
+      "source": "tests/fixtures/images/keelsign-mldsa65.bin"
+    },
+    "fixture-mcuboot-ecdsa-p256.bin": {
+      "bytes": 2322,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "bb768144f70fc570fcda6a0b7b127fda4b04892148d92e2959a73274d17883e1",
+      "source": "tests/fixtures/images/mcuboot-ecdsa-p256.bin"
+    },
+    "fixture-mcuboot-ed25519-padded.bin": {
+      "bytes": 8192,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "8725c3eb730f6d9e9bc1c5ed0323fe4d570c51866bfc98a5afda8f69db98cac2",
+      "source": "tests/fixtures/images/mcuboot-ed25519-padded.bin"
+    },
+    "fixture-mcuboot-ed25519.bin": {
+      "bytes": 2315,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "f07dad7b90f1780e87a1d759e4f761cf1fc429f5826bc27384c98bc5188cc46b",
+      "source": "tests/fixtures/images/mcuboot-ed25519.bin"
+    },
+    "fixture-mcuboot-rsa2048.bin": {
+      "bytes": 2507,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "841270474c16648da0eb50b5737ddc900307ce9724e9e97b3879b0e2c2a68178",
+      "source": "tests/fixtures/images/mcuboot-rsa2048.bin"
+    },
+    "fixture-rejected-mcuboot-ed25519-bigendian.bin": {
+      "bytes": 2315,
+      "expect_parse": "BadMagic",
+      "expect_read_from_4k": "Parse(BadMagic)",
+      "sha256": "7c10a3f14e3c8d533f34bbb6cc1927bb15d1ef2eb116d4473a586d6635419188",
+      "source": "tests/fixtures/images/rejected/mcuboot-ed25519-bigendian.bin"
+    },
+    "synth-empty-tlv-areas.bin": {
+      "bytes": 44,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "1df8614194aeb72ce6bee2e1dee9e8518414cd87b677abbbb8d656996f4f9ff8",
+      "source": "synth: valid; both TLV areas empty (tlv_tot 4)"
+    },
+    "synth-error-bad-magic.bin": {
+      "bytes": 88,
+      "expect_parse": "BadMagic",
+      "expect_read_from_4k": "Parse(BadMagic)",
+      "sha256": "883541ef1e762a4b859b383f13bfe83a752fe4f4d4b75209a17d3ca9e3d6c93e",
+      "source": "synth: ParseError::BadMagic: header magic changed"
+    },
+    "synth-error-bad-tlv-info-magic.bin": {
+      "bytes": 88,
+      "expect_parse": "BadTlvInfoMagic",
+      "expect_read_from_4k": "Parse(BadTlvInfoMagic)",
+      "sha256": "ade8c64198340e82b7dff546def72ca6bc8196bab49d9d4d7938cfbf685c1f2b",
+      "source": "synth: ParseError::BadTlvInfoMagic: protected area with the unprotected magic"
+    },
+    "synth-error-header-too-small.bin": {
+      "bytes": 88,
+      "expect_parse": "HeaderTooSmall",
+      "expect_read_from_4k": "Parse(HeaderTooSmall)",
+      "sha256": "306e3c91fa861e8aa5080789890ea97c7478ebbeb56054ca318a30e653d0b168",
+      "source": "synth: ParseError::HeaderTooSmall: hdr_size 31"
+    },
+    "synth-error-length-mismatch.bin": {
+      "bytes": 88,
+      "expect_parse": "LengthMismatch",
+      "expect_read_from_4k": "Parse(LengthMismatch)",
+      "sha256": "728cbddc76b5d57fd34056a7cf14c7f975d1cb440e9f59549ccd02788f907dcc",
+      "source": "synth: ParseError::LengthMismatch: unprotected tlv_tot 3"
+    },
+    "synth-error-pq-signature-too-long.bin": {
+      "bytes": 3969,
+      "expect_parse": "PqSignatureTooLong",
+      "expect_read_from_4k": "Parse(PqSignatureTooLong)",
+      "sha256": "f2eb75af1f9963a7d833584c8d1bd04ebe60930f64c44b250f37a1e99c735283",
+      "source": "synth: ParseError::PqSignatureTooLong: LMS/HSS signature TLV of 3925 bytes"
+    },
+    "synth-error-protected-size-mismatch.bin": {
+      "bytes": 88,
+      "expect_parse": "ProtectedSizeMismatch",
+      "expect_read_from_4k": "Parse(ProtectedSizeMismatch)",
+      "sha256": "fad02c21a4bf97130d5eaeafaf7dc3fa9d87115d074a30e3219b720510d357b1",
+      "source": "synth: ParseError::ProtectedSizeMismatch: protected tlv_tot 13, header 12"
+    },
+    "synth-error-size-overflow.bin": {
+      "bytes": 88,
+      "expect_parse": "SizeOverflow",
+      "expect_read_from_4k": "Parse(SizeOverflow)",
+      "sha256": "979f7451574c597602e3b531896a8e3de5a8742952dbfe20ed44f02fad060c24",
+      "source": "synth: ParseError::SizeOverflow: img_size 0xFFFFFFFF"
+    },
+    "synth-error-truncated.bin": {
+      "bytes": 87,
+      "expect_parse": "Truncated",
+      "expect_read_from_4k": "Parse(Truncated)",
+      "sha256": "8f4808be55e1a5ee28473a56a5ca8848d0561bd0b1a9d611dffa2c491de41e32",
+      "source": "synth: ParseError::Truncated: last byte of the unprotected area removed"
+    },
+    "synth-every-tlv-kind.bin": {
+      "bytes": 1345,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "f422cad4e8204838ab57eebb1084a096780795772a3292a5f8c0cd936292973d",
+      "source": "synth: a TLV of every TlvKind: SEC_CNT, DEPENDENCY, BOOT_RECORD protected; the rest unprotected (PQ signatures of 64 bytes, reserved 0x4ba4, unknown 0x7f00)"
+    },
+    "synth-tlv-area-too-large.bin": {
+      "bytes": 4280,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "TlvAreaTooLarge",
+      "sha256": "b612aed8ebbab984fb4cdef330ed31eb9838f47f5bb51ea62f35f3947417f3f3",
+      "source": "synth: valid; 4244 bytes of TLV areas, more than the 4096-byte read_from buffer"
+    }
+  }
+}
