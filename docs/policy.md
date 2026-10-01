@@ -51,8 +51,14 @@ A device's trusted keys are one `TrustedKeys<'a, N, E>` set:
 device writes `TrustedKeys::<N, E>::with_ed25519(&pq, &ed25519)`. More keys than `N` or
 `E` is `KeySetError::Capacity`; two Ed25519 keys with the same KEYHASH are
 `KeySetError::DuplicateKeyId`. Empty sets fail closed: with no Ed25519 key, every policy
-that checks the Ed25519 half ends in `Ed25519(KeyNotTrusted)`; with no PQ key, every
-policy that checks the PQ half ends in `KeyNotTrusted`.
+that checks the Ed25519 half ends in `Ed25519(KeyNotTrusted)` for an image whose Ed25519
+half is otherwise well-formed; with no PQ key, every policy that checks the PQ half ends
+in `KeyNotTrusted` for an image whose PQ half is otherwise well-formed (an image without
+a PQ signature is `MissingPqSignature` first, see [Error precedence](#error-precedence)).
+
+Under `Hybrid` the two halves are not bound to the same signer: any trusted Ed25519 key
+plus any trusted PQ key passes, which suits the algorithm-break threat model; a deployment
+with several signers should keep one key of each kind per trusted signer set.
 
 There is no PQ-algorithm policy ("accept only LMS"): the trusted key set is the policy.
 A device that trusts only an LMS key accepts only LMS signatures. A separate algorithm
@@ -66,7 +72,10 @@ signatures with `verify_strict`. Without the feature, `ClassicalOnly` and `Hybri
 closed with `Ed25519(NotEnabled)` before anything is read, and `PqOnly` is unaffected (a
 `PqOnly` bootloader carries no curve code). `keelsign_verify::ed25519::is_enabled()` says
 which build is running. The flash cost is measured in
-[docs/benchmarks.md](benchmarks.md#hybrid-verify-entry-point-sha-46).
+[docs/benchmarks.md](benchmarks.md#hybrid-verify-entry-point-sha-46); the deepest static
+stack chain of a hybrid verify is about 12.8 KB, of which roughly 8 KB is Ed25519 (its
+NAF lookup tables and frames), see the same
+[section](benchmarks.md#hybrid-verify-entry-point-sha-46).
 
 ## Image rules
 

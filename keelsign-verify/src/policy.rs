@@ -459,7 +459,7 @@ mod tests {
         }
     }
 
-    /// `verify_with` over `data` with a 4 KiB TLV buffer and a 256-byte chunk.
+    /// `verify_with` over `data` with an 8 KiB TLV buffer and a 256-byte chunk.
     fn run<'k, B: Backend, const N: usize, const E: usize>(
         backend: &B,
         data: &[u8],

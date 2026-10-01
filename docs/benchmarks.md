@@ -529,7 +529,7 @@ Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
 Both baselines include the 2,315-byte image in `.rodata`. The on-target stack limit is
 4,096 B; the compiled bound with a 256 B chunk is 776 B. Re-measured for SHA-46 (the
 SHA-42 figures were 10,200 / 9,964 / 10,240 / 10,004 B): hashing the protected TLV area
-from the parsed copy costs about 170 B.
+from the parsed copy costs 160–204 B.
 
 ### Digest reproduce
 

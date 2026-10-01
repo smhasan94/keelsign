@@ -36,6 +36,14 @@ jobs:
       - name: cargo clippy (keelsign-verify/ed25519 + ml-dsa)
         run: cargo clippy --workspace --all-targets --locked --features "keelsign-verify/ed25519 keelsign-verify/ml-dsa" -- -D warnings
 
+      # policy-kat enables keelsign-verify/ed25519, so the workspace clippy runs above
+      # always unify it on; lint keelsign-verify alone so its feature-off code is checked.
+      - name: cargo clippy (keelsign-verify alone, no features)
+        run: cargo clippy -p keelsign-verify --all-targets --locked -- -D warnings
+
+      - name: cargo clippy (keelsign-verify alone, ml-dsa)
+        run: cargo clippy -p keelsign-verify --all-targets --locked --features ml-dsa -- -D warnings
+
       - name: cargo test
         run: cargo test --workspace --locked
 

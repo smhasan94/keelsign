@@ -410,7 +410,10 @@ fn hybrid_halves_tampered_name_the_half() {
         d[at] ^= 0x01;
         let result = run(&d, &keys, Policy::Hybrid);
         assert!(
-            matches!(&result, Err(e) if !matches!(e, Error::Ed25519(_) | Error::Image(_))),
+            matches!(
+                result,
+                Err(Error::SignatureInvalid | Error::MalformedSignature)
+            ),
             "LMS byte {at}: {result:?}"
         );
         sampled += 1;

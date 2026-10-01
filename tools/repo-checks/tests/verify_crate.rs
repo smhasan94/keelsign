@@ -212,6 +212,8 @@ fn ci_cross_builds_keelsign_verify_for_both_targets() {
         "cargo clippy --workspace --all-targets --locked --features keelsign-verify/ml-dsa -- -D warnings",
         "cargo clippy --workspace --all-targets --locked --features keelsign-verify/ed25519 -- -D warnings",
         "cargo clippy --workspace --all-targets --locked --features \"keelsign-verify/ed25519 keelsign-verify/ml-dsa\" -- -D warnings",
+        "cargo clippy -p keelsign-verify --all-targets --locked -- -D warnings",
+        "cargo clippy -p keelsign-verify --all-targets --locked --features ml-dsa -- -D warnings",
         "cargo test --workspace --locked",
         "cargo test -p keelsign-verify --locked\n",
         "cargo test -p keelsign-verify --locked --features ml-dsa",

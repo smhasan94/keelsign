@@ -173,8 +173,9 @@ pub const fn is_enabled() -> bool {
 
 /// Verify the Ed25519 `signature` over `message` (the 32-byte image digest `M`) under
 /// `public_key`, with `ed25519-dalek`'s `verify_strict` (RFC 8032 §5.1.7 plus rejection
-/// of small-order and non-canonical keys and `R`; it only ever rejects more than
-/// MCUboot's verifier).
+/// of small-order keys and `R`, and of non-canonical `R` and `s` (`s ≥ ℓ`); it only ever
+/// rejects more than MCUboot's verifier). A non-canonical encoding of the key itself is
+/// not rejected: `VerifyingKey::from_bytes` reduces `y` mod `p`.
 ///
 /// Errors, in order: [`Ed25519Error::NotEnabled`] without the `ed25519` feature;
 /// [`Ed25519Error::InvalidSignatureLength`] unless `signature` is 64 bytes;

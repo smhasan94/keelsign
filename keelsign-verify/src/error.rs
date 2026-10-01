@@ -91,22 +91,27 @@ impl From<ReadError> for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::MissingKeyId => f.write_str("no key-ID TLV"),
-            Error::InvalidKeyId => f.write_str("key-ID TLV has the wrong length"),
-            Error::MultipleKeyIds => f.write_str("more than one key-ID TLV"),
+            Error::MissingKeyId => f.write_str("no post-quantum key-ID TLV"),
+            Error::InvalidKeyId => f.write_str("post-quantum key-ID TLV has the wrong length"),
+            Error::MultipleKeyIds => f.write_str("more than one post-quantum key-ID TLV"),
             Error::MissingPqSignature => f.write_str("no post-quantum signature TLV"),
             Error::MultiplePqSignatures => f.write_str("more than one post-quantum signature TLV"),
-            Error::KeyNotTrusted => f.write_str("key ID is not in the trusted key set"),
+            Error::KeyNotTrusted => {
+                f.write_str("post-quantum key ID is not in the trusted key set")
+            }
             Error::KeyAlgorithmMismatch => {
-                f.write_str("trusted key algorithm does not match the signature TLV")
+                f.write_str("trusted post-quantum key algorithm does not match the signature TLV")
             }
             Error::UnsupportedAlgorithm(alg) => {
-                write!(f, "algorithm {alg:?} is not enabled in this build")
+                write!(
+                    f,
+                    "post-quantum algorithm {alg:?} is not enabled in this build"
+                )
             }
-            Error::UnsupportedParameterSet => f.write_str("unsupported parameter set"),
-            Error::MalformedSignature => f.write_str("signature is malformed"),
-            Error::InvalidPublicKey => f.write_str("public key is malformed"),
-            Error::SignatureInvalid => f.write_str("signature is invalid"),
+            Error::UnsupportedParameterSet => f.write_str("unsupported post-quantum parameter set"),
+            Error::MalformedSignature => f.write_str("post-quantum signature is malformed"),
+            Error::InvalidPublicKey => f.write_str("post-quantum public key is malformed"),
+            Error::SignatureInvalid => f.write_str("post-quantum signature is invalid"),
             Error::Parse(e) => write!(f, "image does not parse: {e}"),
             Error::Read(e) => write!(f, "image read failed: {e}"),
             Error::TlvAreaTooLarge => f.write_str("TLV areas are larger than the TLV buffer"),
@@ -215,6 +220,21 @@ mod tests {
         let all = every_variant();
         let messages: BTreeSet<_> = all.iter().map(ToString::to_string).collect();
         assert_eq!(messages.len(), all.len(), "Display strings are distinct");
+        // The post-quantum half's variants name it in the message (AC2), as the classical
+        // half and the image rules do below.
+        for e in &all {
+            if !matches!(
+                e,
+                Error::Parse(_)
+                    | Error::Read(_)
+                    | Error::TlvAreaTooLarge
+                    | Error::ChunkBufferEmpty
+                    | Error::Ed25519(_)
+                    | Error::Image(_)
+            ) {
+                assert!(e.to_string().contains("post-quantum"), "{e:?}: {e}");
+            }
+        }
         // The classical half and the image rules are named in the message.
         assert!(
             Error::Ed25519(Ed25519Error::SignatureInvalid)
