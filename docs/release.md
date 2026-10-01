@@ -39,10 +39,12 @@ Publish:
 
 ```sh
 cargo login
-cargo publish --dry-run -p keelsign-verify && cargo publish --dry-run -p keelsign
-cargo publish -p keelsign-verify
-cargo publish -p keelsign
+cargo publish --dry-run -p keelsign-verify -p keelsign
+cargo publish -p keelsign-verify -p keelsign
 ```
+
+keelsign depends on keelsign-verify; publish keelsign-verify first (`cargo publish -p
+keelsign-verify -p keelsign` publishes both in order).
 
 Verify (test-plan case "`cargo search keelsign` lists both"):
 
@@ -60,4 +62,4 @@ cargo owner --list keelsign && cargo owner --list keelsign-verify
 
 The account that will publish `0.1.0` must be listed as owner of both crates. The
 placeholders are `0.0.1`, so `0.1.0` is a strictly greater version and publishing it
-later is not blocked (enforced locally by `packaging::placeholder_version_is_0_0_1`).
+later is not blocked (enforced locally by `packaging::publishable_versions_are_0_0_1`).

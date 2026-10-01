@@ -1,5 +1,11 @@
-//! Name-reservation placeholder for the `keelsign` host CLI.
+//! The `keelsign` host CLI: key generation and key files (see `docs/keys.md`).
 //!
-//! This release contains no functionality. Do not depend on it; the first real
-//! release will be `0.1.0`.
+//! **Pre-release.** This library API is unstable; it exists for the CLI and its tests.
+//! Signing, verifying and inspecting images are not written yet.
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
+
+pub mod cli;
+pub mod error;
+pub mod keyfile;
+pub mod keys;

@@ -1,11 +1,21 @@
 # keelsign
 
-**Status: placeholder / name reservation.** This `0.0.1` release has no
-functionality. Do not depend on it.
+**Status: pre-release.** The CLI has `keygen` and `pubkey`; `sign`, `verify` and
+`inspect` are not written yet. The library API is unstable and exists only for the CLI
+and its tests.
 
-`keelsign` will be the host CLI of the keelsign post-quantum firmware signing kit:
-`keygen` / `sign` / `verify` / `inspect` for MCUboot-format images signed with
-ML-DSA or LMS/HSS (optionally hybrid with Ed25519).
+`keelsign` is the host CLI of the keelsign post-quantum firmware signing kit, for
+MCUboot-format images signed with ML-DSA or LMS/HSS (optionally hybrid with Ed25519).
+
+```sh
+keelsign keygen --alg ml-dsa-44 --out signing.pem       # also ml-dsa-65, ed25519
+keelsign pubkey --key signing.pem --out signing.pub.pem
+```
+
+Keys are PKCS#8 (optionally passphrase-encrypted) and SubjectPublicKeyInfo files with
+the standard OIDs. See
+[docs/keys.md](https://github.com/smhasan94/keelsign/blob/main/docs/keys.md) for the
+formats, passphrases, key IDs and exit codes.
 
 Repository: <https://github.com/smhasan94/keelsign>
 
