@@ -30,11 +30,52 @@ jobs:
       - name: cargo test
         run: cargo test --workspace --locked
 
+      # Only the packaging tests: the other ignored repo-checks tests need the thumb
+      # targets, probe-rs and flip-link; the cross-build job covers the example builds.
       - name: repo checks (network)
-        run: cargo test -p repo-checks --locked -- --ignored
+        run: cargo test -p repo-checks --locked --test packaging -- --ignored
 
       - name: publish dry-run keelsign-verify
         run: cargo publish --dry-run --locked -p keelsign-verify
 
       - name: publish dry-run keelsign
         run: cargo publish --dry-run --locked -p keelsign
+
+  cross-build:
+    name: cross-build ${{ matrix.example }} (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - example: nrf52840-hello
+            target: thumbv7em-none-eabihf
+          - example: rp2350-hello
+            target: thumbv8m.main-none-eabihf
+    defaults:
+      run:
+        working-directory: examples/${{ matrix.example }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: flip-link@0.1.12
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: examples/${{ matrix.example }}
+
+      - name: cargo fmt
+        run: cargo fmt --check
+
+      - name: cargo clippy
+        run: cargo clippy --locked --target ${{ matrix.target }} -- -D warnings
+
+      - name: cargo build
+        run: cargo build --release --locked --target ${{ matrix.target }}
