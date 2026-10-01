@@ -22,8 +22,10 @@
 //! Each probed crate also says `#![forbid(unsafe_code)]` (or `#![deny(unsafe_code)]`) in
 //! its root. Left in place, that attribute would keep the `unsafe` cases failing even if
 //! the manifest `[lints]` table were dropped. So every case removes, in its copy only, the
-//! crate-root `#![deny(L)]` / `#![forbid(L)]` line for the lint `L` under test, and fails
-//! with "split the attribute" if another `#![…]` line still names `L`. Each case thus
+//! crate-level `#![deny(L)]` / `#![forbid(L)]` attribute for the lint `L` under test
+//! (single- or multi-line: an inner attribute runs from `#![` to its matching `]`), and
+//! fails with "split the attribute" if any other crate-level attribute still names `L`
+//! (a combined list or a `cfg_attr`). Each case thus
 //! proves the manifest setting alone fires; the source attributes stay covered by the
 //! text checks.
 //!
@@ -37,6 +39,18 @@
 //! (`let keelsign_lint_probe_canary_<case>_<pid> = 0u8;`) that must show up as exactly one
 //! `unused_variables` warning, proving this copy was compiled.
 //!
+//! # Environment limits
+//!
+//! The inner cargo runs have `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`,
+//! `CARGO_BUILD_RUSTFLAGS`, every `CARGO_TARGET_*_RUSTFLAGS` / `*_RUSTDOCFLAGS`,
+//! `CARGO_BUILD_TARGET`, `CLIPPY_CONF_DIR` and the rustc wrapper variables removed. Cargo
+//! configuration files are not neutralised: a user-level `~/.cargo/config.toml`
+//! `[build] rustflags`, or a `.cargo/config.toml` in a directory above the scratch copy,
+//! still applies, and one adding `-D clippy::…` could mask a dropped manifest `[lints]`
+//! table for the crates other than `keelsign-verify` (whose mutation test asserts the
+//! probes compile without it). A future repository-root `.cargo/config.toml` would not be
+//! copied either (dot-directories are skipped).
+//!
 //! # Manual TP2 procedure (break the inheritance, then revert)
 //!
 //! 1. `T=<scratch>/tp2-broken; mkdir -p $T && git -C <repo> archive HEAD | tar -x -C $T`
@@ -48,6 +62,11 @@
 //!    `keelsign_verify_forbids_unsafe_even_with_allow` and
 //!    `keelsign_verify_probes_compile_without_lint_inheritance`.
 //! 4. Revert (extract a fresh copy) and re-run the same command: every test passes.
+//!
+//! `CARGO_TARGET_DIR` must point inside the extract. With a target directory shared
+//! between checkouts, cargo can reuse a test binary built from another checkout (the
+//! tests locate the workspace through `env!("CARGO_MANIFEST_DIR")`), and the "broken" run
+//! then silently tests the wrong tree.
 //! 5. Optional: set the root `[workspace.lints.rust] unsafe_code = "deny"` instead; exactly
 //!    the four `*_forbids_unsafe_even_with_allow` cases of the crates that inherit the
 //!    workspace lints fail (`keelsign-verify`, `lms-kat`, `policy-kat`, `mldsa-kat`; the
@@ -320,14 +339,23 @@ static PROBE_LOCK: Mutex<()> = Mutex::new(());
 static CLIPPY: OnceLock<Result<String, String>> = OnceLock::new();
 
 /// Environment variables that would change how the probes compile.
-const SCRUBBED_ENV: [&str; 6] = [
+const SCRUBBED_ENV: [&str; 8] = [
     "RUSTFLAGS",
     "CARGO_ENCODED_RUSTFLAGS",
     "CARGO_BUILD_RUSTFLAGS",
     "RUSTC_WRAPPER",
     "CARGO_BUILD_RUSTC_WRAPPER",
     "RUSTC_WORKSPACE_WRAPPER",
+    "CARGO_BUILD_TARGET",
+    "CLIPPY_CONF_DIR",
 ];
+
+/// Whether an environment variable is a per-target flags override
+/// (`CARGO_TARGET_<triple>_RUSTFLAGS` / `_RUSTDOCFLAGS`).
+fn is_target_flags_var(name: &str) -> bool {
+    name.starts_with("CARGO_TARGET_")
+        && (name.ends_with("_RUSTFLAGS") || name.ends_with("_RUSTDOCFLAGS"))
+}
 
 /// Non-member directories the members compile against: `policy-kat` embeds the image
 /// fixtures with `include_bytes!("../../../tests/fixtures/images/…")`.
@@ -339,13 +367,28 @@ fn probe_target_dir() -> PathBuf {
 }
 
 /// The `members = [ … ]` entries of the root `Cargo.toml`.
+///
+/// Anchored on a line whose trimmed text starts with `members` (so `default-members` does
+/// not match); `#` comments inside the array are ignored.
 fn workspace_members(root_manifest: &str) -> Vec<String> {
-    let start = root_manifest
-        .find("members = [")
-        .expect("root Cargo.toml has `members = [`");
-    let rest = &root_manifest[start + "members = [".len()..];
-    let end = rest.find(']').expect("`members` list is closed");
-    rest[..end]
+    let mut lines = root_manifest.lines().skip_while(|l| {
+        !l.trim_start()
+            .strip_prefix("members")
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+    });
+    let mut list = String::new();
+    for line in lines.by_ref() {
+        let code = line.split('#').next().unwrap_or_default();
+        list.push_str(code);
+        list.push('\n');
+        if code.contains(']') {
+            break;
+        }
+    }
+    let start = list.find('[').expect("root Cargo.toml has `members = [`");
+    let end = list.rfind(']').expect("`members` list is closed");
+    assert!(start < end, "`members` list is closed");
+    list[start + 1..end]
         .split('"')
         .skip(1)
         .step_by(2)
@@ -397,32 +440,126 @@ fn crate_root(member_dir: &Path) -> (&'static str, &'static str) {
     }
 }
 
-/// Whether a crate-level attribute line names `lint` as one of its arguments.
-fn attribute_names(line: &str, lint: &str) -> bool {
-    line.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
-        .any(|token| token == lint)
+/// A crate-level inner attribute: its text from `#![` to the matching `]` (joined across
+/// lines) and the 0-based lines it spans.
+#[derive(Debug, PartialEq, Eq)]
+struct InnerAttr {
+    text: String,
+    first_line: usize,
+    last_line: usize,
 }
 
-/// Remove the crate-root `#![deny(lint)]` / `#![forbid(lint)]` line from `text`; panics if
-/// another `#![…]` line still names `lint`.
-fn strip_lint_attribute(text: &str, lint: &str, root: &str) -> String {
-    let deny = format!("#![deny({lint})]");
-    let forbid = format!("#![forbid({lint})]");
-    let kept: Vec<&str> = text
-        .lines()
-        .filter(|l| l.trim() != deny && l.trim() != forbid)
-        .collect();
-    for line in &kept {
-        assert!(
-            !(line.trim_start().starts_with("#![") && attribute_names(line, lint)),
-            "{root}: `{}` still names `{lint}` after stripping its own attribute line; \
-             split the attribute so the lint has a line of its own",
-            line.trim()
-        );
+impl InnerAttr {
+    /// Whether one of the attribute's tokens is `name` (a lint, `no_std`, …).
+    fn names(&self, name: &str) -> bool {
+        self.text
+            .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
+            .any(|token| token == name)
     }
-    let mut out = kept.join("\n");
-    out.push('\n');
-    out
+}
+
+/// Every inner attribute (`#![…]`) that starts a line of `text`, tracking bracket depth
+/// across lines and skipping string literals and `//` comments.
+fn inner_attributes(text: &str) -> Vec<InnerAttr> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut attrs = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim_start();
+        if !trimmed.starts_with("#![") {
+            i += 1;
+            continue;
+        }
+        let start = lines[i].len() - trimmed.len();
+        let first_line = i;
+        let mut text = String::new();
+        let mut depth = 0usize;
+        let mut in_str = false;
+        let mut escaped = false;
+        let mut col = start;
+        'scan: while i < lines.len() {
+            let line = &lines[i][col..];
+            let mut chars = line.char_indices().peekable();
+            while let Some((pos, c)) = chars.next() {
+                if in_str {
+                    if escaped {
+                        escaped = false;
+                    } else if c == '\\' {
+                        escaped = true;
+                    } else if c == '"' {
+                        in_str = false;
+                    }
+                    continue;
+                }
+                match c {
+                    '"' => in_str = true,
+                    '/' if chars.peek().is_some_and(|&(_, n)| n == '/') => break,
+                    '[' => depth += 1,
+                    ']' => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            text.push_str(&line[..=pos]);
+                            break 'scan;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            text.push_str(line);
+            text.push('\n');
+            i += 1;
+            col = 0;
+        }
+        attrs.push(InnerAttr {
+            text,
+            first_line,
+            last_line: i.min(lines.len().saturating_sub(1)),
+        });
+        i += 1;
+    }
+    attrs
+}
+
+/// Remove the crate-level `#![deny(lint)]` / `#![forbid(lint)]` attribute from `text`
+/// (single- or multi-line). Errs if another crate-level attribute still names `lint`
+/// (a combined list or a `cfg_attr`).
+fn strip_lint_attribute(text: &str, lint: &str) -> Result<String, String> {
+    let lone: Vec<String> = ["deny", "forbid"]
+        .iter()
+        .flat_map(|level| {
+            [
+                format!("#![{level}({lint})]"),
+                format!("#![{level}({lint},)]"),
+            ]
+        })
+        .collect();
+    let mut drop = vec![false; text.lines().count()];
+    for attr in inner_attributes(text) {
+        if !attr.names(lint) {
+            continue;
+        }
+        let compact: String = attr.text.chars().filter(|c| !c.is_whitespace()).collect();
+        if !lone.contains(&compact) {
+            return Err(format!(
+                "`{}` names `{lint}` alongside other items; split the attribute so the lint \
+                 has an attribute of its own",
+                attr.text.split_whitespace().collect::<Vec<_>>().join(" ")
+            ));
+        }
+        for flag in &mut drop[attr.first_line..=attr.last_line] {
+            *flag = true;
+        }
+    }
+    let mut out: String = text
+        .lines()
+        .zip(&drop)
+        .filter(|(_, d)| !**d)
+        .map(|(l, _)| format!("{l}\n"))
+        .collect();
+    if out.is_empty() {
+        out.push('\n');
+    }
+    Ok(out)
 }
 
 /// The last `n` lines of `text`.
@@ -485,7 +622,8 @@ fn run_case(case: &str, krate: &Crate, probes: &[Probe], edit: Edit) -> Outcome 
 
     let mut text = read(&root_path);
     for lint in probes.iter().filter_map(|p| p.stripped_lint()) {
-        text = strip_lint_attribute(&text, lint, &root_rel);
+        text = strip_lint_attribute(&text, lint)
+            .unwrap_or_else(|e| panic!("case `{case}`: {root_rel}: {e}"));
     }
     if !text.ends_with('\n') {
         text.push('\n');
@@ -524,6 +662,11 @@ fn run_case(case: &str, krate: &Crate, probes: &[Probe], edit: Edit) -> Outcome 
         let mut cmd = cargo_in(&copy, &target_dir);
         for var in SCRUBBED_ENV {
             cmd.env_remove(var);
+        }
+        for (name, _) in std::env::vars_os() {
+            if name.to_str().is_some_and(is_target_flags_var) {
+                cmd.env_remove(name);
+            }
         }
         cmd.args(args);
         cmd.output()
@@ -708,9 +851,9 @@ fn every_workspace_member_is_classified() {
     for krate in &CRATES {
         let dir = root.join(krate.dir);
         let (root_file, _) = crate_root(&dir);
-        let is_no_std = read(&dir.join(root_file))
-            .lines()
-            .any(|l| l.trim() == "#![no_std]");
+        let is_no_std = inner_attributes(&read(&dir.join(root_file)))
+            .iter()
+            .any(|a| a.names("no_std"));
         assert!(
             !is_no_std || matches!(krate.class, Class::NoStd | Class::NoStdException),
             "{} is `#![no_std]` but classified {:?}; classify it NoStd so the no_std lint \
@@ -1048,7 +1191,7 @@ fn diagnostic_parser_reads_codes_levels_and_spans() {
     assert_eq!(parse_message(aborting), Ok(Some(None)));
 
     assert_eq!(
-        parse_json(r#"{"a":[1,-2.5e3,true,null,"é😀"]}"#),
+        parse_json(r#"{"a":[1,-2.5e3,true,null,"\u00e9\ud83d\ude00"]}"#),
         Ok(Json::Obj(vec![(
             "a".to_owned(),
             Json::Arr(vec![
@@ -1062,4 +1205,90 @@ fn diagnostic_parser_reads_codes_levels_and_spans() {
     );
     assert!(parse_json(r#"{"a":1"#).is_err());
     assert!(parse_json(r#"{"a":1} x"#).is_err());
+}
+
+#[test]
+fn crate_attribute_scanner_handles_single_multi_combined_and_cfg_attr() {
+    // Single-line attribute of its own: stripped, other attributes kept.
+    assert_eq!(
+        strip_lint_attribute(
+            "#![no_std]\n#![forbid(unsafe_code)]\n#![deny(missing_docs)]\nfn a() {}\n",
+            "unsafe_code"
+        ),
+        Ok("#![no_std]\n#![deny(missing_docs)]\nfn a() {}\n".to_owned())
+    );
+    // rustfmt-wrapped multi-line attribute of its own: stripped as a whole.
+    assert_eq!(
+        strip_lint_attribute(
+            "#![no_std]\n#![forbid(\n    unsafe_code,\n)]\nfn a() {}\n",
+            "unsafe_code"
+        ),
+        Ok("#![no_std]\nfn a() {}\n".to_owned())
+    );
+    // Nothing names the lint: unchanged.
+    assert_eq!(
+        strip_lint_attribute("#![no_std]\nfn a() {}\n", "clippy::panic"),
+        Ok("#![no_std]\nfn a() {}\n".to_owned())
+    );
+    // Combined (single- and multi-line) and `cfg_attr` forms: "split the attribute".
+    for combined in [
+        "#![forbid(unsafe_code, missing_docs)]\n",
+        "#![deny(\n    missing_docs,\n    unsafe_code,\n)]\nfn a() {}\n",
+        "#![cfg_attr(not(test), forbid(unsafe_code))]\n",
+        "#![cfg_attr(\n    not(test),\n    forbid(unsafe_code)\n)]\n",
+    ] {
+        let err = strip_lint_attribute(combined, "unsafe_code").expect_err(combined);
+        assert!(err.contains("split the attribute"), "{err}");
+    }
+
+    // The scanner finds `no_std` in every form the guard must recognise.
+    for no_std in [
+        "#![no_std]\n",
+        "#![no_std] // a comment ]\n",
+        "#![cfg_attr(not(test), no_std)]\n",
+        "//! Doc.\n#![cfg_attr(\n    not(test),\n    no_std\n)]\n",
+    ] {
+        assert!(
+            inner_attributes(no_std).iter().any(|a| a.names("no_std")),
+            "{no_std:?}"
+        );
+    }
+    assert!(
+        !inner_attributes("#![forbid(unsafe_code)]\nfn no_std() {}\n")
+            .iter()
+            .any(|a| a.names("no_std"))
+    );
+    // Strings with brackets do not end an attribute early.
+    assert_eq!(
+        inner_attributes("#![doc = \"]\"]\n#![no_std]\n"),
+        vec![
+            InnerAttr {
+                text: "#![doc = \"]\"]".to_owned(),
+                first_line: 0,
+                last_line: 0,
+            },
+            InnerAttr {
+                text: "#![no_std]".to_owned(),
+                first_line: 1,
+                last_line: 1,
+            },
+        ]
+    );
+}
+
+#[test]
+fn workspace_members_ignores_default_members_and_comments() {
+    let manifest = "[workspace]\ndefault-members = [\"a\"]\nmembers = [\n    \"a\", # first\n    # \"commented\",\n    \"b/c\",\n]\nexclude = [\"x\"]\n";
+    assert_eq!(workspace_members(manifest), ["a", "b/c"]);
+    assert_eq!(
+        workspace_members("[workspace]\nmembers = [\"one\", \"two\"]\n"),
+        ["one", "two"]
+    );
+    assert!(is_target_flags_var(
+        "CARGO_TARGET_THUMBV7EM_NONE_EABIHF_RUSTFLAGS"
+    ));
+    assert!(is_target_flags_var(
+        "CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTDOCFLAGS"
+    ));
+    assert!(!is_target_flags_var("CARGO_TARGET_DIR"));
 }
