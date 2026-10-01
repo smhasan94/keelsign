@@ -49,7 +49,9 @@
 //!    `keelsign_verify_probes_compile_without_lint_inheritance`.
 //! 4. Revert (extract a fresh copy) and re-run the same command: every test passes.
 //! 5. Optional: set the root `[workspace.lints.rust] unsafe_code = "deny"` instead; exactly
-//!    the `*_forbids_unsafe_even_with_allow` cases fail.
+//!    the four `*_forbids_unsafe_even_with_allow` cases of the crates that inherit the
+//!    workspace lints fail (`keelsign-verify`, `lms-kat`, `policy-kat`, `mldsa-kat`; the
+//!    host crates set their own `unsafe_code = "forbid"`).
 
 use repo_checks::{ScratchDir, cargo_in, workspace_root};
 use std::fmt;
