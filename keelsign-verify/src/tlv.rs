@@ -5,8 +5,9 @@
 //!
 //! - keelsign owns the MCUboot vendor-reserved block [`KEELSIGN_TLV_RANGE`]
 //!   (`0x4BA0..=0x4BAF`): four IDs are assigned, `0x4BA4..=0x4BAF` are reserved.
-//! - Every keelsign TLV lives in the **unprotected** TLV area. Verifiers must ignore
-//!   TLV types they do not know, in both areas.
+//! - Every keelsign TLV lives in the **unprotected** TLV area; [`verify`](crate::verify)
+//!   rejects an image with any TLV of the keelsign block in the protected area (SHA-46).
+//!   Verifiers must ignore TLV types they do not know, in both areas.
 //! - An image carries exactly one key-ID TLV and exactly one post-quantum signature TLV.
 //! - The post-quantum signature is over the 32-byte image digest `M`: SHA-256 over the
 //!   image header, the image body and the protected TLV area (its info header included),

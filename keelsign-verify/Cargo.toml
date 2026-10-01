@@ -13,6 +13,12 @@ default = []
 # (pinned per CLAUDE.md). With it off, ML-DSA signatures fail with
 # `Error::UnsupportedAlgorithm`.
 ml-dsa = []
+# The Ed25519 half of a hybrid image (SHA-46): `Policy::ClassicalOnly` and
+# `Policy::Hybrid` verify MCUboot's ED25519 TLV with `ed25519-dalek`'s `verify_strict`.
+# Off by default; without it those two policies fail closed with
+# `Error::Ed25519(Ed25519Error::NotEnabled)` before reading the image, and
+# `Policy::PqOnly` builds carry no curve code.
+ed25519 = ["dep:ed25519-dalek"]
 
 [dependencies]
 # Key IDs are truncated SHA-256 digests of the public key. Defaults off: no `alloc`.
@@ -20,6 +26,10 @@ sha2 = { version = "=0.11.0", default-features = false }
 # `ReadNorFlash`, the flash side of `reader::NorFlashReader` (SHA-42). no_std, no
 # dependencies with default features off; the version embassy-nrf and embassy-rp use.
 embedded-storage = { version = "=0.3.2", default-features = false }
+# Ed25519 verification for the `ed25519` feature (SHA-46). no_std and heap-free with
+# default features off (no `fast` tables, no `zeroize`: nothing secret in a verifier);
+# u32 serial backend on Cortex-M; forbid(unsafe_code). Shares sha2 0.11.0.
+ed25519-dalek = { version = "=3.0.0", default-features = false, optional = true }
 
 [dev-dependencies]
 # Property tests of the image parser (SHA-35). Host tests only; without `fork`/`timeout`.

@@ -83,15 +83,18 @@ rejects both too (`boot/bootutil/src/tlv.c:66-77`). SHA-35's parser rejects both
 - The same `M` is signed by the Ed25519 half of a hybrid image ([Hybrid layout](#hybrid-layout)).
 
 The verifier computes `M` itself while hashing the image in chunks (SHA-42:
-`keelsign_verify::image_digest`, which hashes the 32 header bytes it parsed and streams
-the rest of the hashed range from the slot through a caller-sized buffer), and also
-requires the `IMAGE_TLV_SHA256` TLV to be present and equal to `M` (SHA-46). Every
-`IMAGE_TLV_SHA256` (`0x10`) present MUST equal `M`, and a keelsign verifier rejects an
-image carrying more than one. Images hashed with SHA-384 or SHA-512
-(`IMAGE_TLV_SHA384` `0x11` / `IMAGE_TLV_SHA512` `0x12`, `image.h:102-103`, no `0x10`) are
-unsupported in v0.1 and rejected. SHA-35 exposes these TLVs, SHA-42 computes `M` and
-SHA-46 enforces these rules; the sample images do not exercise them. Images carrying `IMAGE_TLV_SIG_PURE` (`0x25`,
-`image.h:109`), MCUboot's "signature over the image, not its digest" mode, are rejected.
+`keelsign_verify::image_digest`, which hashes the 32 header bytes it parsed, streams the
+body from the slot through a caller-sized buffer and, since SHA-46, hashes the protected
+TLV area from the copy it parsed too), and also requires the `IMAGE_TLV_SHA256` TLV to be
+present and equal to `M`. Every `IMAGE_TLV_SHA256` (`0x10`) present MUST equal `M`, and a
+keelsign verifier rejects an image carrying more than one. Images hashed with SHA-384 or
+SHA-512 (`IMAGE_TLV_SHA384` `0x11` / `IMAGE_TLV_SHA512` `0x12`, `image.h:102-103`, no
+`0x10`) are unsupported in v0.1 and rejected. SHA-35 exposes these TLVs, SHA-42 computes
+`M`, and these rules are enforced by `keelsign_verify::verify` (SHA-46; see
+[docs/policy.md](policy.md)), which the policy-matrix sample images exercise
+(`Image(MissingSha256Tlv)`, `Image(MultipleSha256Tlvs)`, `Image(DigestMismatch)`). Images
+carrying `IMAGE_TLV_SIG_PURE` (`0x25`, `image.h:109`), MCUboot's "signature over the
+image, not its digest" mode, are rejected (`Image(SigPure)`).
 
 ### Rationale
 
@@ -147,7 +150,10 @@ The Ed25519 key of a hybrid image is identified by MCUboot's own `IMAGE_TLV_KEYH
 (`0x01`): SHA-256 of the DER SubjectPublicKeyInfo, which is what imgtool embeds and
 hashes (`scripts/imgtool/keys/ed25519.py:32-36`). MCUboot compares only the first
 `keyhash_len` bytes of it (`boot/bootutil/src/bootutil_find_key.c:56-80`); keelsign-verify
-requires all 32.
+requires all 32. A device trusts an Ed25519 key as `keelsign_verify::Ed25519Key` (the raw
+32-byte key) in the same `TrustedKeys` set as its PQ keys
+(`TrustedKeys::with_ed25519`), which looks it up by `keelsign_verify::keyhash_of`, the
+SHA-256 of the RFC 8410 SubjectPublicKeyInfo prefix and the key.
 
 ## Hybrid layout
 
@@ -165,8 +171,10 @@ signature, both over the same `M`. The unprotected TLV area is, in order:
 - Exactly one KEYHASH + ED25519 pair, KEYHASH immediately before ED25519: MCUboot picks
   the key from the KEYHASH TLV and ignores a signature TLV that no KEYHASH precedes
   (`image_validate.c:364-403`, reset after each signature at `:433`).
-- "Exactly one pair" is a verifier rule too: in hybrid mode SHA-46 rejects an image with
-  zero KEYHASH + ED25519 pairs or with more than one. MCUboot's own semantics differ: it
+- "Exactly one pair" is a verifier rule too: under `Policy::Hybrid` and
+  `Policy::ClassicalOnly`, `keelsign_verify::verify` (SHA-46) rejects an image with zero
+  KEYHASH + ED25519 pairs (`Ed25519(Missing)`), with more than one (`Ed25519(Multiple)`)
+  or with an ED25519 TLV that no KEYHASH immediately precedes (`Ed25519(Unpaired)`). MCUboot's own semantics differ: it
   verifies every signature whose KEYHASH names a known key, each result overwriting the
   last (`image_validate.c:413-414`, taken at `:562-564`), and skips a signature that
   follows an unknown KEYHASH (`:396-403`). This is the one intentional difference between
@@ -174,7 +182,9 @@ signature, both over the same `M`. The unprotected TLV area is, in order:
 - MCUboot TLVs first, then the keelsign TLVs, so `imgtool sign` output is kept byte for
   byte and keelsign only appends (and fixes up `it_tlv_tot`).
 - A PQ-only image has rows 1, 4 and 5.
-- The hybrid policy (both must verify) is SHA-46.
+- The hybrid policy (both must verify) is enforced by `keelsign_verify::verify` under
+  `Policy::Hybrid` (SHA-46; see [docs/policy.md](policy.md)), with the Ed25519 half
+  checked by `ed25519-dalek`'s `verify_strict` behind the `ed25519` feature.
 
 ## One PQ signature per image
 
@@ -350,7 +360,9 @@ outside CNSA 2.0 whatever the policy (ML-DSA-87 is out of scope, see
   (SHA-62) MUST either add `0x4BA0`–`0x4BA3` to the allow list or disable it. A stock
   Zephyr MCUboot with the default allow list **rejects** keelsign images.
 - **SHA256 TLV is mandatory.** MCUboot requires the hash TLV and compares it
-  (`image_validate.c:341-362`, `:553-557`); keelsign requires it too (SHA-46).
+  (`image_validate.c:341-362`, `:553-557`); `keelsign_verify::verify` requires exactly
+  one, equal to `M`, under every policy (SHA-46, `Image(MissingSha256Tlv)`,
+  `Image(MultipleSha256Tlvs)`, `Image(DigestMismatch)`).
 - **Not adopted: MCUboot PR #2707.** That PR (open, head `1d9ea7a`) adds native LMS support with its own
   `IMAGE_TLV_LMS` (`0x26`) in MCUboot's space. keelsign keeps its vendor TLVs; a
   compatibility mode is tracked as a follow-up.
@@ -406,9 +418,10 @@ Each row was checked against the cited source at the stated commit.
   LMS/HSS parameter set is the trusted public key's.
 - ML-DSA-87 and SLH-DSA.
 - MCUboot PR #2707's `IMAGE_TLV_LMS` (`0x26`) compatibility mode (follow-up).
-- The image parser (SHA-35), digest computation (SHA-42), hybrid policy and Ed25519
-  verification (SHA-46), the ML-DSA backend (SHA-44), the CLI (SHA-49, SHA-51),
-  per-board partition numbers (SHA-58) and the MCUboot allow-list glue (SHA-62).
+- The image parser (SHA-35), digest computation (SHA-42), the ML-DSA backend (SHA-44),
+  the CLI (SHA-49, SHA-51), per-board partition numbers (SHA-58) and the MCUboot
+  allow-list glue (SHA-62); the verify policies (SHA-46) are in
+  [docs/policy.md](policy.md).
 
 ## Sample images
 
@@ -420,6 +433,21 @@ keelsign TLVs, with LMS/HSS signatures from the pinned independent signer hsslms
 `MANIFEST.json` records every file's size and SHA-256 and the imgtool and cryptography
 versions. `keelsign-verify/tests/image_fixtures.rs` parses them with
 `keelsign_verify::image` and verifies them.
+
+The policy matrix (SHA-46, [docs/policy.md](policy.md)) adds three signed images and
+eighteen deterministic mutations, all written by the same script:
+
+| File | Notes |
+|---|---|
+| `keelsign-hybrid-ed25519-mldsa44.bin` | imgtool Ed25519 plus an ML-DSA-44 filler half (does not verify until SHA-44) |
+| `keelsign-hybrid-protected-tlvs.bin` | the hybrid layout with protected `SEC_CNT` 7 and vendor TLV `0x10A0` |
+| `keelsign-hybrid-reserved-tlv-protected.bin` | the hybrid layout plus a `0x4BA0` TLV in the protected area (`imgtool sign --custom-tlv`); rejected |
+| `keelsign-hybrid-*.bin` (18 more) | mutations of `keelsign-hybrid-ed25519-lms.bin` (one of `keelsign-hybrid-protected-tlvs.bin`), not re-signed; `MANIFEST.json` records `derived_from` and `mutation` |
+| `policy-matrix.bin` | the "KSPM v1" index of the matrix (names, PQ keys, expected verdicts; no image bytes) that `benches/policy-kat` runs on the host and the boards |
+
+Every image's `MANIFEST.json` entry carries a `policy` object, its expected verdict under
+`classical_only`, `pq_only` and `hybrid`; docs/policy.md's matrix table,
+`keelsign-verify/tests/policy_matrix.rs` and `policy-matrix.bin` are checked against it.
 
 The same directory holds golden MCUboot images for the image parser (SHA-35): plain
 imgtool 2.4.0 output, no keelsign TLVs, each with a security counter (7), a dependency

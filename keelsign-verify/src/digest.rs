@@ -1,9 +1,13 @@
 //! The image digest `M`: SHA-256 over the header, the body and the protected TLV area,
 //! read from storage in caller-sized chunks.
 //!
-//! [`image_digest`] hashes the 32 header bytes kept by [`Image`] (never re-read from
-//! storage, so the digest covers exactly the header that was parsed), then streams the
-//! rest of [`Image::hashed_range`] through the caller's chunk buffer. This is the value
+//! [`image_digest`] hashes the 32 header bytes kept by [`Image`], streams the rest of
+//! the header (its padding up to `hdr_size`) and the body, offsets 32 up to the TLV
+//! offset, through the caller's chunk buffer, then hashes the protected TLV area from the
+//! copy [`Image`] parsed ([`TlvArea::bytes`](crate::image::TlvArea::bytes)). Neither the
+//! header nor the protected area is re-read from storage, so the digest covers exactly
+//! the header and protected TLVs that were parsed (the version and the security counter
+//! [`verify`](crate::verify) reports; SHA-46). This is the value
 //! MCUboot stores in the `SHA256` TLV (`bootutil_img_hash`, `image_validate.c` at
 //! `a8ffd2c`) and the message keelsign's post-quantum signatures sign
 //! ([docs/image-format.md][spec]).
@@ -32,9 +36,11 @@ pub const DEFAULT_CHUNK_LEN: usize = 256;
 ///
 /// `image` must have been read from `reader` (by
 /// [`Image::read_from`](crate::image::Image::read_from), or parsed from the same bytes):
-/// the header is hashed from [`Image::raw_header`] and only bytes
-/// `32..hashed_range().end` are read, in ascending order. Compare the result with the
-/// image's `SHA256` TLV, or use it as the message of the post-quantum signature.
+/// the header is hashed from [`Image::raw_header`], only the body bytes
+/// `32..tlv_offset` are read, in ascending order, and the protected TLV area (if any) is
+/// hashed from [`Image::protected`]'s [`bytes`](crate::image::TlvArea::bytes). Compare
+/// the result with the image's `SHA256` TLV, or use it as the message of the
+/// post-quantum signature.
 ///
 /// Errors: [`Error::ChunkBufferEmpty`] if `chunk` is empty, and [`Error::Read`] if a read
 /// fails (the digest is then abandoned).
@@ -68,8 +74,11 @@ pub fn image_digest<R: ImageReader + ?Sized>(
     }
     let mut hasher = Sha256::new();
     hasher.update(image.raw_header());
-    let end = image.hashed_range().end;
-    // `hdr_size >= 32`, so the hashed range never ends inside the header.
+    // The body ends where the protected area starts (or, without one, where the hashed
+    // range ends); the protected area is hashed from the parsed copy below.
+    let protected = image.protected();
+    let end = protected.map_or(image.hashed_range().end, |area| area.range().start);
+    // `hdr_size >= 32`, so the body never ends inside the header.
     let mut offset = IMAGE_HEADER_SIZE as u32;
     while offset < end {
         let remaining = end - offset;
@@ -80,6 +89,9 @@ pub fn image_digest<R: ImageReader + ?Sized>(
         hasher.update(&*buf);
         // `n <= remaining`, so the sum stays within `end`.
         offset = offset.saturating_add(u32::try_from(n).unwrap_or(remaining));
+    }
+    if let Some(area) = protected {
+        hasher.update(area.bytes());
     }
     Ok(hasher.finalize().into())
 }
@@ -145,6 +157,12 @@ mod tests {
             .1
     }
 
+    /// Where the streamed bytes end: the TLV offset (`hdr_size + img_size`), where the
+    /// protected area, hashed from the parsed copy, starts.
+    fn body_end(image: &Image<'_>) -> usize {
+        image.header().tlv_offset().unwrap() as usize
+    }
+
     fn digest_with(data: &[u8], chunk_len: usize) -> Result<[u8; 32], Error> {
         let image = Image::parse(data).unwrap();
         let mut reader = data;
@@ -165,8 +183,9 @@ mod tests {
             let digest = image_digest(&mut reader, &image, &mut chunk).unwrap();
             assert_eq!(digest, expected(data, &image), "{name}");
             // Every read goes through the caller's chunk and fills at most all of it; the
-            // reads tile 32..hashed_len, so nothing else buffers the image.
-            let end = image.hashed_range().end as usize;
+            // reads tile 32..tlv_offset (the protected area is hashed from the parsed
+            // copy), so nothing else buffers the image.
+            let end = body_end(&image);
             let mut next = 32usize;
             for &(offset, n) in &reader.reads {
                 assert_eq!(offset as usize, next, "{name}");
@@ -235,14 +254,21 @@ mod tests {
     }
 
     #[test]
-    fn digest_never_rereads_header() {
+    fn digest_never_rereads_header_or_protected_area() {
+        let mut with_protected = 0;
         for (name, data) in FIXTURES {
             let image = Image::parse(data).unwrap();
+            let end = body_end(&image);
             for chunk_len in [1, 31, 32, 33, 256] {
                 let mut reader = Recording::new(data);
                 image_digest(&mut reader, &image, &mut vec_of(chunk_len)).unwrap();
+                // No read below offset 32 (the header) or at or past the TLV offset (the
+                // protected area and everything after it).
                 assert!(
-                    reader.reads.iter().all(|&(offset, _)| offset >= 32),
+                    reader
+                        .reads
+                        .iter()
+                        .all(|&(offset, n)| offset >= 32 && offset as usize + n <= end),
                     "{name} {chunk_len}"
                 );
             }
@@ -253,7 +279,29 @@ mod tests {
             let mut reader: &[u8] = &changed;
             let digest = image_digest(&mut reader, &image, &mut vec_of(256)).unwrap();
             assert_eq!(digest, expected(data, &image), "{name}");
+            // So does the protected area: a reader whose protected TLV bytes (the info
+            // header and every value) differ from the parsed copy still gives the parsed
+            // copy's digest, the bytes the version and SEC_CNT were read from.
+            if let Some(area) = image.protected() {
+                with_protected += 1;
+                let mut changed = data.to_vec();
+                for b in &mut changed[range(area.range())] {
+                    *b ^= 0xA5;
+                }
+                let mut reader: &[u8] = &changed;
+                let digest = image_digest(&mut reader, &image, &mut vec_of(64)).unwrap();
+                assert_eq!(digest, expected(data, &image), "{name}");
+                assert_eq!(area.bytes(), &data[range(area.range())], "{name}");
+            }
         }
+        assert!(
+            with_protected >= 5,
+            "{with_protected} fixtures with a protected area"
+        );
+    }
+
+    fn range(r: core::ops::Range<u32>) -> core::ops::Range<usize> {
+        r.start as usize..r.end as usize
     }
 
     /// The number of reads a successful digest makes.
@@ -295,10 +343,10 @@ mod tests {
                 }
             }
         }
-        // A reader shorter than the hashed range fails with OutOfBounds, not a panic.
+        // A reader shorter than the body fails with OutOfBounds, not a panic.
         let (_, data) = FIXTURES[0];
         let image = Image::parse(data).unwrap();
-        let end = image.hashed_range().end as usize;
+        let end = body_end(&image);
         let mut short: &[u8] = &data[..end - 1];
         assert_eq!(
             image_digest(&mut short, &image, &mut vec_of(64)),
@@ -339,7 +387,7 @@ mod tests {
             let cut = cut.index(data.len() + 1);
             let mut short: &[u8] = &data[..cut];
             let result = image_digest(&mut short, &image, &mut vec_of(chunk_len));
-            if cut >= image.hashed_range().end as usize {
+            if cut >= body_end(&image) {
                 prop_assert_eq!(result, Ok(expected(data, &image)));
             } else {
                 prop_assert_eq!(result, Err(Error::Read(ReadError::OutOfBounds)));

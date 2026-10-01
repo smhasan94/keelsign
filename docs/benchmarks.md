@@ -463,7 +463,9 @@ python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/relea
 `keelsign_verify::image_digest` computes the image digest `M` (SHA-256 of the header,
 the body and the protected TLV area, the value of the `SHA256` TLV) from an
 `ImageReader`: it hashes the 32 header bytes kept by `Image` (never re-read from the
-slot), then streams the rest of `Image::hashed_range` through the caller's chunk buffer.
+slot), streams the body (offsets 32 up to the TLV offset) through the caller's chunk
+buffer, and hashes the protected TLV area from the parsed copy (SHA-46: never re-read
+either, so the security counter `verify` reports is what was hashed).
 `Image::read_from` reads the header and the TLV areas (sized from their info headers,
 after checking that they fit `ImageReader::len`) into a caller buffer.
 `NorFlashReader` adapts any `embedded-storage` `ReadNorFlash` with `READ_SIZE == 1`
@@ -476,13 +478,14 @@ slot-relative offsets.
   108 B: 32 B chaining value, 64 B block buffer, block count and buffer position) + the
   frame of `image_digest`. Nothing scales with the image. The default chunk is
   `DEFAULT_CHUNK_LEN` = 256 B, MCUboot's `BOOT_TMPBUF_SZ` (`bootutil_priv.h:86` at
-  `a8ffd2c`). With it, the compiled bound is 256 + 512 = 768 B (static frames below).
+  `a8ffd2c`). With it, the compiled bound is 256 + 520 = 776 B (static frames below).
 - **Static frame**: nightly `-Z emit-stack-sizes` own-frame sizes of `size_digest`, in
   which `image_digest` and `Image::read_from` each sit alone in an `#[inline(never)]`
-  wrapper: `size_digest::digest<NorFlashReader<…>>` 336 B (`image_digest` with the
+  wrapper: `size_digest::digest<NorFlashReader<…>>` 344 B (`image_digest` with the
   SHA-256 state, the reader and `finalize` inlined) + `sha2::sha256::compress256` 176 B
-  = 512 B, identical on both boards. `Image::read_from`: `size_digest::read_image<…>`
-  232 B + `Image::parse_parts` 48 B = 280 B. The chunk (256 B) and the TLV buffer
+  = 520 B, identical on both boards. `Image::read_from`: `size_digest::read_image<…>`
+  248 B + `Image::parse_parts` 64 B = 312 B (re-measured for SHA-46: `image_digest` now
+  hashes the protected area from the parsed copy and `TlvArea` keeps the whole area). The chunk (256 B) and the TLV buffer
   (4 KiB) are the caller's and not in these figures.
 - **Flash**: `size_digest` minus `size_digest_baseline`. The baseline is HAL init, the
   flash driver, defmt and a black-boxed reference to the 2,315-byte golden image
@@ -511,20 +514,22 @@ frames).
 
 | Board | Digest cycles (200 KB, 256 B chunk) | Digest time | Peak stack (measured) | Static frame (compiled) | Peak RAM bound (256 B chunk) | Flash Δ release | Flash Δ size |
 |---|---|---|---|---|---|---|---|
-| nrf52840 | pending (hardware) | pending (hardware) | pending (hardware) | 512 B | 768 B | 10,200 B | 9,964 B |
-| rp2350 | pending (hardware) | pending (hardware) | pending (hardware) | 512 B | 768 B | 10,240 B | 10,004 B |
+| nrf52840 | pending (hardware) | pending (hardware) | pending (hardware) | 520 B | 776 B | 10,368 B | 10,168 B |
+| rp2350 | pending (hardware) | pending (hardware) | pending (hardware) | 520 B | 776 B | 10,400 B | 10,204 B |
 
 Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
 
 | Board / profile | `size_digest_baseline` flash | `size_digest` flash | Δ digest |
 |---|---|---|---|
-| nrf52840 / release | 5,192 | 15,392 | 10,200 |
-| nrf52840 / size | 4,604 | 14,568 | 9,964 |
-| rp2350 / release | 6,392 | 16,632 | 10,240 |
-| rp2350 / size | 5,308 | 15,312 | 10,004 |
+| nrf52840 / release | 5,192 | 15,560 | 10,368 |
+| nrf52840 / size | 4,604 | 14,772 | 10,168 |
+| rp2350 / release | 6,392 | 16,792 | 10,400 |
+| rp2350 / size | 5,308 | 15,512 | 10,204 |
 
 Both baselines include the 2,315-byte image in `.rodata`. The on-target stack limit is
-4,096 B; the compiled bound with a 256 B chunk is 768 B.
+4,096 B; the compiled bound with a 256 B chunk is 776 B. Re-measured for SHA-46 (the
+SHA-42 figures were 10,200 / 9,964 / 10,240 / 10,004 B): hashing the protected TLV area
+from the parsed copy costs 160–204 B.
 
 ### Digest reproduce
 
@@ -566,4 +571,106 @@ Static frames (nightly only, not run in CI):
 cd benches/nrf52840-mldsa
 cargo +nightly rustc --release --locked --bin size_digest --target-dir target/nightly -- -Z emit-stack-sizes
 python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/release/size_digest --top 8 --match size_digest::
+```
+
+## Hybrid verify entry point (SHA-46)
+
+`keelsign_verify::verify` under `Policy::Hybrid` is what a hybrid bootloader runs: the
+image rules, `Image::read_from`, `image_digest` (which since SHA-46 streams only the body
+and hashes the header and the protected TLV area from the parsed copy), the Ed25519 half
+(`ed25519-dalek` `=3.0.0`, `verify_strict`, the `ed25519` feature) and the LMS/HSS half.
+The policies and the matrix are specified in [docs/policy.md](policy.md).
+
+### Hybrid method
+
+- **Flash**: `size_verify` minus `size_verify_baseline`. The baseline is HAL init, the
+  flash driver, defmt and black-boxed references to the hybrid image
+  `keelsign-hybrid-ed25519-lms.bin` (3,512 B), its LMS public key (found in
+  `policy-matrix.bin`, which both bins parse) and the Ed25519 test key; `size_verify`
+  adds one `verify(.., Policy::Hybrid, ..)` of that image through `NorFlashReader`
+  (4 KiB TLV buffer, 256 B chunk). The delta is `verify` with everything it pulls in:
+  the image rules, the parser, the digest with SHA-256, Ed25519 (curve25519 field and
+  point arithmetic on the u32 serial backend, SHA-512) and the LMS/HSS verifier.
+- **Static frame**: nightly `-Z emit-stack-sizes` own-frame sizes of `size_verify`, in
+  which `verify` sits in an `#[inline(never)]` wrapper (`size_verify::verify_hybrid`)
+  together with the 4 KiB TLV buffer and the 256 B chunk. The deepest chain is the
+  Ed25519 half: `size_verify::verify_hybrid` 4,896 B (`verify_with`, `read_from` and the
+  digest inlined, the two buffers included) + `keelsign_verify::ed25519::verify_signature`
+  4,912 B (the NAF lookup tables) + `NafLookupTable5::from` 2,096 B +
+  `FieldElement2625::pow22501` 848 B ≈ 12.8 KB, identical on both boards; the LMS half
+  adds `lms_verify` 640 B + `lms::hash` 256 B + `compress256` 176 B to the wrapper. These
+  are own-frame sizes without a call graph, so the chain is an estimate, far under the
+  32,768 B limit of the LMS tests.
+- **On target** (`tests/policy.rs`, needs the board): `policy_matrix_from_flash` runs
+  every case of `policy-matrix.bin` (33 images, every one in `tests/fixtures/images/` but
+  the 200 KB image) under every policy through `policy_kat::run_fixture`, each image read
+  through `NorFlashReader` over `&mut` the board flash at its `.rodata` address (nRF52840:
+  the address; RP2350: the address minus the XIP base `0x1000_0000`), with
+  `DefaultBackend::new()`, a 4 KiB TLV buffer and a 256 B chunk. It logs
+  `POLICY board=… case=… policy=… expect=… got=… result=ok` for each of the 99 cells and
+  `POLICY board=nrf52840 passed=99/99` (or `board=rp2350`), and fails on any mismatch.
+
+### Hybrid results
+
+Cycles and the measured peak stack of a hybrid verify are SHA-69; flash and static frames
+are measured without the boards (stable Rust 1.91.1, nightly
+`rustc 1.101.0-nightly (c1070d693 2026-09-28)` for the frames).
+
+| Board | Flash Δ release | Flash Δ size | Static frame (compiled, deepest chain) | Cycles | Peak stack |
+|---|---|---|---|---|---|
+| nrf52840 | 74,376 B | 59,144 B | 12,752 B | pending (SHA-69) | pending (SHA-69) |
+| rp2350 | 74,264 B | 59,152 B | 12,752 B | pending (SHA-69) | pending (SHA-69) |
+
+Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
+
+| Board / profile | `size_verify_baseline` flash | `size_verify` flash | Δ verify |
+|---|---|---|---|
+| nrf52840 / release | 14,940 | 89,316 | 74,376 |
+| nrf52840 / size | 14,132 | 73,276 | 59,144 |
+| rp2350 / release | 16,092 | 90,356 | 74,264 |
+| rp2350 / size | 14,772 | 73,924 | 59,152 |
+
+Both baselines include the 3,512-byte image and the 7,295-byte `policy-matrix.bin` in
+`.rodata`. The delta is roughly the digest (about 10.4 KB, above), the LMS/HSS verifier
+(see [LMS results](#lms-results)) and Ed25519, which the planning measurement put at
+43 KB (`opt-level = "s"`) to 57 KB (`opt-level = 3`) on its own. A `PqOnly` build
+without the `ed25519` feature carries none of the Ed25519 code.
+
+### Hybrid reproduce
+
+Every command block starts from the repository root. For the Pico 2 W use
+`benches/rp2350-mldsa`, board `rp2350` and target `thumbv8m.main-none-eabihf`.
+
+Host tests (no board):
+
+```sh
+cargo test -p keelsign-verify --locked --features ed25519 --test policy_matrix
+cargo test -p policy-kat --locked
+```
+
+On-target policy matrix (manual procedure, needs the board):
+
+```sh
+cd benches/nrf52840-mldsa
+cargo test --release --locked --test policy -- policy_matrix_from_flash
+```
+
+Expect `POLICY board=nrf52840 passed=99/99` and no `result=FAIL` line.
+
+Flash footprint (no board):
+
+```sh
+cd benches/nrf52840-mldsa
+cargo build --release --locked --bins
+cargo build --profile size --locked --bins
+python3 ../../scripts/elf_sizes.py --label nrf52840/release --baseline target/thumbv7em-none-eabihf/release/size_verify_baseline target/thumbv7em-none-eabihf/release/size_verify_baseline target/thumbv7em-none-eabihf/release/size_verify
+python3 ../../scripts/elf_sizes.py --label nrf52840/size --baseline target/thumbv7em-none-eabihf/size/size_verify_baseline target/thumbv7em-none-eabihf/size/size_verify_baseline target/thumbv7em-none-eabihf/size/size_verify
+```
+
+Static frames (nightly only, not run in CI):
+
+```sh
+cd benches/nrf52840-mldsa
+cargo +nightly rustc --release --locked --bin size_verify --target-dir target/nightly -- -Z emit-stack-sizes
+python3 ../../scripts/stack_frames.py target/nightly/thumbv7em-none-eabihf/release/size_verify --top 16
 ```

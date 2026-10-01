@@ -2,8 +2,9 @@
 
 use repo_checks::{
     BENCHES, DIGEST_BENCH_FILES, DIGEST_ON_TARGET_TESTS, DIGEST_SIZE_BINS, DIGEST_STACK_LIMIT,
-    Example, LMS_BENCH_FILES, LMS_ON_TARGET_TESTS, LMS_SIZE_BINS, LMS_STACK_LIMIT, ScratchDir,
-    cargo_in, python_script, run_capture, run_ok, workspace_root,
+    Example, LMS_BENCH_FILES, LMS_ON_TARGET_TESTS, LMS_SIZE_BINS, LMS_STACK_LIMIT,
+    POLICY_BENCH_FILES, POLICY_ON_TARGET_TESTS, POLICY_SIZE_BINS, ScratchDir, cargo_in,
+    python_script, run_capture, run_ok, workspace_root,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -79,6 +80,7 @@ fn bench_projects_exist() {
             .iter()
             .chain(&LMS_BENCH_FILES)
             .chain(&DIGEST_BENCH_FILES)
+            .chain(&POLICY_BENCH_FILES)
         {
             assert!(dir.join(rel).is_file(), "{}: missing {rel}", bench.name);
         }
@@ -106,6 +108,8 @@ fn bench_projects_exist() {
             ("stack-paint", "../stack-paint"),
             // SHA-42: tests/image.rs and size_digest use the reader and digest directly.
             ("keelsign-verify", "../../keelsign-verify"),
+            // SHA-46: the policy-matrix index and runner.
+            ("policy-kat", "../policy-kat"),
         ] {
             let line = dependency_line(&cargo_toml, dep)
                 .unwrap_or_else(|| panic!("{}: must depend on {dep}", bench.name));
@@ -115,6 +119,13 @@ fn bench_projects_exist() {
                 bench.name
             );
         }
+        // SHA-46: the Ed25519 half is on for the policy matrix and size_verify.
+        let verify = dependency_line(&cargo_toml, "keelsign-verify").unwrap_or_default();
+        assert!(
+            verify.contains("features = [\"ed25519\"]"),
+            "{}: keelsign-verify must enable the `ed25519` feature: `{verify}`",
+            bench.name
+        );
         let hal = dependency_line(&cargo_toml, "embassy-nrf")
             .or_else(|| dependency_line(&cargo_toml, "embassy-rp"))
             .unwrap_or_else(|| panic!("{}: must depend on its embassy HAL", bench.name));
@@ -152,6 +163,7 @@ fn bench_projects_exist() {
             .iter()
             .chain(&LMS_SIZE_BINS)
             .chain(&DIGEST_SIZE_BINS)
+            .chain(&POLICY_SIZE_BINS)
         {
             assert!(
                 cargo_toml.contains(&format!("[[bin]]\nname = \"{bin}\"\ntest = false\n")),
@@ -379,6 +391,40 @@ fn bench_tests_use_embedded_test_harness() {
                 bench.name
             );
         }
+
+        // SHA-46: the policy matrix is a fourth embedded-test binary.
+        assert!(
+            cargo_toml.contains("[[test]]\nname = \"policy\"\nharness = false\n"),
+            "{}: tests/policy.rs must be a `harness = false` test",
+            bench.name
+        );
+        let policy = read_bench(bench, "tests/policy.rs");
+        for needle in [
+            "#![no_std]",
+            "#![no_main]",
+            "#[embedded_test::tests]",
+            "#[init]",
+            "compile_error!",
+            "defmt_rtt as _",
+            "policy_kat",
+            "NorFlashReader",
+            "POLICY board=",
+            "Policy::ALL",
+            "POLICY_TARGET",
+        ] {
+            assert!(
+                policy.contains(needle),
+                "{}: tests/policy.rs must contain `{needle}`",
+                bench.name
+            );
+        }
+        for test in POLICY_ON_TARGET_TESTS {
+            assert!(
+                policy.contains(&format!("fn {test}(")),
+                "{}: tests/policy.rs must define the on-target test `{test}`",
+                bench.name
+            );
+        }
     }
 }
 
@@ -412,7 +458,7 @@ fn benches_excluded_from_root_workspace() {
             bench.name
         );
     }
-    for member in ["mldsa-kat", "lms-kat", "stack-paint"] {
+    for member in ["mldsa-kat", "lms-kat", "policy-kat", "stack-paint"] {
         assert!(
             metadata.contains(&format!("\"name\":\"{member}\"")),
             "{member} must be a root workspace member (host KATs run in `cargo test --workspace`)"
@@ -472,6 +518,7 @@ fn cross_build(name: &str) {
         .iter()
         .chain(&LMS_SIZE_BINS)
         .chain(&DIGEST_SIZE_BINS)
+        .chain(&POLICY_SIZE_BINS)
     {
         assert!(
             release.join(bin).is_file(),
@@ -479,7 +526,7 @@ fn cross_build(name: &str) {
             release.join(bin).display()
         );
     }
-    for test in ["kat", "lms", "image"] {
+    for test in ["kat", "lms", "image", "policy"] {
         let found = fs::read_dir(release.join("deps"))
             .expect("read deps dir")
             .filter_map(Result::ok)
@@ -593,5 +640,29 @@ fn flash_sizes_script_runs() {
         assert_eq!(deltas.len(), 2, "{stdout}");
         assert_eq!(deltas[0], 0, "{}: digest baseline delta", bench.name);
         assert!(deltas[1] > 0, "{}: size_digest must add flash", bench.name);
+
+        // SHA-46: size_verify over size_verify_baseline.
+        let (ok, stdout, stderr) = run_capture(
+            python_script("elf_sizes.py")
+                .arg("--baseline")
+                .arg(release.join(POLICY_SIZE_BINS[0]))
+                .args(POLICY_SIZE_BINS.map(|b| release.join(b))),
+        );
+        assert!(ok, "elf_sizes.py failed:\n{stderr}");
+        let deltas: Vec<i64> = stdout
+            .lines()
+            .skip(2)
+            .map(|row| {
+                row.split('|')
+                    .map(str::trim)
+                    .filter(|c| !c.is_empty())
+                    .nth(7)
+                    .and_then(|c| c.parse().ok())
+                    .unwrap_or_else(|| panic!("no Δ flash cell in `{row}`"))
+            })
+            .collect();
+        assert_eq!(deltas.len(), 2, "{stdout}");
+        assert_eq!(deltas[0], 0, "{}: verify baseline delta", bench.name);
+        assert!(deltas[1] > 0, "{}: size_verify must add flash", bench.name);
     }
 }

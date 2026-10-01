@@ -1,19 +1,24 @@
 # keelsign-verify
 
-**Status: pre-release, API unstable.** Not yet usable to verify images. The current
-code holds the MCUboot image header and TLV-area parser (`image`, panic-free on any
-input), the image reader (`ImageReader`, for `&[u8]` and any `embedded-storage` NOR
-flash through `NorFlashReader`) and the chunked image digest (`image_digest`, peak RAM
-bounded by the caller's chunk buffer, 256 bytes by default), the trusted-key set (lookup
-by key ID), the post-quantum signature dispatch with typed errors, and the built-in
-LMS/HSS verifier (RFC 8554, SP 800-208; SHA-256 and SHA-256/192 with W8, up to two HSS
-levels by default, or single-tree only under the strict CNSA 2.0 policy
-(`DefaultBackend::cnsa_2_0()`)) behind `verify_pq`. The image format
-(keelsign TLV IDs `0x4BA0`–`0x4BA3`, the signing mode, key IDs and the hybrid Ed25519
-layout) is specified in
-[docs/image-format.md](https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md).
-The ML-DSA backend comes in a later release. The
-`ml-dsa` feature is off by default.
+**Status: pre-release, API unstable.** `verify` is the single entry point: it reads an
+MCUboot image from a slot (`ImageReader`, for `&[u8]` and any `embedded-storage` NOR
+flash through `NorFlashReader`), enforces the image rules, hashes the image in chunks
+(peak RAM bounded by the caller's chunk buffer, 256 bytes by default) and verifies the
+halves the device's `Policy` requires (`ClassicalOnly`, `PqOnly` or `Hybrid`) against a
+`TrustedKeys` set, returning a `VerifiedImage` (version, security counter, digest) for
+the caller's anti-rollback check; every failure is a typed error. Underneath are the
+MCUboot image header and TLV-area parser (`image`, panic-free on any input), the
+post-quantum signature dispatch, the built-in LMS/HSS verifier (RFC 8554, SP 800-208;
+SHA-256 and SHA-256/192 with W8, up to two HSS levels by default, or single-tree only
+under the strict CNSA 2.0 policy (`DefaultBackend::cnsa_2_0()`, through `verify_with`))
+and the Ed25519 half of hybrid images (MCUboot's KEYHASH + ED25519 pair, `ed25519-dalek`
+`verify_strict`). The image format (keelsign TLV IDs `0x4BA0`–`0x4BA3`, the signing
+mode, key IDs and the hybrid Ed25519 layout) is specified in
+[docs/image-format.md](https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md)
+and the policies in
+[docs/policy.md](https://github.com/smhasan94/keelsign/blob/main/docs/policy.md). The
+ML-DSA backend comes in a later release. Both features are off by default: `ed25519`
+(needed for `ClassicalOnly` and `Hybrid`, which otherwise fail closed) and `ml-dsa`.
 
 `keelsign-verify` will be the `no_std`, heap-free on-device verifier of the keelsign
 post-quantum firmware signing kit: it parses the MCUboot header and TLV area, hashes

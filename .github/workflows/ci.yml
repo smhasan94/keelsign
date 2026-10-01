@@ -30,11 +30,36 @@ jobs:
       - name: cargo clippy (keelsign-verify/ml-dsa)
         run: cargo clippy --workspace --all-targets --locked --features keelsign-verify/ml-dsa -- -D warnings
 
+      - name: cargo clippy (keelsign-verify/ed25519)
+        run: cargo clippy --workspace --all-targets --locked --features keelsign-verify/ed25519 -- -D warnings
+
+      - name: cargo clippy (keelsign-verify/ed25519 + ml-dsa)
+        run: cargo clippy --workspace --all-targets --locked --features "keelsign-verify/ed25519 keelsign-verify/ml-dsa" -- -D warnings
+
+      # policy-kat enables keelsign-verify/ed25519, so the workspace clippy runs above
+      # always unify it on; lint keelsign-verify alone so its feature-off code is checked.
+      - name: cargo clippy (keelsign-verify alone, no features)
+        run: cargo clippy -p keelsign-verify --all-targets --locked -- -D warnings
+
+      - name: cargo clippy (keelsign-verify alone, ml-dsa)
+        run: cargo clippy -p keelsign-verify --all-targets --locked --features ml-dsa -- -D warnings
+
       - name: cargo test
         run: cargo test --workspace --locked
 
+      # keelsign-verify alone, so no workspace member's features are unified in: both
+      # features off (ClassicalOnly / Hybrid fail closed with Ed25519(NotEnabled)).
+      - name: cargo test (keelsign-verify, no features)
+        run: cargo test -p keelsign-verify --locked
+
       - name: cargo test (keelsign-verify, ml-dsa)
         run: cargo test -p keelsign-verify --locked --features ml-dsa
+
+      - name: cargo test (keelsign-verify, ed25519)
+        run: cargo test -p keelsign-verify --locked --features ed25519
+
+      - name: cargo test (keelsign-verify, ed25519 + ml-dsa)
+        run: cargo test -p keelsign-verify --locked --features ed25519,ml-dsa
 
       # Only the packaging tests: the other ignored repo-checks tests need the thumb
       # targets, probe-rs and flip-link; the cross-build job covers the example builds.
@@ -47,8 +72,8 @@ jobs:
       - name: publish dry-run keelsign
         run: cargo publish --dry-run --locked -p keelsign
 
-  # keelsign-verify (no_std, no heap) for both Cortex-M targets, with the `ml-dsa`
-  # feature off and on.
+  # keelsign-verify (no_std, no heap) for both Cortex-M targets, with the `ml-dsa` and
+  # `ed25519` features off and on.
   verify-cross:
     name: keelsign-verify ${{ matrix.target }} (features "${{ matrix.features }}")
     runs-on: ubuntu-latest
@@ -60,10 +85,18 @@ jobs:
             features: ""
           - target: thumbv7em-none-eabihf
             features: ml-dsa
+          - target: thumbv7em-none-eabihf
+            features: ed25519
+          - target: thumbv7em-none-eabihf
+            features: ed25519,ml-dsa
           - target: thumbv8m.main-none-eabihf
             features: ""
           - target: thumbv8m.main-none-eabihf
             features: ml-dsa
+          - target: thumbv8m.main-none-eabihf
+            features: ed25519
+          - target: thumbv8m.main-none-eabihf
+            features: ed25519,ml-dsa
     steps:
       - uses: actions/checkout@v4
 

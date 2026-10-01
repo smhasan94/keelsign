@@ -83,8 +83,8 @@ impl Backend for DefaultBackend {
 /// This is [`verify_pq_with`]`(&DefaultBackend::new(), keys, tlvs, message)`; see there
 /// for the order of the checks and the errors. For the strict single-tree CNSA 2.0 policy
 /// call [`verify_pq_with`]`(&DefaultBackend::cnsa_2_0(), keys, tlvs, message)`.
-pub fn verify_pq<'a, 't, I, const N: usize>(
-    keys: &TrustedKeys<'a, N>,
+pub fn verify_pq<'a, 't, I, const N: usize, const E: usize>(
+    keys: &TrustedKeys<'a, N, E>,
     tlvs: I,
     message: &[u8],
 ) -> Result<TrustedKey<'a>, Error>

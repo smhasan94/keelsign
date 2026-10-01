@@ -3,6 +3,7 @@
 use sha2::{Digest, Sha256};
 
 use crate::algorithm::Algorithm;
+use crate::ed25519::{Ed25519Error, Ed25519Key, KeyHash};
 use crate::error::{Error, KeySetError};
 use crate::lms;
 use crate::tlv::KEY_ID_LEN;
@@ -39,18 +40,26 @@ pub fn key_id_of(public_key: &[u8]) -> KeyId {
     id
 }
 
-/// A set of at most `N` trusted public keys, looked up by key ID.
+/// A set of at most `N` trusted post-quantum public keys, looked up by key ID, and at
+/// most `E` trusted Ed25519 keys (the classical half of hybrid images, SHA-46), looked up
+/// by KEYHASH ([`keyhash_of`](crate::ed25519::keyhash_of)).
+///
+/// `E` defaults to 0, so `TrustedKeys::<N>` is a post-quantum-only set; a hybrid device
+/// writes `TrustedKeys::<N, E>::with_ed25519(&pq, &ed25519)`.
 ///
 /// No heap: the keys are borrowed and their IDs are computed once, in
-/// [`TrustedKeys::new`]. Lookup compares IDs with plain byte comparison; key IDs are
-/// public (they travel in the image), so this leaks nothing.
+/// [`TrustedKeys::new`] / [`TrustedKeys::with_ed25519`]. Lookup compares IDs with plain
+/// byte comparison; key IDs and KEYHASHes are public (they travel in the image), so this
+/// leaks nothing.
 #[derive(Clone, Copy, Debug)]
-pub struct TrustedKeys<'a, const N: usize> {
+pub struct TrustedKeys<'a, const N: usize, const E: usize = 0> {
     entries: [Option<(KeyId, TrustedKey<'a>)>; N],
     len: usize,
+    ed25519: [Option<(KeyHash, Ed25519Key<'a>)>; E],
+    ed25519_len: usize,
 }
 
-impl<'a, const N: usize> TrustedKeys<'a, N> {
+impl<'a, const N: usize, const E: usize> TrustedKeys<'a, N, E> {
     /// Build a key set from `keys`, computing each key ID.
     ///
     /// Fails with [`KeySetError::Capacity`] if there are more than `N` keys,
@@ -99,17 +108,63 @@ impl<'a, const N: usize> TrustedKeys<'a, N> {
             *slot = Some((id, *key));
             len += 1;
         }
-        Ok(Self { entries, len })
+        Ok(Self {
+            entries,
+            len,
+            ed25519: [None; E],
+            ed25519_len: 0,
+        })
     }
 
-    /// Number of keys in the set.
+    /// Build a key set from the post-quantum keys `pq` (as [`TrustedKeys::new`]) and the
+    /// Ed25519 keys `ed25519`, computing each key's KEYHASH.
+    ///
+    /// Fails as [`TrustedKeys::new`] for `pq`, then with [`KeySetError::Capacity`] if
+    /// there are more than `E` Ed25519 keys and [`KeySetError::DuplicateKeyId`] if two
+    /// Ed25519 keys have the same KEYHASH (the same public-key bytes). An Ed25519 key that
+    /// is not a valid point is accepted here and refused with
+    /// [`Ed25519Error::InvalidPublicKey`] when it verifies a signature.
+    pub fn with_ed25519(
+        pq: &[TrustedKey<'a>],
+        ed25519: &[Ed25519Key<'a>],
+    ) -> Result<Self, KeySetError> {
+        let mut set = Self::new(pq)?;
+        if ed25519.len() > E {
+            return Err(KeySetError::Capacity);
+        }
+        for key in ed25519 {
+            let hash = key.keyhash();
+            if set
+                .ed25519
+                .iter()
+                .flatten()
+                .any(|(existing, _)| *existing == hash)
+            {
+                return Err(KeySetError::DuplicateKeyId);
+            }
+            let slot = set
+                .ed25519
+                .get_mut(set.ed25519_len)
+                .ok_or(KeySetError::Capacity)?;
+            *slot = Some((hash, *key));
+            set.ed25519_len += 1;
+        }
+        Ok(set)
+    }
+
+    /// Number of post-quantum keys in the set.
     pub fn len(&self) -> usize {
         self.len
     }
 
-    /// Whether the set has no keys.
+    /// Whether the set has no post-quantum keys.
     pub fn is_empty(&self) -> bool {
         self.len == 0
+    }
+
+    /// Number of Ed25519 keys in the set.
+    pub fn ed25519_len(&self) -> usize {
+        self.ed25519_len
     }
 
     /// The trusted key with ID `key_id` (the raw key-ID TLV value).
@@ -124,6 +179,23 @@ impl<'a, const N: usize> TrustedKeys<'a, N> {
             .find(|(id, _)| id == key_id)
             .map(|(_, key)| key)
             .ok_or(Error::KeyNotTrusted)
+    }
+
+    /// The trusted Ed25519 key with KEYHASH `keyhash` (the raw KEYHASH TLV value).
+    ///
+    /// Fails with [`Error::Ed25519`]`(`[`Ed25519Error::InvalidKeyHash`]`)` if `keyhash` is
+    /// not 32 bytes and [`Error::Ed25519`]`(`[`Ed25519Error::KeyNotTrusted`]`)` if no
+    /// Ed25519 key has that KEYHASH (always, for a set with `E = 0`).
+    pub fn find_ed25519(&self, keyhash: &[u8]) -> Result<&Ed25519Key<'a>, Error> {
+        let keyhash: &KeyHash = keyhash
+            .try_into()
+            .map_err(|_| Error::Ed25519(Ed25519Error::InvalidKeyHash))?;
+        self.ed25519
+            .iter()
+            .flatten()
+            .find(|(hash, _)| hash == keyhash)
+            .map(|(_, key)| key)
+            .ok_or(Error::Ed25519(Ed25519Error::KeyNotTrusted))
     }
 }
 
@@ -362,6 +434,92 @@ mod tests {
                 "L {levels}, LMS {lms_type:#x}, OTS {ots_type:#x}"
             );
         }
+    }
+
+    #[test]
+    fn ed25519_keys_lookup_by_keyhash_capacity_and_duplicates() {
+        use crate::ed25519::keyhash_of;
+
+        static ED_A: [u8; 32] = [0xEA; 32];
+        static ED_B: [u8; 32] = [0xEB; 32];
+        let a = Ed25519Key { public_key: &ED_A };
+        let b = Ed25519Key { public_key: &ED_B };
+        let lms = key(Algorithm::LmsHss, &LMS_PK_A);
+
+        let keys = TrustedKeys::<2, 2>::with_ed25519(&[lms], &[a, b]).unwrap();
+        assert_eq!((keys.len(), keys.ed25519_len()), (1, 2));
+        assert_eq!(keys.find_ed25519(&keyhash_of(&ED_A)), Ok(&a));
+        assert_eq!(keys.find_ed25519(&keyhash_of(&ED_B)), Ok(&b));
+        // The PQ half is unchanged.
+        assert_eq!(keys.find(&key_id_of(&LMS_PK_A)), Ok(&lms));
+        // The PQ key ID (16 bytes) and the KEYHASH (32 bytes) live in separate tables.
+        assert_eq!(
+            keys.find_ed25519(&key_id_of(&LMS_PK_A)),
+            Err(Error::Ed25519(Ed25519Error::InvalidKeyHash))
+        );
+        let lms_digest: [u8; 32] = Sha256::digest(LMS_PK_A).into();
+        assert_eq!(
+            keys.find_ed25519(&lms_digest),
+            Err(Error::Ed25519(Ed25519Error::KeyNotTrusted))
+        );
+        // KEYHASH is SHA-256 of the SubjectPublicKeyInfo, not of the raw key.
+        let raw: [u8; 32] = Sha256::digest(ED_A).into();
+        assert_eq!(
+            keys.find_ed25519(&raw),
+            Err(Error::Ed25519(Ed25519Error::KeyNotTrusted))
+        );
+        for len in [0usize, 31, 33] {
+            assert_eq!(
+                keys.find_ed25519(&[0u8; 40][..len]),
+                Err(Error::Ed25519(Ed25519Error::InvalidKeyHash)),
+                "{len}"
+            );
+        }
+
+        // Capacity: more Ed25519 keys than E, and E = 0 (the default).
+        assert_eq!(
+            TrustedKeys::<2, 1>::with_ed25519(&[lms], &[a, b]).unwrap_err(),
+            KeySetError::Capacity
+        );
+        assert_eq!(
+            TrustedKeys::<2>::with_ed25519(&[lms], &[a]).unwrap_err(),
+            KeySetError::Capacity
+        );
+        // PQ errors come first.
+        assert_eq!(
+            TrustedKeys::<0, 2>::with_ed25519(&[lms], &[a]).unwrap_err(),
+            KeySetError::Capacity
+        );
+        assert_eq!(
+            TrustedKeys::<2, 2>::with_ed25519(&[key(Algorithm::LmsHss, &[])], &[a, a]).unwrap_err(),
+            KeySetError::InvalidPublicKeyLength(Algorithm::LmsHss)
+        );
+        // Duplicate KEYHASH, also from a different buffer.
+        assert_eq!(
+            TrustedKeys::<2, 2>::with_ed25519(&[], &[a, a]).unwrap_err(),
+            KeySetError::DuplicateKeyId
+        );
+        let copy = ED_A;
+        assert_eq!(
+            TrustedKeys::<2, 3>::with_ed25519(&[], &[a, b, Ed25519Key { public_key: &copy }])
+                .unwrap_err(),
+            KeySetError::DuplicateKeyId
+        );
+
+        // `new` builds a set without Ed25519 keys; `TrustedKeys::<N>` infers E = 0.
+        let pq_only = TrustedKeys::<2>::new(&[lms]).unwrap();
+        let _: &TrustedKeys<'_, 2, 0> = &pq_only;
+        assert_eq!(pq_only.ed25519_len(), 0);
+        assert_eq!(
+            pq_only.find_ed25519(&keyhash_of(&ED_A)),
+            Err(Error::Ed25519(Ed25519Error::KeyNotTrusted))
+        );
+        let empty_ed = TrustedKeys::<2, 2>::new(&[lms]).unwrap();
+        assert_eq!(empty_ed.ed25519_len(), 0);
+        assert_eq!(
+            empty_ed.find_ed25519(&keyhash_of(&ED_A)),
+            Err(Error::Ed25519(Ed25519Error::KeyNotTrusted))
+        );
     }
 
     #[test]

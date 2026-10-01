@@ -17,8 +17,9 @@ use std::path::PathBuf;
 use keelsign_verify::image::{IMAGE_TLV_SHA256, Image};
 use keelsign_verify::{DEFAULT_CHUNK_LEN, image_digest};
 
-/// Every little-endian fixture image, as named in MANIFEST.json.
-const FIXTURES: [&str; 12] = [
+/// Every little-endian signed fixture image, as named in MANIFEST.json (the SHA-46
+/// policy mutations are not: some change the SHA256 TLV or the hashed bytes on purpose).
+const FIXTURES: [&str; 15] = [
     "mcuboot-rsa2048.bin",
     "mcuboot-ecdsa-p256.bin",
     "mcuboot-ed25519.bin",
@@ -31,6 +32,9 @@ const FIXTURES: [&str; 12] = [
     "keelsign-mldsa44.bin",
     "keelsign-mldsa65.bin",
     "keelsign-dual-pq-invalid.bin",
+    "keelsign-hybrid-ed25519-mldsa44.bin",
+    "keelsign-hybrid-protected-tlvs.bin",
+    "keelsign-hybrid-reserved-tlv-protected.bin",
 ];
 
 fn fixture_dir() -> PathBuf {

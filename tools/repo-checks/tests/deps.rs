@@ -1,5 +1,5 @@
-//! Dependency rules: the ml-dsa pin (CLAUDE.md) and the scoped `unsafe` exception for the
-//! measurement-only `benches/stack-paint` crate.
+//! Dependency rules: the ml-dsa pin (CLAUDE.md), the ed25519-dalek pin (SHA-46) and the
+//! scoped `unsafe` exception for the measurement-only `benches/stack-paint` crate.
 
 use repo_checks::{SHIPPED_CRATES, workspace_root};
 use std::fs;
@@ -123,6 +123,59 @@ fn ml_dsa_pinned_exact_and_patched() {
             [ML_DSA_PIN],
             "{lockfile}: ml-dsa must resolve to exactly {ML_DSA_PIN}"
         );
+    }
+}
+
+/// The exact ed25519-dalek version keelsign-verify pins for the `ed25519` feature
+/// (SHA-46).
+const ED25519_DALEK_PIN: &str = "3.0.0";
+
+/// The curve25519-dalek it resolves; at least 4.1.3, the fix for RUSTSEC-2024-0344
+/// (timing variability in `Scalar29::sub`).
+const CURVE25519_DALEK: &str = "5.0.0";
+const CURVE25519_DALEK_MIN_PATCHED: &str = "4.1.3";
+
+#[test]
+fn ed25519_dalek_pinned_exact() {
+    assert!(version_at_least(
+        CURVE25519_DALEK,
+        CURVE25519_DALEK_MIN_PATCHED
+    ));
+    assert!(!version_at_least("4.1.2", CURVE25519_DALEK_MIN_PATCHED));
+    let manifest = read("keelsign-verify/Cargo.toml");
+    let line = manifest
+        .lines()
+        .find(|l| l.starts_with("ed25519-dalek ="))
+        .expect("keelsign-verify must depend on ed25519-dalek");
+    for needle in [
+        format!("version = \"={ED25519_DALEK_PIN}\""),
+        "default-features = false".to_owned(),
+        "optional = true".to_owned(),
+    ] {
+        assert!(
+            line.contains(&needle),
+            "ed25519-dalek must have `{needle}`: `{line}`"
+        );
+    }
+    // Every lockfile that builds keelsign-verify with `ed25519` resolves exactly these.
+    for lockfile in LOCKFILES {
+        let lock = read(lockfile);
+        let packages = lock_packages(&lock);
+        for (name, pin) in [
+            ("ed25519-dalek", ED25519_DALEK_PIN),
+            ("curve25519-dalek", CURVE25519_DALEK),
+        ] {
+            let versions: Vec<&str> = packages
+                .iter()
+                .filter(|(n, _, _)| n == name)
+                .map(|(_, v, _)| v.as_str())
+                .collect();
+            assert_eq!(
+                versions,
+                [pin],
+                "{lockfile}: {name} must resolve to exactly {pin}"
+            );
+        }
     }
 }
 

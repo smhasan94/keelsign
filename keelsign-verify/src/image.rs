@@ -26,8 +26,9 @@
 //! ([docs/image-format.md][spec]), so keelsign TLVs in the protected area are ignored for
 //! PQ selection: a PQ signature TLV there is inside `M`, the bytes it would sign, so it can
 //! never be a valid signature over `M`. The parser still yields them (from
-//! [`Image::protected`] and [`Image::tlvs`]); rejecting such images outright is a candidate
-//! image-policy rule (SHA-46).
+//! [`Image::protected`] and [`Image::tlvs`]); [`verify`](crate::verify) rejects such
+//! images outright ([`ImageError::KeelsignTlvProtected`](crate::ImageError::KeelsignTlvProtected),
+//! SHA-46).
 //!
 //! # What the parser does not decide
 //!
@@ -37,7 +38,9 @@
 //!   ticket (SHA-35) asked for an `UnknownTlv` error; the image format (SHA-37) requires
 //!   verifiers to ignore unknown TLV types, and that constraint wins.
 //! - The header flags, how many `SHA256` TLVs an image has, the KEYHASH / signature
-//!   pairing and anti-rollback are image policy (SHA-46). The parser only exposes them
+//!   pairing and the security counter are image policy, enforced by
+//!   [`verify`](crate::verify) (SHA-46, docs/policy.md); anti-rollback is the caller's
+//!   ([`VerifiedImage`](crate::VerifiedImage)). The parser only exposes them
 //!   ([`Header::flags`], [`Image::tlvs`]).
 //! - The order of TLVs carries no meaning: no state is kept from one TLV to the next.
 //!
@@ -65,6 +68,7 @@
 //!
 //! [spec]: https://github.com/smhasan94/keelsign/blob/main/docs/image-format.md
 
+use core::cmp::Ordering;
 use core::fmt;
 use core::ops::Range;
 
@@ -193,8 +197,14 @@ impl core::error::Error for ParseError {}
 
 /// `struct image_version`: `major.minor.revision+build_num`.
 ///
-/// It deliberately has no ordering: comparing versions (anti-rollback) is policy
-/// (SHA-46).
+/// It deliberately implements no [`Ord`]: whether `build_num` takes part in a comparison
+/// is a device decision, so the caller picks one of the two explicit comparators for its
+/// anti-rollback check (SHA-46, docs/policy.md):
+///
+/// - [`ImageVersion::cmp_ignoring_build_num`]: `(major, minor, revision)` only, MCUboot's
+///   default `boot_version_cmp`;
+/// - [`ImageVersion::cmp_with_build_num`]: then `build_num`, MCUboot built with
+///   `MCUBOOT_VERSION_CMP_USE_BUILD_NUMBER`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ImageVersion {
     /// `iv_major`.
@@ -207,7 +217,25 @@ pub struct ImageVersion {
     pub build_num: u32,
 }
 
-/// The header's `ih_flags` (`IMAGE_F_*`), exposed but not acted on (SHA-46).
+impl ImageVersion {
+    /// Compare `major`, then `minor`, then `revision`; `build_num` is ignored, so
+    /// `1.2.3+4` and `1.2.3+9` are [`Ordering::Equal`]. This is MCUboot's default
+    /// `boot_version_cmp`, used for its downgrade prevention.
+    pub fn cmp_ignoring_build_num(&self, other: &ImageVersion) -> Ordering {
+        (self.major, self.minor, self.revision).cmp(&(other.major, other.minor, other.revision))
+    }
+
+    /// Compare `major`, `minor`, `revision`, then `build_num`: MCUboot's `boot_version_cmp`
+    /// when built with `MCUBOOT_VERSION_CMP_USE_BUILD_NUMBER`.
+    pub fn cmp_with_build_num(&self, other: &ImageVersion) -> Ordering {
+        self.cmp_ignoring_build_num(other)
+            .then(self.build_num.cmp(&other.build_num))
+    }
+}
+
+/// The header's `ih_flags` (`IMAGE_F_*`). The parser does not act on them;
+/// [`verify`](crate::verify) rejects encrypted, compressed and non-bootable images
+/// (SHA-46).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ImageFlags(pub u32);
 
@@ -514,6 +542,8 @@ impl<'a> From<Tlv<'a>> for (u16, &'a [u8]) {
 /// A validated TLV area (protected or unprotected).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TlvArea<'a> {
+    /// The whole area, its info header included.
+    bytes: &'a [u8],
     /// The TLVs, after the info header.
     tlvs: &'a [u8],
     /// Offset of the info header in the image, and of the area's end.
@@ -533,6 +563,15 @@ impl<'a> TlvArea<'a> {
         self.protected
     }
 
+    /// The area's bytes as parsed, its 4-byte info header included: exactly
+    /// [`range`](Self::range) of the image. For the protected area these are the bytes
+    /// the image digest `M` ends with, and
+    /// [`image_digest`](crate::digest::image_digest) hashes them from here rather than
+    /// re-reading them from storage (SHA-46).
+    pub fn bytes(&self) -> &'a [u8] {
+        self.bytes
+    }
+
     /// The area's TLVs, in order. Never fails: the area was validated when the image was
     /// parsed.
     pub fn iter(&self) -> TlvIter<'a> {
@@ -549,8 +588,8 @@ impl<'a> TlvArea<'a> {
     /// PQ selection MUST use the unprotected area's pairs, `image.unprotected().pairs()`.
     /// keelsign TLVs are unprotected-only (docs/image-format.md), so keelsign TLVs in the
     /// protected area are ignored for PQ selection: a PQ signature there is inside `M` and
-    /// can never be a valid signature over `M`. Rejecting such images is a candidate policy
-    /// rule (SHA-46). See the [module docs](self#post-quantum-signature-selection).
+    /// can never be a valid signature over `M`; [`verify`](crate::verify) rejects such
+    /// images (SHA-46). See the [module docs](self#post-quantum-signature-selection).
     pub fn pairs(&self) -> impl Iterator<Item = (u16, &'a [u8])> + use<'a> {
         self.iter().map(|tlv| tlv.as_pair())
     }
@@ -752,11 +791,11 @@ impl<'a> Image<'a> {
     /// - The bytes hashed over [`Image::hashed_range`] start with the header bytes in
     ///   `raw`: the header must not be re-read from storage that could have changed
     ///   between parsing and hashing. [`image_digest`](crate::digest::image_digest) hashes
-    ///   [`Image::raw_header`] for this reason. Only the header is pinned:
-    ///   [`image_digest`](crate::digest::image_digest) re-reads the protected TLV bytes
-    ///   from the reader, so the bytes hashed are not the `tlv_bytes` copy that
-    ///   [`Image::protected`] exposes (as in MCUboot); policy on protected TLV contents
-    ///   (SHA-46) must allow for that.
+    ///   [`Image::raw_header`] for this reason, and likewise hashes the protected TLV
+    ///   area from the `tlv_bytes` copy ([`TlvArea::bytes`]) rather than re-reading it
+    ///   (SHA-46): the header and protected TLVs that [`Image::header`] and
+    ///   [`Image::protected`] expose (the version, the security counter) are exactly the
+    ///   bytes hashed. Only the body is streamed from storage, as in MCUboot.
     pub fn parse_parts(raw: RawHeader, tlv_bytes: &'a [u8]) -> Result<Image<'a>, ParseError> {
         let header = raw.header;
         let tlv_offset = header.tlv_offset()?;
@@ -836,8 +875,8 @@ impl<'a> Image<'a> {
     /// Not the input of PQ selection: that MUST be `self.unprotected().pairs()`. keelsign
     /// TLVs are unprotected-only (docs/image-format.md), so keelsign TLVs in the protected
     /// area, which this iterator yields, are ignored for PQ selection; a PQ signature there
-    /// is inside `M` and can never be a valid signature over `M`. Rejecting such images is
-    /// a candidate policy rule (SHA-46).
+    /// is inside `M` and can never be a valid signature over `M`;
+    /// [`verify`](crate::verify) rejects such images (SHA-46).
     pub fn tlvs(&self) -> impl Iterator<Item = Tlv<'a>> + use<'a> {
         self.protected
             .map(|area| area.iter())
@@ -866,15 +905,17 @@ fn area(
     let end = start
         .checked_add(u32::from(tlv_tot))
         .ok_or(ParseError::SizeOverflow)?;
-    let tlvs = bytes
-        .get(TLV_INFO_SIZE..usize::from(tlv_tot))
+    let whole = bytes
+        .get(..usize::from(tlv_tot))
         .ok_or(ParseError::Truncated)?;
+    let tlvs = whole.get(TLV_INFO_SIZE..).ok_or(ParseError::Truncated)?;
     let mut rest = tlvs;
     while !rest.is_empty() {
         let (_, _, next) = split_tlv(rest)?;
         rest = next;
     }
     Ok(TlvArea {
+        bytes: whole,
         tlvs,
         start,
         end,
@@ -1148,51 +1189,7 @@ mod tests {
 
     // ---- Synthetic images -------------------------------------------------------------
 
-    fn header_bytes(hdr_size: u16, protect_tlv_size: u16, img_size: u32) -> Vec<u8> {
-        let mut h = Vec::new();
-        h.extend_from_slice(&IMAGE_MAGIC.to_le_bytes());
-        h.extend_from_slice(&0x1000u32.to_le_bytes());
-        h.extend_from_slice(&hdr_size.to_le_bytes());
-        h.extend_from_slice(&protect_tlv_size.to_le_bytes());
-        h.extend_from_slice(&img_size.to_le_bytes());
-        h.extend_from_slice(&0u32.to_le_bytes());
-        h.extend_from_slice(&[1, 2, 3, 0, 4, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(h.len(), IMAGE_HEADER_SIZE);
-        h
-    }
-
-    fn area_bytes(magic: u16, tlvs: &[(u16, &[u8])]) -> Vec<u8> {
-        let mut body = Vec::new();
-        for (t, v) in tlvs {
-            body.extend_from_slice(&t.to_le_bytes());
-            body.extend_from_slice(&u16::try_from(v.len()).unwrap().to_le_bytes());
-            body.extend_from_slice(v);
-        }
-        let mut out = Vec::new();
-        out.extend_from_slice(&magic.to_le_bytes());
-        out.extend_from_slice(&u16::try_from(4 + body.len()).unwrap().to_le_bytes());
-        out.extend(body);
-        out
-    }
-
-    /// A 32-byte header, a 4-byte body and the given TLV areas.
-    fn synth(protected: Option<&[(u16, &[u8])]>, unprotected: &[(u16, &[u8])]) -> Vec<u8> {
-        let prot = protected.map(|t| area_bytes(TLV_PROT_INFO_MAGIC, t));
-        let prot_len = prot.as_ref().map_or(0, Vec::len);
-        let mut d = header_bytes(32, u16::try_from(prot_len).unwrap(), 4);
-        d.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD]);
-        d.extend(prot.unwrap_or_default());
-        d.extend(area_bytes(TLV_INFO_MAGIC, unprotected));
-        d
-    }
-
-    fn set_u16(d: &mut [u8], at: usize, v: u16) {
-        d[at..at + 2].copy_from_slice(&v.to_le_bytes());
-    }
-
-    fn set_u32(d: &mut [u8], at: usize, v: u32) {
-        d[at..at + 4].copy_from_slice(&v.to_le_bytes());
-    }
+    use super::test_support::{area_bytes, header_bytes, set_u16, set_u32, synth};
 
     // ---- Reference parser (oracle) ----------------------------------------------------
 
@@ -2307,13 +2304,67 @@ mod tests {
         );
         assert!(size_of::<TlvKind>() <= 4, "{}", size_of::<TlvKind>());
         assert!(size_of::<Tlv<'_>>() <= 3 * size_of::<usize>());
-        assert!(size_of::<TlvArea<'_>>() <= 4 * size_of::<usize>());
+        // Two slices (the whole area, SHA-46, and its TLVs), two offsets and a flag.
+        assert!(
+            size_of::<TlvArea<'_>>() <= 4 * size_of::<usize>() + 16,
+            "{}",
+            size_of::<TlvArea<'_>>()
+        );
         assert!(
             // The TLV areas, the header and its 32 raw bytes (SHA-42).
-            size_of::<Image<'_>>() <= 12 * size_of::<usize>() + 32,
+            size_of::<Image<'_>>() <= 16 * size_of::<usize>() + 32 + 24,
             "{}",
             size_of::<Image<'_>>()
         );
+    }
+
+    #[test]
+    fn version_cmp_ignoring_build_num_is_mcuboot_default_and_with_build_num_orders_builds() {
+        use core::cmp::Ordering::{Equal, Greater, Less};
+        let v = |major, minor, revision, build_num| ImageVersion {
+            major,
+            minor,
+            revision,
+            build_num,
+        };
+        let base = v(1, 2, 3, 4);
+        // (other, ignoring build_num, with build_num), each read as `base.cmp(other)`.
+        let cases = [
+            (v(1, 2, 3, 4), Equal, Equal),
+            (v(1, 2, 3, 9), Equal, Less),
+            (v(1, 2, 3, 0), Equal, Greater),
+            (v(1, 2, 4, 0), Less, Less),
+            (v(1, 2, 2, u32::MAX), Greater, Greater),
+            (v(1, 3, 0, 0), Less, Less),
+            (v(1, 1, u16::MAX, u32::MAX), Greater, Greater),
+            (v(2, 0, 0, 0), Less, Less),
+            (v(0, u8::MAX, u16::MAX, u32::MAX), Greater, Greater),
+        ];
+        for (other, ignoring, with) in cases {
+            assert_eq!(base.cmp_ignoring_build_num(&other), ignoring, "{other:?}");
+            assert_eq!(base.cmp_with_build_num(&other), with, "{other:?}");
+            // Antisymmetric.
+            assert_eq!(other.cmp_ignoring_build_num(&base), ignoring.reverse());
+            assert_eq!(other.cmp_with_build_num(&base), with.reverse());
+        }
+        // Lexicographic: revision outranks build_num, minor outranks revision, major
+        // outranks minor, whatever the lower fields hold.
+        assert_eq!(
+            v(1, 0, 1, 0).cmp_with_build_num(&v(1, 0, 0, u32::MAX)),
+            Greater
+        );
+        assert_eq!(
+            v(1, 1, 0, 0).cmp_ignoring_build_num(&v(1, 0, 9, 0)),
+            Greater
+        );
+        assert_eq!(
+            v(2, 0, 0, 0).cmp_ignoring_build_num(&v(1, 9, 9, 9)),
+            Greater
+        );
+        // Equal under both comparators exactly when equal as values (build_num included
+        // only by the second).
+        assert_eq!(v(1, 2, 3, 4).cmp_with_build_num(&v(1, 2, 3, 4)), Equal);
+        assert_eq!(v(1, 2, 3, 4), v(1, 2, 3, 4));
     }
 
     #[test]
@@ -2342,7 +2393,7 @@ mod tests {
         assert!(ImageFlags(IMAGE_F_RAM_LOAD).ram_load());
         assert!(ImageFlags(IMAGE_F_ROM_FIXED).rom_fixed());
         assert_eq!(ImageFlags(u32::MAX).unknown_bits(), !0xF3D);
-        // Flags are parsed, never acted on (SHA-46).
+        // Flags are parsed, never acted on by the parser (verify does, SHA-46).
         let mut d = synth(None, &[]);
         set_u32(&mut d, 16, u32::MAX);
         assert_eq!(
@@ -2431,5 +2482,70 @@ mod tests {
                 prop_assert!(image.tlv_end() as usize <= d.len());
             }
         }
+    }
+}
+
+/// Synthetic-image builders shared by the image and policy tests.
+#[cfg(test)]
+pub(crate) mod test_support {
+    // Host test code, not no_std firmware: failing a test with a message is the point.
+    #![allow(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing
+    )]
+
+    use std::vec::Vec;
+
+    use super::{IMAGE_HEADER_SIZE, IMAGE_MAGIC, TLV_INFO_MAGIC, TLV_PROT_INFO_MAGIC};
+
+    pub(crate) fn header_bytes(hdr_size: u16, protect_tlv_size: u16, img_size: u32) -> Vec<u8> {
+        let mut h = Vec::new();
+        h.extend_from_slice(&IMAGE_MAGIC.to_le_bytes());
+        h.extend_from_slice(&0x1000u32.to_le_bytes());
+        h.extend_from_slice(&hdr_size.to_le_bytes());
+        h.extend_from_slice(&protect_tlv_size.to_le_bytes());
+        h.extend_from_slice(&img_size.to_le_bytes());
+        h.extend_from_slice(&0u32.to_le_bytes());
+        h.extend_from_slice(&[1, 2, 3, 0, 4, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(h.len(), IMAGE_HEADER_SIZE);
+        h
+    }
+
+    pub(crate) fn area_bytes(magic: u16, tlvs: &[(u16, &[u8])]) -> Vec<u8> {
+        let mut body = Vec::new();
+        for (t, v) in tlvs {
+            body.extend_from_slice(&t.to_le_bytes());
+            body.extend_from_slice(&u16::try_from(v.len()).unwrap().to_le_bytes());
+            body.extend_from_slice(v);
+        }
+        let mut out = Vec::new();
+        out.extend_from_slice(&magic.to_le_bytes());
+        out.extend_from_slice(&u16::try_from(4 + body.len()).unwrap().to_le_bytes());
+        out.extend(body);
+        out
+    }
+
+    /// A 32-byte header, a 4-byte body and the given TLV areas.
+    pub(crate) fn synth(
+        protected: Option<&[(u16, &[u8])]>,
+        unprotected: &[(u16, &[u8])],
+    ) -> Vec<u8> {
+        let prot = protected.map(|t| area_bytes(TLV_PROT_INFO_MAGIC, t));
+        let prot_len = prot.as_ref().map_or(0, Vec::len);
+        let mut d = header_bytes(32, u16::try_from(prot_len).unwrap(), 4);
+        d.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD]);
+        d.extend(prot.unwrap_or_default());
+        d.extend(area_bytes(TLV_INFO_MAGIC, unprotected));
+        d
+    }
+
+    pub(crate) fn set_u16(d: &mut [u8], at: usize, v: u16) {
+        d[at..at + 2].copy_from_slice(&v.to_le_bytes());
+    }
+
+    pub(crate) fn set_u32(d: &mut [u8], at: usize, v: u32) {
+        d[at..at + 4].copy_from_slice(&v.to_le_bytes());
     }
 }
