@@ -2,9 +2,9 @@
 //!
 //! The text checks in `verify_crate.rs` and `deps.rs` only prove that the manifests say
 //! the right thing. These tests prove the compiler and clippy reject the code: each case
-//! copies the workspace members to a scratch directory, appends one probe module to the
-//! probed crate's root, runs `cargo clippy --message-format=json` there and checks the
-//! diagnostic codes.
+//! copies the workspace members (plus the image fixtures `policy-kat` embeds) to a
+//! scratch directory, appends one probe module to the probed crate's root, runs
+//! `cargo clippy --message-format=json` there and checks the diagnostic codes.
 //!
 //! # Crate classes
 //!
@@ -62,6 +62,8 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 enum Class {
     /// `no_std` crate inheriting the workspace lints: four clippy denies, forbid unsafe.
     NoStd,
+    /// The measurement-only `stack-paint` crate: four clippy denies, unsafe at deny.
+    NoStdException,
 }
 
 /// A workspace member probed by these tests.
@@ -77,6 +79,30 @@ const KEELSIGN_VERIFY: Crate = Crate {
     package: "keelsign-verify",
     dir: "keelsign-verify",
     class: Class::NoStd,
+};
+
+const LMS_KAT: Crate = Crate {
+    package: "lms-kat",
+    dir: "benches/lms-kat",
+    class: Class::NoStd,
+};
+
+const POLICY_KAT: Crate = Crate {
+    package: "policy-kat",
+    dir: "benches/policy-kat",
+    class: Class::NoStd,
+};
+
+const MLDSA_KAT: Crate = Crate {
+    package: "mldsa-kat",
+    dir: "benches/mldsa-kat",
+    class: Class::NoStd,
+};
+
+const STACK_PAINT: Crate = Crate {
+    package: "stack-paint",
+    dir: "benches/stack-paint",
+    class: Class::NoStdException,
 };
 
 /// One snippet of code appended to a crate root.
@@ -276,6 +302,10 @@ const SCRUBBED_ENV: [&str; 6] = [
     "RUSTC_WORKSPACE_WRAPPER",
 ];
 
+/// Non-member directories the members compile against: `policy-kat` embeds the image
+/// fixtures with `include_bytes!("../../../tests/fixtures/images/…")`.
+const NON_MEMBER_INPUTS: [&str; 1] = ["tests/fixtures/images"];
+
 /// The inner target directory shared by every case.
 fn probe_target_dir() -> PathBuf {
     Path::new(env!("CARGO_TARGET_TMPDIR")).join("lint-probes")
@@ -417,8 +447,8 @@ fn run_case(case: &str, krate: &Crate, probes: &[Probe], edit: Edit) -> Outcome 
     for file in ["Cargo.toml", "Cargo.lock"] {
         fs::copy(root.join(file), copy.join(file)).unwrap_or_else(|e| panic!("copy {file}: {e}"));
     }
-    for member in &members {
-        copy_tree(&root.join(member), &copy.join(member));
+    for dir in members.iter().map(String::as_str).chain(NON_MEMBER_INPUTS) {
+        copy_tree(&root.join(dir), &copy.join(dir));
     }
 
     let member_dir = copy.join(krate.dir);
@@ -528,6 +558,7 @@ fn run_case(case: &str, krate: &Crate, probes: &[Probe], edit: Edit) -> Outcome 
 fn check_case(case: &str, krate: &Crate, probe: Probe) {
     let applicable = match krate.class {
         Class::NoStd => true,
+        Class::NoStdException => probe != Probe::UnsafeUnderAllow,
     };
     assert!(
         applicable,
@@ -556,6 +587,47 @@ probe_cases! { KEELSIGN_VERIFY;
     keelsign_verify_rejects_slice_indexing => SliceIndexing,
     keelsign_verify_rejects_unsafe => Unsafe,
     keelsign_verify_forbids_unsafe_even_with_allow => UnsafeUnderAllow,
+}
+
+probe_cases! { LMS_KAT;
+    lms_kat_probe_control_is_clean => Control,
+    lms_kat_rejects_panic => Panic,
+    lms_kat_rejects_unwrap => Unwrap,
+    lms_kat_rejects_expect => Expect,
+    lms_kat_rejects_slice_indexing => SliceIndexing,
+    lms_kat_rejects_unsafe => Unsafe,
+    lms_kat_forbids_unsafe_even_with_allow => UnsafeUnderAllow,
+}
+
+probe_cases! { POLICY_KAT;
+    policy_kat_probe_control_is_clean => Control,
+    policy_kat_rejects_panic => Panic,
+    policy_kat_rejects_unwrap => Unwrap,
+    policy_kat_rejects_expect => Expect,
+    policy_kat_rejects_slice_indexing => SliceIndexing,
+    policy_kat_rejects_unsafe => Unsafe,
+    policy_kat_forbids_unsafe_even_with_allow => UnsafeUnderAllow,
+}
+
+probe_cases! { MLDSA_KAT;
+    mldsa_kat_probe_control_is_clean => Control,
+    mldsa_kat_rejects_panic => Panic,
+    mldsa_kat_rejects_unwrap => Unwrap,
+    mldsa_kat_rejects_expect => Expect,
+    mldsa_kat_rejects_slice_indexing => SliceIndexing,
+    mldsa_kat_rejects_unsafe => Unsafe,
+    mldsa_kat_forbids_unsafe_even_with_allow => UnsafeUnderAllow,
+}
+
+// `stack-paint` denies (not forbids) unsafe_code so its one Arm-only module can allow it;
+// there is no forbid-level case.
+probe_cases! { STACK_PAINT;
+    stack_paint_probe_control_is_clean => Control,
+    stack_paint_rejects_panic => Panic,
+    stack_paint_rejects_unwrap => Unwrap,
+    stack_paint_rejects_expect => Expect,
+    stack_paint_rejects_slice_indexing => SliceIndexing,
+    stack_paint_rejects_unsafe => Unsafe,
 }
 
 /// AC1, automated half of TP2: without `[lints] workspace = true` (and with the source
