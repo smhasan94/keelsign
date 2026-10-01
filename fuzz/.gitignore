@@ -1,0 +1,10 @@
+/target
+/artifacts
+/coverage
+/corpus-work
+/fuzz-artifacts.tar.gz
+# The committed seed corpus is script output (scripts/gen_fuzz_corpus.py); anything else
+# libFuzzer writes there stays untracked.
+/corpus/parse_image/*
+!/corpus/parse_image/fixture-*.bin
+!/corpus/parse_image/synth-*.bin

@@ -1,0 +1,21 @@
+diff --git a/keelsign-verify/src/image.rs b/keelsign-verify/src/image.rs
+index 5a5bbeb..93a5416 100644
+--- a/keelsign-verify/src/image.rs
++++ b/keelsign-verify/src/image.rs
+@@ -930,9 +930,13 @@ fn split_tlv(rest: &[u8]) -> Result<(u16, &[u8], &[u8]), ParseError> {
+         .ok_or(ParseError::LengthMismatch)?;
+     let tlv_type = u16::from_le_bytes([t0, t1]);
+     let len = usize::from(u16::from_le_bytes([l0, l1]));
+-    let (value, next) = tail
+-        .split_at_checked(len)
+-        .ok_or(ParseError::LengthMismatch)?;
++    // SHA-39 TP1: deliberate off-by-one in the TLV length check (`len > tail.len()` is
++    // right); a value that overruns its area by one byte is accepted, short by one byte.
++    if len > tail.len() + 1 {
++        return Err(ParseError::LengthMismatch);
++    }
++    let value = tail.get(..len).unwrap_or(tail);
++    let next = tail.get(len..).unwrap_or(&[]);
+     if is_pq_signature(tlv_type) && len > MAX_PQ_SIGNATURE_LEN {
+         return Err(ParseError::PqSignatureTooLong);
+     }

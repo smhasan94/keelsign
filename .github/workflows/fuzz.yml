@@ -1,0 +1,138 @@
+name: Fuzz
+
+# The parse_image fuzz target (fuzz/, SHA-39; docs/fuzzing.md): a 2-minute smoke run on
+# every PR, a 30-minute run every night, both from the committed corpus.
+on:
+  pull_request:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: fuzz-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Read-only token: the jobs only check out and upload artifacts.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # cargo fuzz needs nightly (sanitizers, -Z flags). Pinned; bump by hand together with
+  # docs/fuzzing.md.
+  FUZZ_TOOLCHAIN: nightly-2026-09-29
+
+jobs:
+  # The fuzz crate on stable: formatting, lints, its tests (every seed passes the
+  # check and matches MANIFEST.json, the corpus reaches every coverage arm), and the
+  # committed corpus is the generator's output.
+  fuzz-check:
+    name: fuzz crate fmt, clippy, test, corpus check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+
+      - name: cargo fmt (fuzz)
+        run: cargo fmt --manifest-path fuzz/Cargo.toml --check
+
+      - name: cargo clippy (fuzz)
+        run: cargo clippy --manifest-path fuzz/Cargo.toml --all-targets --locked -- -D warnings
+
+      - name: cargo test (fuzz)
+        run: cargo test --manifest-path fuzz/Cargo.toml --locked
+
+      - name: corpus matches a fresh regeneration
+        run: python3 scripts/gen_fuzz_corpus.py --check
+
+      - name: coverage checker self-test
+        run: python3 scripts/fuzz_coverage_check.py --self-test
+
+  fuzz-smoke:
+    name: fuzz smoke (120 s)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
+
+      - uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cargo-fuzz@0.13.2
+
+      - name: fuzz parse_image for 120 s
+        run: scripts/fuzz.sh smoke
+
+      - name: upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-smoke-${{ github.run_id }}
+          path: fuzz/artifacts/
+          retention-days: 30
+
+  fuzz-nightly:
+    name: fuzz nightly (1800 s), TP1 self-test, coverage
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
+          components: llvm-tools-preview
+
+      - uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cargo-fuzz@0.13.2
+
+      - name: fuzz parse_image for 1800 s
+        run: scripts/fuzz.sh nightly
+
+      # Always: summary.txt (crash_files=0 when healthy) and a tarball of fuzz/artifacts/
+      # that keeps the crash directory artifacts/parse_image/ even when it is empty.
+      - name: summarise the run
+        if: always()
+        run: scripts/fuzz.sh summary
+
+      - name: upload nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-nightly-${{ github.run_id }}
+          path: |
+            fuzz/artifacts/summary.txt
+            fuzz/fuzz-artifacts.tar.gz
+          retention-days: 30
+
+      # The harness still finds the off-by-one fuzz/tp1-tlv-length-off-by-one.patch
+      # injects into a copy of the parser, within 120 s.
+      - name: TP1 self-test (injected off-by-one)
+        run: scripts/fuzz.sh tp1
+
+      - name: coverage of the committed corpus
+        run: scripts/fuzz.sh coverage
+
+      - name: upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-coverage-${{ github.run_id }}
+          path: |
+            fuzz/coverage/parse_image/coverage.txt
+            fuzz/coverage/parse_image/report.txt
+            fuzz/coverage/parse_image/html/
+          retention-days: 30
