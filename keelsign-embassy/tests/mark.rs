@@ -490,6 +490,25 @@ fn config_and_key_errors_are_reported_before_any_flash_access() {
             WRITE_SIZE,
             ConfigError::PartitionsOverlap,
         ),
+        // Aligned, but offset + length overflows u32.
+        (
+            Layout {
+                dfu_offset: 0xFFFF_F000,
+                dfu_len: 0x2000,
+                ..LAYOUT
+            },
+            WRITE_SIZE,
+            ConfigError::PartitionOutOfRange,
+        ),
+        (
+            Layout {
+                state_offset: 0xFFFF_F000,
+                state_len: 0x2000,
+                ..LAYOUT
+            },
+            WRITE_SIZE,
+            ConfigError::PartitionOutOfRange,
+        ),
     ];
     for (layout, aligned_len, expected) in cases {
         let mut aligned = vec![0u8; aligned_len];
@@ -529,4 +548,89 @@ fn config_and_key_errors_are_reported_before_any_flash_access() {
         );
     }
     assert!(shared.into_inner().ops.is_empty(), "no flash access");
+}
+
+/// The state magic `magic` written over the whole first word of the state partition (as
+/// the bootloader leaves it).
+fn with_state(mut flash: Flash, magic: u8) -> Flash {
+    let start = STATE_OFFSET as usize;
+    flash.mem[start..start + WRITE_SIZE].fill(magic);
+    flash
+}
+
+/// embassy-boot allows a new update from `Revert` (after a failed update) and `DfuDetach`,
+/// as from `Boot`; both updaters mark a valid image there.
+#[test]
+fn marking_is_allowed_from_revert_and_dfu_detach() {
+    const REVERT_MAGIC: u8 = 0xC0;
+    const DFU_DETACH_MAGIC: u8 = 0xE0;
+    for (magic, state) in [
+        (REVERT_MAGIC, State::Revert),
+        (DFU_DETACH_MAGIC, State::DfuDetach),
+    ] {
+        let start = with_state(flash_with(image(LMS_IMAGE)), magic);
+        // The state reads as expected before marking.
+        {
+            let shared = Shared::new(RefCell::new(start.clone()));
+            let mut aligned = [0u8; WRITE_SIZE];
+            let mut updater = blocking_updater(&shared, &mut aligned, &lms_config()).unwrap();
+            assert_eq!(updater.get_state().unwrap(), state);
+        }
+        for (result, flash) in [
+            mark_blocking(start.clone(), &lms_config()),
+            mark_async(start, &lms_config()),
+        ] {
+            result.unwrap_or_else(|e| panic!("from {state:?}: {e:?}"));
+            assert_eq!(state_word(&flash), [SWAP_MAGIC; 4], "from {state:?}");
+            assert!(mutations_only_in_state(&flash.ops), "from {state:?}");
+        }
+    }
+}
+
+/// A rejected image never reaches the caller's `accept` check, in either updater.
+#[test]
+fn accept_is_not_called_when_verify_rejects() {
+    let mut tampered = flash_with(image(LMS_IMAGE));
+    tampered.mem[DFU_OFFSET as usize + 0x200] ^= 0x01;
+    let config = lms_config();
+    let mut tlv_buf = [0u8; 4096];
+    let mut chunk = [0u8; DEFAULT_CHUNK_LEN];
+    let expected = Some(Error::Rejected(keelsign_verify::Error::Image(
+        ImageError::DigestMismatch,
+    )));
+
+    let mut called = false;
+    let shared = Shared::new(RefCell::new(tampered.clone()));
+    {
+        let mut aligned = [0u8; WRITE_SIZE];
+        let mut updater = blocking_updater(&shared, &mut aligned, &config).unwrap();
+        let result = updater.verify_and_mark_updated_if(&mut tlv_buf, &mut chunk, |_| {
+            called = true;
+            true
+        });
+        assert_eq!(result.err(), expected);
+    }
+    assert!(
+        !called,
+        "blocking: accept must not run for a rejected image"
+    );
+    let flash = shared.into_inner().into_inner();
+    assert!(flash.ops.iter().all(|op| !op.mutates()));
+
+    let shared = AsyncShared::new(tampered);
+    {
+        let mut aligned = [0u8; WRITE_SIZE];
+        let mut updater = async_updater(&shared, &mut aligned, &config).unwrap();
+        let result = embassy_futures::block_on(updater.verify_and_mark_updated_if(
+            &mut tlv_buf,
+            &mut chunk,
+            |_| {
+                called = true;
+                true
+            },
+        ));
+        assert_eq!(result.err(), expected);
+    }
+    assert!(!called, "async: accept must not run for a rejected image");
+    assert!(shared.into_inner().ops.iter().all(|op| !op.mutates()));
 }

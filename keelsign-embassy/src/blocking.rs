@@ -214,6 +214,11 @@ where
     /// An updater over the DFU and state partitions the linker script names
     /// (`__bootloader_dfu_start` / `_end`, `__bootloader_state_start` / `_end`), both on
     /// `flash` (embassy-boot's `FirmwareUpdaterConfig::from_linkerfile_blocking`).
+    ///
+    /// embassy-embedded-hal's `BlockingPartition::new` runs on the linker symbols *before*
+    /// the adapter's checks: misaligned symbols panic inside embassy. Only
+    /// [`BlockingUpdater::new`] rules embassy's assertions out; the remaining checks
+    /// (buffer length, empty DFU slot, keys) still return [`Error`]s here.
     pub fn from_linkerfile(
         flash: &'d embassy_sync::blocking_mutex::Mutex<
             embassy_sync::blocking_mutex::raw::NoopRawMutex,

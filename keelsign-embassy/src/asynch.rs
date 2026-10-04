@@ -68,8 +68,9 @@ where
     /// ([`ConfigError::AlignedBufferLen`]), the DFU partition is empty
     /// ([`ConfigError::DfuSlotEmpty`]), a partition is not a multiple of the flash's
     /// read, write and erase sizes ([`ConfigError::DfuUnaligned`],
-    /// [`ConfigError::StateUnaligned`]) or the partitions overlap
-    /// ([`ConfigError::PartitionsOverlap`]).
+    /// [`ConfigError::StateUnaligned`]), a partition ends past `u32::MAX`
+    /// ([`ConfigError::PartitionOutOfRange`]) or the partitions overlap
+    /// ([`ConfigError::PartitionsOverlap`]). So no embassy assertion can fire in `new`.
     pub fn new(
         flash: &'a Mutex<M, F>,
         layout: Layout,
@@ -198,6 +199,11 @@ where
     /// An updater over the DFU and state partitions the linker script names
     /// (`__bootloader_dfu_*`, `__bootloader_state_*`), both on `flash` (embassy-boot's
     /// `FirmwareUpdaterConfig::from_linkerfile`).
+    ///
+    /// embassy-embedded-hal's `Partition::new` runs on the linker symbols *before* the
+    /// adapter's checks: misaligned symbols panic inside embassy. Only [`Updater::new`]
+    /// rules embassy's assertions out; the remaining checks (buffer length, overlap,
+    /// range, keys) still return [`Error`]s here.
     pub fn from_linkerfile(
         flash: &'a Mutex<embassy_sync::blocking_mutex::raw::NoopRawMutex, F>,
         aligned: &'a mut [u8],
@@ -219,7 +225,8 @@ fn multiple_of_all(value: u32, sizes: [usize; 3]) -> bool {
     usize::try_from(value).is_ok_and(|v| sizes.iter().all(|&s| s != 0 && v.is_multiple_of(s)))
 }
 
-/// The checks embassy-boot and embassy-embedded-hal would otherwise assert (panic) on.
+/// The checks embassy-boot and embassy-embedded-hal would otherwise assert (panic) on,
+/// plus partitions that end past `u32::MAX`.
 fn check_layout<F: NorFlash>(layout: &Layout, aligned_len: usize) -> Result<(), ConfigError> {
     let read = <F as AsyncReadNorFlash>::READ_SIZE;
     if aligned_len != F::WRITE_SIZE.max(read) {
@@ -235,11 +242,15 @@ fn check_layout<F: NorFlash>(layout: &Layout, aligned_len: usize) -> Result<(), 
     if !multiple_of_all(layout.state_offset, sizes) || !multiple_of_all(layout.state_len, sizes) {
         return Err(ConfigError::StateUnaligned);
     }
-    let dfu_start = u64::from(layout.dfu_offset);
-    let dfu_end = dfu_start + u64::from(layout.dfu_len);
-    let state_start = u64::from(layout.state_offset);
-    let state_end = state_start + u64::from(layout.state_len);
-    if dfu_start < state_end && state_start < dfu_end {
+    let dfu_end = layout
+        .dfu_offset
+        .checked_add(layout.dfu_len)
+        .ok_or(ConfigError::PartitionOutOfRange)?;
+    let state_end = layout
+        .state_offset
+        .checked_add(layout.state_len)
+        .ok_or(ConfigError::PartitionOutOfRange)?;
+    if layout.dfu_offset < state_end && layout.state_offset < dfu_end {
         return Err(ConfigError::PartitionsOverlap);
     }
     Ok(())

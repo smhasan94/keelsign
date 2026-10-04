@@ -17,7 +17,7 @@ let mut updater = nrf::blocking_from_linkerfile(&flash, &mut aligned.0, &CONFIG)
 let (mut tlv_buf, mut chunk) = ([0u8; 4096], [0u8; DEFAULT_CHUNK_LEN]);
 match updater.verify_and_mark_updated(&mut tlv_buf, &mut chunk) {
     Ok(image) => cortex_m::peripheral::SCB::sys_reset(), // the bootloader swaps it in
-    Err(e) => defmt::error!("update rejected: {}", e),   // nothing was written
+    Err(e) => defmt::error!("update not marked: {}", e), // nothing was written
 }
 ```
 

@@ -25,12 +25,16 @@ pub enum Error {
     /// The state partition already asks for a swap: an update is pending. Only `Boot`,
     /// `Revert` and `DfuDetach` allow a new one (as embassy-boot's own checks).
     BadState,
-    /// The flash failed while reading or writing the state partition.
+    /// The flash failed: reading or writing the state partition, or the DFU partition
+    /// in `write_firmware`, `prepare_update` and `read_dfu`. (A flash error while the DFU
+    /// slot is verified is [`Error::Rejected`] with `keelsign_verify::Error::Read`.)
     Flash(NorFlashErrorKind),
 }
 
-/// What is wrong with an updater's buffers or partitions. Checked when the updater is
-/// built, so embassy-boot's own assertions cannot fire.
+/// What is wrong with an updater's buffers or partitions. Checked by `BlockingUpdater::new`
+/// and `Updater::new` before embassy-boot sees them, so embassy's own assertions cannot
+/// fire there. (The `from_linkerfile` constructors let embassy build the partitions from
+/// the linker symbols first; see their docs.)
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfigError {
@@ -46,6 +50,8 @@ pub enum ConfigError {
     PartitionsOverlap,
     /// The DFU partition is empty.
     DfuSlotEmpty,
+    /// A partition's offset plus its length does not fit a `u32` flash offset.
+    PartitionOutOfRange,
 }
 
 impl From<ConfigError> for Error {
@@ -95,6 +101,7 @@ impl fmt::Display for ConfigError {
             ConfigError::StateUnaligned => "the state partition is not aligned to the flash",
             ConfigError::PartitionsOverlap => "the DFU and state partitions overlap",
             ConfigError::DfuSlotEmpty => "the DFU partition is empty",
+            ConfigError::PartitionOutOfRange => "a partition ends past the 32-bit flash offsets",
         })
     }
 }
@@ -152,6 +159,7 @@ mod tests {
             Error::Config(ConfigError::StateUnaligned),
             Error::Config(ConfigError::PartitionsOverlap),
             Error::Config(ConfigError::DfuSlotEmpty),
+            Error::Config(ConfigError::PartitionOutOfRange),
             Error::BadState,
             Error::Flash(NorFlashErrorKind::Other),
             Error::Flash(NorFlashErrorKind::OutOfBounds),
@@ -171,7 +179,8 @@ mod tests {
                     | ConfigError::DfuUnaligned
                     | ConfigError::StateUnaligned
                     | ConfigError::PartitionsOverlap
-                    | ConfigError::DfuSlotEmpty => {}
+                    | ConfigError::DfuSlotEmpty
+                    | ConfigError::PartitionOutOfRange => {}
                 }
             }
         }

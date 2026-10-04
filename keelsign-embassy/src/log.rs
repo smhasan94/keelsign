@@ -13,7 +13,7 @@ pub(crate) fn outcome(result: &Result<VerifiedImage<'_>, Error>) {
             "keelsign-embassy: update verified ({}) and marked for swap",
             defmt::Debug2Format(&image.version)
         ),
-        Err(e) => defmt::error!("keelsign-embassy: update rejected: {}", e),
+        Err(e) => defmt::error!("keelsign-embassy: update not marked: {}", e),
     }
     #[cfg(not(feature = "defmt"))]
     let _ = result;

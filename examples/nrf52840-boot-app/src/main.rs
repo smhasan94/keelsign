@@ -35,9 +35,10 @@ use {defmt_rtt as _, panic_probe as _};
 /// Which build this is.
 const APP: &str = if cfg!(feature = "b") { "B" } else { "A" };
 
-/// The version this application is signed with (docs/embassy.md): only a newer image in
-/// the DFU slot is marked, so the previous application, which the swap leaves in the DFU
-/// slot, is never swapped back in.
+/// The version this application is signed with (docs/embassy.md). `newer_than_running`
+/// demonstrates the anti-rollback `accept` hook: an older image that is validly signed
+/// (written to the DFU slot by mistake or by an attacker) is verified, then refused with
+/// `NotAccepted` and not marked.
 const RUNNING_VERSION: (u8, u8, u16) = if cfg!(feature = "b") {
     (2, 0, 0)
 } else {
@@ -64,7 +65,8 @@ const CONFIG: Config<'static, 1> = Config::new(
     [],
 );
 
-/// Accepts only an image newer than the running application.
+/// Accepts only an image newer than the running application, comparing
+/// `(major, minor, revision)`: `build_num` is ignored (MCUboot's default comparison).
 #[cfg_attr(feature = "soak", allow(dead_code))]
 fn newer_than_running(image: &VerifiedImage<'_>) -> bool {
     let v = image.version;

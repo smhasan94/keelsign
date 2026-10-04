@@ -193,12 +193,29 @@ fn ci_cross_builds_keelsign_embassy_and_boot_apps() {
         "cargo clippy --locked --target ${{ matrix.target }} -- -D warnings",
         "cargo build --release --locked --target ${{ matrix.target }}",
         "flip-link",
+        // SHA-55 review: the boot apps' b and soak variants, boot-app entries only.
+        "if: ${{ contains(matrix.project, 'boot-app') }}\n        run: cargo clippy --locked --target ${{ matrix.target }} --features b,soak -- -D warnings",
     ] {
         assert!(
             builds.contains(needle),
             "cross-build job must run `{needle}`"
         );
     }
+    // The condition matches exactly the boot-app matrix entries.
+    let projects: Vec<&str> = builds
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("- project: "))
+        .collect();
+    let boot: Vec<&str> = projects
+        .iter()
+        .copied()
+        .filter(|p| p.contains("boot-app"))
+        .collect();
+    let expected: Vec<String> = BOOT_EXAMPLES
+        .iter()
+        .map(|a| format!("examples/{}", a.name))
+        .collect();
+    assert_eq!(boot, expected, "only the boot apps match `boot-app`");
     for forbidden in ["probe-rs run", "probe-rs download", "cargo run"] {
         assert!(
             !ci.contains(forbidden),
@@ -506,7 +523,7 @@ fn boot_app_examples_cross_build() {
     for app in &BOOT_EXAMPLES {
         let dir = workspace_root().join("examples").join(app.name);
         let target_dir = dir.join("target");
-        for features in ["", "b", "soak"] {
+        for features in ["", "b", "soak", "b,soak"] {
             run_ok(cargo_in(&dir, &target_dir).args([
                 "clippy",
                 "--locked",

@@ -63,12 +63,19 @@ probe-rs read --chip nRF52840_xxAA b8 0x6000 4    # nRF52840-DK
 probe-rs read --chip RP235x b8 0x10006000 4       # Pico 2 W
 ```
 
-| Bytes | State |
-|---|---|
-| `ff ff ff ff` (erased) or `d0 d0 d0 d0` | `Boot` |
-| `f0 f0 f0 f0` | `Swap`: an update is marked (or swapped in and not confirmed yet) |
-| `c0 c0 c0 c0` | `Revert`: the bootloader swapped the old image back |
-| `e0 e0 e0 e0` | `DfuDetach` |
+The first byte is the magic. embassy-boot writes it in units of the flash's `WRITE_SIZE`:
+the nRF52840 NVMC repeats it 4 times, the RP2350 flash writes 1 byte, so its other three
+bytes stay `ff` (or read `00`, embassy-boot's progress markers).
+
+| State | nRF52840-DK | Pico 2 W |
+|---|---|---|
+| `Boot` (erased) | `ff ff ff ff` | `ff ff ff ff` |
+| `Boot` (after `mark_booted`) | `d0 d0 d0 d0` | `d0 ff ff ff` |
+| `Swap`: an update is marked (or swapped in and not confirmed yet) | `f0 f0 f0 f0` | `f0 ff ff ff` |
+| `Revert`: the bootloader swapped the old image back | `c0 c0 c0 c0` | `c0 ff ff ff` |
+| `DfuDetach` | `e0 e0 e0 e0` | `e0 ff ff ff` |
+
+Below, "`Boot`" means a first byte of `ff` or `d0`, "`Swap`" a first byte of `f0`.
 
 ## Bootloader
 
@@ -409,8 +416,10 @@ Each application logs `hello from keelsign boot app A` (`B` with the `b` feature
 reads the state: on `Swap` it confirms itself (`mark_booted`); on `Revert` it confirms
 itself and erases the failed update's header; otherwise it verifies the DFU slot
 (`Policy::PqOnly`, the LMS/HSS key of `tests/fixtures/images/keelsign-lms-m32-h5.bin`)
-and marks it only if the image is newer than itself (app A is 1.0.0, app B 2.0.0), then
-resets. The `soak` feature verifies in a loop and never marks.
+and marks it only if the image is newer than itself (app A is 1.0.0, app B 2.0.0,
+`build_num` ignored), then resets. The version check is the anti-rollback `accept` hook
+in action: an older, validly signed image written to the DFU slot is verified and then
+refused with `NotAccepted`. The `soak` feature verifies in a loop and never marks.
 
 Flash app A into the active slot with the probe as the runner (it writes the ELF at
 ACTIVE + 0x200 and leaves the state page and the DFU slot alone), from
@@ -450,7 +459,8 @@ bootloader reverts to app A. This proves the mark and the swap; P3 boots a real 
    8 s (RP2350) later. The bootloader reverts. Expect
    `hello from keelsign boot app A`, `state Revert: the update was reverted; app A confirmed`
    and `DFU image header erased`.
-6. Read the state word: `d0 d0 d0 d0`. Reset once more: `state Boot`,
+6. Read the state word: `Boot` after `mark_booted` (nRF `d0 d0 d0 d0`, RP2350
+   `d0 ff ff ff`). Reset once more: `state Boot`,
    `no update: Rejected(Parse(BadMagic))`.
 
 Record the RTT log of steps 2 to 6 for each board. ML-DSA-44 images are DEFERRED to
@@ -476,13 +486,13 @@ log and the state word.
 
 | Image | Expected log (app A) | State word |
 |---|---|---|
-| `/tmp/lms-bad-body.bin` | `no update: Rejected(Image(DigestMismatch))` | unchanged (`ff ff ff ff` or `d0 d0 d0 d0`) |
+| `/tmp/lms-bad-body.bin` | `no update: Rejected(Image(DigestMismatch))` | unchanged (`Boot`: first byte `ff` or `d0`) |
 | `/tmp/lms-bad-sig.bin` | `no update: Rejected(SignatureInvalid)` | unchanged |
 | `tests/fixtures/images/keelsign-hss2-m32-h5h5.bin` (another key) | `no update: Rejected(KeyNotTrusted)` | unchanged |
 | `tests/fixtures/images/keelsign-hybrid-bad-body.bin` | `no update: Rejected(Image(DigestMismatch))` | unchanged |
 
 Each reject is also logged by the adapter as
-`keelsign-embassy: update rejected: Rejected(...)`. After every case app A boots again
+`keelsign-embassy: update not marked: Rejected(...)`. After every case app A boots again
 (`hello from keelsign boot app A`, `state Boot`): the old application keeps running.
 
 ## P3 full update with app B (NEEDS-HARDWARE, needs SHA-67; ML-DSA-44 DEFERRED to SHA-169)
@@ -501,6 +511,7 @@ then. The signing key is a new LMS/HSS key, not the fixture's.
    ```sh
    cargo build --release --features b
    rust-objcopy -O binary target/thumbv7em-none-eabihf/release/nrf52840-boot-app b.bin
+   # RP2350: target/thumbv8m.main-none-eabihf/release/rp2350-boot-app
    imgtool sign --header-size 0x200 --pad-header --align 4 --version 2.0.0 \
        --slot-size 0x40000 b.bin b.signed.bin          # RP2350: --slot-size 0x80000
    keelsign sign --key lms.pem b.signed.bin b.keelsign.bin   # SHA-67: LMS/HSS signing
@@ -510,9 +521,13 @@ then. The signing key is a new LMS/HSS key, not the fixture's.
    `b.keelsign.bin` into the DFU slot and reset.
 4. Expect from app A: `update 2.0.0+0 verified and marked for swap; resetting`. After
    the swap: `hello from keelsign boot app B` and
-   `state Swap: app B confirmed (mark_booted)`; the state word reads `d0 d0 d0 d0`.
-5. Reset again: app B boots, `state Boot: verifying the DFU slot` and
-   `no update: NotAccepted` (the DFU slot now holds app A, 1.0.0, older than app B).
+   `state Swap: app B confirmed (mark_booted)`; the state word reads `Boot` after
+   `mark_booted` (nRF `d0 d0 d0 d0`, RP2350 `d0 ff ff ff`).
+5. Reset again: app B boots, `state Boot: verifying the DFU slot` and a reject such as
+   `no update: Rejected(Image(DigestMismatch))` (or a `Rejected(Parse(...))`). embassy-boot's
+   swap moves active page `i` to DFU page `i + 1` and never rewrites DFU page 0, so the
+   DFU slot now holds app B's header followed by app A's pages one page up: not a valid
+   image. The version check never runs; nothing is marked and app B keeps booting.
 6. Repeat on the other board. An ML-DSA-44 app B is DEFERRED to SHA-169 (stack).
 
 ## P4 reset during verification (NEEDS-HARDWARE)
@@ -528,8 +543,8 @@ write and erase.)
    verify every few tens of milliseconds.
 3. Reset the board at least 20 times at random moments (`probe-rs reset --chip ...` in a
    loop with random sleeps, or the reset button) while the log runs.
-4. After each reset, read the state word: it must be `ff ff ff ff` or `d0 d0 d0 d0`
-   (`Boot`), never `f0 f0 f0 f0`; app A must boot again (`hello from keelsign boot app A`)
+4. After each reset, read the state word: its first byte must be `ff` or `d0` (`Boot`),
+   never `f0` (`Swap`); app A must boot again (`hello from keelsign boot app A`)
    and verify `ok` again.
 5. Optional: run P1 and cut the power while the bootloader swaps (step 5): embassy-boot's
    swap is power-fail safe and resumes; the board ends in app A with `Revert` handled.
