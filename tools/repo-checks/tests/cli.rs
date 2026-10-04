@@ -1,6 +1,6 @@
 //! SHA-51: the keelsign CLI's `sign` and `inspect` commands — the CI steps they need, the
 //! inspect JSON schema, the inspect snapshot generator and the exit codes in
-//! docs/signing.md.
+//! docs/signing.md. SHA-53: `verify`, the final exit codes and the README quickstart.
 
 use repo_checks::workspace_root;
 use std::fs;
@@ -145,4 +145,81 @@ fn make_fixtures_runs_inspect_snapshots_after_images() {
             "scripts/gen_inspect_snapshots.py lacks `{needle}`"
         );
     }
+}
+
+/// SHA-53 AC4 / TP4: the `ci` job builds the release binary and runs the README quickstart
+/// through scripts/check-quickstart.sh, which runs the `## Quickstart` block within 300 s.
+#[test]
+fn ci_runs_the_readme_quickstart_shell_test() {
+    let ci = read(".github/workflows/ci.yml");
+    let host = ci_job(&ci, "ci");
+    for needle in [
+        "- name: readme quickstart (shell test)",
+        "cargo build --release -p keelsign --locked\n",
+        "scripts/check-quickstart.sh --keelsign target/release\n",
+    ] {
+        assert!(host.contains(needle), "ci job must have `{needle}`");
+    }
+    let build = host
+        .find("cargo build --release -p keelsign --locked")
+        .expect("release build");
+    let run = host
+        .find("scripts/check-quickstart.sh --keelsign")
+        .expect("script");
+    assert!(build < run, "the release build comes first");
+
+    let script = read("scripts/check-quickstart.sh");
+    for needle in [
+        "set -euo pipefail",
+        "## Quickstart",
+        "bash -euo pipefail -c \"$block\"",
+        "SECONDS",
+        "budget=300",
+        "--keelsign",
+    ] {
+        assert!(
+            script.contains(needle),
+            "scripts/check-quickstart.sh lacks `{needle}`"
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = fs::metadata(workspace_root().join("scripts/check-quickstart.sh"))
+            .expect("stat")
+            .permissions()
+            .mode();
+        assert_ne!(mode & 0o111, 0, "scripts/check-quickstart.sh is executable");
+    }
+}
+
+/// SHA-53 AC4: the README quickstart is one `sh` block that builds nothing itself and runs
+/// every keelsign command (keygen, pubkey, sign, verify, inspect), with the install line
+/// before it.
+#[test]
+fn readme_quickstart_block_names_every_command() {
+    let readme = read("README.md");
+    let section = readme
+        .split("\n## Quickstart\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n## ").next())
+        .expect("README.md has a `## Quickstart` section");
+    assert!(section.contains("cargo install --path keelsign --locked"));
+    assert_eq!(section.matches("```sh\n").count(), 1, "one sh block");
+    let block = section
+        .split("```sh\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n```").next())
+        .expect("sh block");
+    let commands: Vec<&str> = block
+        .lines()
+        .filter_map(|line| line.strip_prefix("keelsign "))
+        .filter_map(|rest| rest.split_whitespace().next())
+        .collect();
+    assert_eq!(commands, ["keygen", "pubkey", "sign", "verify", "inspect"]);
+    assert!(
+        !block.contains("cargo "),
+        "the block uses the installed binary"
+    );
+    assert!(block.contains("tests/fixtures/images/mcuboot-ed25519.bin"));
 }
