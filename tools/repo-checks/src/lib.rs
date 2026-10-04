@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 /// Crates published to crates.io, in publish order; keelsign depends on keelsign-verify.
 pub const PUBLISHABLE_CRATES: [&str; 2] = ["keelsign-verify", "keelsign"];
@@ -56,6 +57,24 @@ pub const BENCHES: [Example; 2] = [
         hal_feature: "rp235xa",
     },
 ];
+
+/// Serialises the tests that run cargo in `benches/<name>/target` (and its
+/// `target/mldsa`) against each other within one test binary: cargo unlinks and
+/// re-creates `release/<bin>` on every invocation, even a fresh no-op one, so a
+/// sibling test reading the ELFs (`elf_sizes.py`, `objdump`) can see them missing
+/// (SHA-282). One lock per bench keeps the two boards building in parallel. `cargo
+/// test` runs test binaries one at a time, so a process-wide lock is enough (a
+/// runner that puts each test in its own process, such as `cargo nextest`, would
+/// need a file lock instead). A test that panics while holding it must not poison
+/// the others (`--no-fail-fast`).
+pub fn bench_target_lock(bench: &Example) -> MutexGuard<'static, ()> {
+    static LOCKS: [Mutex<()>; BENCHES.len()] = [const { Mutex::new(()) }; BENCHES.len()];
+    let i = BENCHES
+        .iter()
+        .position(|b| b.name == bench.name)
+        .unwrap_or_else(|| panic!("{} is not in BENCHES", bench.name));
+    LOCKS[i].lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Files the SHA-65 LMS/HSS additions put in every bench project, relative to its
 /// directory.
@@ -359,4 +378,57 @@ pub fn sha256_hex(data: &[u8]) -> String {
         }
     }
     h.iter().map(|x| format!("{x:08x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BENCHES, bench_target_lock};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    /// Locks `bench` on another thread and reports whether it got the lock within
+    /// the timeout, so a wrongly shared lock fails the test instead of hanging it.
+    fn locks_from_another_thread(index: usize) -> bool {
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let _guard = bench_target_lock(&BENCHES[index]);
+            let _ = tx.send(());
+        });
+        rx.recv_timeout(Duration::from_secs(30)).is_ok()
+    }
+
+    #[test]
+    fn bench_target_lock_is_per_bench_and_relockable_after_drop() {
+        assert_eq!(BENCHES.len(), 2, "the test pairs the two boards");
+
+        // Holding one bench's lock does not block the other bench.
+        let nrf = bench_target_lock(&BENCHES[0]);
+        assert!(
+            locks_from_another_thread(1),
+            "{} must not share {}'s lock",
+            BENCHES[1].name,
+            BENCHES[0].name
+        );
+        drop(nrf);
+
+        // After the guard drops, the same bench locks again.
+        assert!(
+            locks_from_another_thread(0),
+            "{} must lock again once its guard drops",
+            BENCHES[0].name
+        );
+
+        // A test that panics while holding the lock does not poison it.
+        let poisoner = thread::spawn(|| {
+            let _guard = bench_target_lock(&BENCHES[0]);
+            panic!("poison the {} lock on purpose", BENCHES[0].name);
+        });
+        assert!(poisoner.join().is_err(), "the poisoning thread must panic");
+        assert!(
+            locks_from_another_thread(0),
+            "a poisoned {} lock must still be obtained",
+            BENCHES[0].name
+        );
+    }
 }

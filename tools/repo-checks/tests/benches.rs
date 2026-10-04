@@ -4,7 +4,8 @@ use repo_checks::{
     BENCHES, DIGEST_BENCH_FILES, DIGEST_ON_TARGET_TESTS, DIGEST_SIZE_BINS, DIGEST_STACK_LIMIT,
     Example, LMS_BENCH_FILES, LMS_ON_TARGET_TESTS, LMS_SIZE_BINS, LMS_STACK_LIMIT,
     MLDSA_ON_TARGET_TESTS, MLDSA_VERIFY_BENCH_FILES, POLICY_BENCH_FILES, POLICY_ON_TARGET_TESTS,
-    POLICY_SIZE_BINS, ScratchDir, cargo_in, python_script, run_capture, run_ok, workspace_root,
+    POLICY_SIZE_BINS, ScratchDir, bench_target_lock, cargo_in, python_script, run_capture, run_ok,
+    workspace_root,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -571,6 +572,7 @@ fn ci_builds_bench_tests_for_both_targets() {
 
 fn cross_build(name: &str) {
     let bench = bench_by_name(name);
+    let _guard = bench_target_lock(bench);
     let dir = bench_dir(bench);
     let target_dir = dir.join("target");
     run_ok(cargo_in(&dir, &target_dir).args(["test", "--no-run", "--release", "--locked"]));
@@ -648,6 +650,7 @@ fn rp2350_mldsa_cross_builds() {
 #[ignore = "needs thumbv* targets, flip-link and python3; builds both bench projects"]
 fn flash_sizes_script_runs() {
     for bench in &BENCHES {
+        let _guard = bench_target_lock(bench);
         let dir = bench_dir(bench);
         let target_dir = dir.join("target");
         run_ok(cargo_in(&dir, &target_dir).args(["build", "--release", "--locked", "--bins"]));
