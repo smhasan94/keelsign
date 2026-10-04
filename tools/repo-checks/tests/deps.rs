@@ -558,9 +558,13 @@ const EMBASSY_PINS: [(&str, &str); 9] = [
     ("embassy-rp", "0.10.0"),
 ];
 
-/// Lockfiles that resolve keelsign-embassy's embassy-boot (the root workspace, and from
-/// stage 5 on the boot-app examples).
-const EMBASSY_LOCKFILES: [&str; 1] = ["Cargo.lock"];
+/// Lockfiles that resolve keelsign-embassy's embassy-boot: the root workspace (every
+/// pinned crate) and the boot-app examples (the crates their board needs).
+const EMBASSY_LOCKFILES: [&str; 3] = [
+    "Cargo.lock",
+    "examples/nrf52840-boot-app/Cargo.lock",
+    "examples/rp2350-boot-app/Cargo.lock",
+];
 
 /// SHA-55 AC1: keelsign-embassy pins every dependency exactly, its HAL pins match the
 /// hello examples, and every lockfile resolves exactly the pinned embassy crates. embassy-
@@ -628,11 +632,24 @@ fn embassy_dependencies_pinned_exact() {
                 .filter(|(name, _, _)| name == krate)
                 .map(|(_, version, _)| version.as_str())
                 .collect();
-            assert_eq!(
-                versions,
-                [pin],
-                "{lockfile}: {krate} must resolve to exactly {pin}"
-            );
+            // The root lock resolves every optional dependency; a boot app only its board's
+            // HAL and (with its `defmt` feature) defmt.
+            let required = lockfile == "Cargo.lock"
+                || !matches!(krate, "embassy-nrf" | "embassy-rp")
+                || lockfile.contains(if krate == "embassy-nrf" {
+                    "nrf52840"
+                } else {
+                    "rp2350"
+                });
+            if required {
+                assert_eq!(
+                    versions,
+                    [pin],
+                    "{lockfile}: {krate} must resolve to exactly {pin}"
+                );
+            } else {
+                assert!(versions.is_empty(), "{lockfile}: {krate} must not resolve");
+            }
         }
         assert!(
             !packages.iter().any(|(name, _, _)| name == "salty"),

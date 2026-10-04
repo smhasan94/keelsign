@@ -1,0 +1,12 @@
+[target.thumbv7em-none-eabihf]
+# `cargo run` flashes the application at 0x7200 through the on-board J-Link and streams
+# defmt over RTT; the embassy-boot bootloader must already be at 0 (docs/embassy.md).
+runner = "probe-rs run --chip nRF52840_xxAA"
+# flip-link puts the stack below .bss/.data so a stack overflow faults instead of corrupting memory.
+rustflags = ["-C", "linker=flip-link"]
+
+[build]
+target = "thumbv7em-none-eabihf"
+
+[env]
+DEFMT_LOG = "info"

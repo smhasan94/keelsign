@@ -42,6 +42,24 @@ pub const EXAMPLES: [Example; 2] = [
     },
 ];
 
+/// The standalone embassy-boot applications under `examples/` (SHA-55), one per
+/// development board: they verify the DFU slot with keelsign-embassy before marking it
+/// (docs/embassy.md). `chip` is the probe-rs chip name, `hal_feature` the HAL chip feature.
+pub const BOOT_EXAMPLES: [Example; 2] = [
+    Example {
+        name: "nrf52840-boot-app",
+        target: "thumbv7em-none-eabihf",
+        chip: "nRF52840_xxAA",
+        hal_feature: "nrf52840",
+    },
+    Example {
+        name: "rp2350-boot-app",
+        target: "thumbv8m.main-none-eabihf",
+        chip: "RP235x",
+        hal_feature: "rp235xa",
+    },
+];
+
 /// The standalone on-target benchmark projects under `benches/` (SHA-34), one per
 /// development board. `name` is the directory under `benches/` and the package name.
 pub const BENCHES: [Example; 2] = [
