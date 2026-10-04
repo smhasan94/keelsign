@@ -40,12 +40,14 @@
 #[cfg(test)]
 extern crate std;
 
+mod asynch;
 mod blocking;
 mod config;
 mod error;
 mod log;
 mod sync_flash;
 
+pub use asynch::{Layout, Updater};
 pub use blocking::BlockingUpdater;
 pub use config::Config;
 pub use error::{ConfigError, Error};

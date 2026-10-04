@@ -16,7 +16,7 @@ use std::cell::RefCell;
 
 use common::*;
 use keelsign_embassy::{
-    Algorithm, AlignedBuffer, Config, ConfigError, DEFAULT_CHUNK_LEN, Error, Policy, State,
+    Algorithm, AlignedBuffer, Config, ConfigError, DEFAULT_CHUNK_LEN, Error, Layout, Policy, State,
     TrustedKey,
 };
 use keelsign_verify::{ImageError, KeySetError};
@@ -226,43 +226,95 @@ fn reset_at_any_point_during_mark_leaves_boot_or_swap() {
         flash_with(image(LMS_IMAGE)),
         booted(flash_with(image(LMS_IMAGE))),
     ] {
-        // How many writes and erases a full mark takes from this state.
-        let (result, done) = mark_blocking(start.clone(), &lms_config());
-        result.unwrap();
-        let total = done.mutations();
-        assert!(total >= 2, "marking erases and writes");
-        for allowed in 0..=total {
-            let mut flash = start.clone();
-            flash.freeze_after = Some(allowed);
-            let (result, mut flash) = mark_blocking(flash, &lms_config());
-            if allowed < total {
-                assert_eq!(
-                    result.err(),
-                    Some(Error::Flash(
-                        embedded_storage::nor_flash::NorFlashErrorKind::Other
-                    )),
-                    "power lost after {allowed} of {total} writes/erases"
+        for blocking in [true, false] {
+            let mark = |flash: Flash| {
+                if blocking {
+                    mark_blocking(flash, &lms_config())
+                } else {
+                    mark_async(flash, &lms_config())
+                }
+            };
+            // How many writes and erases a full mark takes from this state.
+            let (result, done) = mark(start.clone());
+            result.unwrap();
+            let total = done.mutations();
+            assert!(total >= 2, "marking erases and writes");
+            for allowed in 0..=total {
+                let mut flash = start.clone();
+                flash.freeze_after = Some(allowed);
+                let (result, mut flash) = mark(flash);
+                if allowed < total {
+                    assert_eq!(
+                        result.err(),
+                        Some(Error::Flash(
+                            embedded_storage::nor_flash::NorFlashErrorKind::Other
+                        )),
+                        "power lost after {allowed} of {total} writes/erases"
+                    );
+                } else {
+                    result.unwrap();
+                }
+                // Reset: power back, a fresh updater reads the state.
+                flash.power_on();
+                let shared = Shared::new(RefCell::new(flash));
+                let mut aligned = [0u8; WRITE_SIZE];
+                let mut updater = blocking_updater(&shared, &mut aligned, &lms_config()).unwrap();
+                let state = updater.get_state().unwrap();
+                assert!(
+                    matches!(state, State::Boot | State::Swap),
+                    "after {allowed} of {total}: {state:?}"
                 );
-            } else {
-                result.unwrap();
+                assert_eq!(
+                    state == State::Swap,
+                    allowed == total,
+                    "after {allowed} of {total}"
+                );
             }
-            // Reset: power back, a fresh updater reads the state.
-            flash.power_on();
-            let shared = Shared::new(RefCell::new(flash));
-            let mut aligned = [0u8; WRITE_SIZE];
-            let mut updater = blocking_updater(&shared, &mut aligned, &lms_config()).unwrap();
-            let state = updater.get_state().unwrap();
-            assert!(
-                matches!(state, State::Boot | State::Swap),
-                "after {allowed} of {total}: {state:?}"
-            );
-            assert_eq!(
-                state == State::Swap,
-                allowed == total,
-                "after {allowed} of {total}"
-            );
         }
     }
+}
+
+/// The async updater gives the blocking updater's result, state and writes on every
+/// policy-matrix cell.
+#[test]
+fn async_updater_matches_blocking_on_every_matrix_case() {
+    let ml_dsa = Algorithm::MlDsa44.is_enabled();
+    let mut cells = 0;
+    for case in fixture().cases() {
+        let case = case.unwrap();
+        for &policy in Policy::ALL {
+            let expect = case.expect(policy, ml_dsa).unwrap();
+            let start = flash_with(image(case.name));
+            let ((b_result, b_flash), (a_result, a_flash)) = match pq_key(&case) {
+                Some(key) => {
+                    let config = Config::new(policy, [key], ed25519_keys());
+                    (
+                        mark_blocking(start.clone(), &config),
+                        mark_async(start, &config),
+                    )
+                }
+                None => {
+                    let config = Config::<0, 1>::new(policy, [], ed25519_keys());
+                    (
+                        mark_blocking(start.clone(), &config),
+                        mark_async(start, &config),
+                    )
+                }
+            };
+            let cell = format!("{} under {policy:?}", case.name);
+            assert_eq!(a_result, b_result, "{cell}");
+            assert_eq!(verdict(&a_result), Some(expect), "{cell}");
+            assert_eq!(state_word(&a_flash), state_word(&b_flash), "{cell}");
+            assert_eq!(
+                mutations(&a_flash.ops),
+                mutations(&b_flash.ops),
+                "{cell}: the same writes and erases"
+            );
+            assert_eq!(a_flash.mem, b_flash.mem, "{cell}: the same flash contents");
+            cells += 1;
+        }
+    }
+    assert_eq!(cells, policy_kat::TARGET_CASES * 3);
 }
 
 #[test]
@@ -374,4 +426,107 @@ fn config_and_key_errors_are_reported_before_any_flash_access() {
     }
     let flash = shared.into_inner().into_inner();
     assert!(flash.ops.is_empty(), "no flash access: {:?}", flash.ops);
+
+    // The async updater checks the layout too, so embassy's partition and state-buffer
+    // assertions cannot fire.
+    let shared = AsyncShared::new(flash_with(image(LMS_IMAGE)));
+    let cases = [
+        (LAYOUT, WRITE_SIZE + 1, ConfigError::AlignedBufferLen),
+        (
+            Layout {
+                dfu_len: 0,
+                ..LAYOUT
+            },
+            WRITE_SIZE,
+            ConfigError::DfuSlotEmpty,
+        ),
+        (
+            Layout {
+                dfu_offset: DFU_OFFSET + 4,
+                ..LAYOUT
+            },
+            WRITE_SIZE,
+            ConfigError::DfuUnaligned,
+        ),
+        (
+            Layout {
+                dfu_len: DFU_LEN - 4,
+                ..LAYOUT
+            },
+            WRITE_SIZE,
+            ConfigError::DfuUnaligned,
+        ),
+        (
+            Layout {
+                state_offset: 2,
+                ..LAYOUT
+            },
+            WRITE_SIZE,
+            ConfigError::StateUnaligned,
+        ),
+        (
+            Layout {
+                state_len: 100,
+                ..LAYOUT
+            },
+            WRITE_SIZE,
+            ConfigError::StateUnaligned,
+        ),
+        (
+            Layout {
+                state_offset: DFU_OFFSET + DFU_LEN - 0x1000,
+                ..LAYOUT
+            },
+            WRITE_SIZE,
+            ConfigError::PartitionsOverlap,
+        ),
+        (
+            Layout {
+                dfu_offset: 0,
+                dfu_len: 0x1000,
+                state_offset: 0,
+                state_len: 0x1000,
+            },
+            WRITE_SIZE,
+            ConfigError::PartitionsOverlap,
+        ),
+    ];
+    for (layout, aligned_len, expected) in cases {
+        let mut aligned = vec![0u8; aligned_len];
+        assert_eq!(
+            keelsign_embassy::Updater::new(&shared, layout, &mut aligned, &lms_config()).err(),
+            Some(Error::Config(expected)),
+            "{layout:?}"
+        );
+    }
+    let mut aligned = [0u8; WRITE_SIZE];
+    assert_eq!(
+        keelsign_embassy::Updater::new(
+            &shared,
+            LAYOUT,
+            &mut aligned,
+            &Config::new(Policy::PqOnly, bad_key, [])
+        )
+        .err(),
+        Some(Error::KeySet(KeySetError::InvalidPublicKeyLength(
+            Algorithm::LmsHss
+        )))
+    );
+    // Adjacent partitions in either order are fine.
+    for layout in [
+        LAYOUT,
+        Layout {
+            dfu_offset: 0,
+            dfu_len: DFU_LEN,
+            state_offset: DFU_LEN,
+            state_len: STATE_LEN,
+        },
+    ] {
+        let mut aligned = [0u8; WRITE_SIZE];
+        assert!(
+            keelsign_embassy::Updater::new(&shared, layout, &mut aligned, &lms_config()).is_ok(),
+            "{layout:?}"
+        );
+    }
+    assert!(shared.into_inner().ops.is_empty(), "no flash access");
 }

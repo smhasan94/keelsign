@@ -15,9 +15,14 @@ use std::cell::RefCell;
 use embassy_embedded_hal::flash::partition::BlockingPartition;
 use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::mutex::Mutex as AsyncMutex;
 use embedded_storage::nor_flash::{ErrorType, NorFlash, NorFlashErrorKind, ReadNorFlash};
+use embedded_storage_async::nor_flash::{
+    NorFlash as AsyncNorFlash, ReadNorFlash as AsyncReadNorFlash,
+};
 use keelsign_embassy::{
-    BlockingUpdater, Config, Ed25519Key, Error, FirmwareUpdaterConfig, TrustedKey, VerifiedImage,
+    BlockingUpdater, Config, Ed25519Key, Error, FirmwareUpdaterConfig, Layout, TrustedKey, Updater,
+    VerifiedImage,
 };
 use policy_kat::{Case, Expect};
 
@@ -191,6 +196,35 @@ impl<const SIZE: usize, const ERASE: usize, const WRITE: usize> NorFlash
     }
 }
 
+impl<const SIZE: usize, const ERASE: usize, const WRITE: usize> AsyncReadNorFlash
+    for MockFlash<SIZE, ERASE, WRITE>
+{
+    const READ_SIZE: usize = 1;
+
+    async fn read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), Self::Error> {
+        self.do_read(offset, bytes)
+    }
+
+    fn capacity(&self) -> usize {
+        SIZE
+    }
+}
+
+impl<const SIZE: usize, const ERASE: usize, const WRITE: usize> AsyncNorFlash
+    for MockFlash<SIZE, ERASE, WRITE>
+{
+    const WRITE_SIZE: usize = WRITE;
+    const ERASE_SIZE: usize = ERASE;
+
+    async fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
+        self.do_erase(from, to)
+    }
+
+    async fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Self::Error> {
+        self.do_write(offset, bytes)
+    }
+}
+
 /// An erased flash with `image` at the start of the DFU partition (not logged).
 pub fn flash_with(image: &[u8]) -> Flash {
     let mut flash = Flash::new();
@@ -283,4 +317,50 @@ pub fn mutations_only_in_state(ops: &[Op]) -> bool {
         let (from, to) = op.range();
         (STATE_OFFSET..STATE_OFFSET + STATE_LEN).contains(&from) && to <= STATE_OFFSET + STATE_LEN
     })
+}
+
+/// The tests' partitions as an async [`Layout`].
+pub const LAYOUT: Layout = Layout {
+    dfu_offset: DFU_OFFSET,
+    dfu_len: DFU_LEN,
+    state_offset: STATE_OFFSET,
+    state_len: STATE_LEN,
+};
+
+/// The flash shared by the async updater.
+pub type AsyncShared = AsyncMutex<NoopRawMutex, Flash>;
+
+/// The async updater over the tests' layout.
+pub type Async<'a, 'k, const N: usize, const E: usize> =
+    Updater<'a, 'a, 'k, NoopRawMutex, Flash, N, E>;
+
+/// An async updater over the tests' layout of `flash`.
+pub fn async_updater<'a, 'k, const N: usize, const E: usize>(
+    flash: &'a AsyncShared,
+    aligned: &'a mut [u8],
+    config: &Config<'k, N, E>,
+) -> Result<Async<'a, 'k, N, E>, Error> {
+    Updater::new(flash, LAYOUT, aligned, config)
+}
+
+/// Runs the async `verify_and_mark_updated` once over `flash` (polled to completion) and
+/// returns its result and the flash afterwards.
+pub fn mark_async<'k, const N: usize, const E: usize>(
+    flash: Flash,
+    config: &Config<'k, N, E>,
+) -> (Result<VerifiedImage<'k>, Error>, Flash) {
+    let shared = AsyncShared::new(flash);
+    let mut aligned = [0u8; WRITE_SIZE];
+    let result = {
+        let mut updater = async_updater(&shared, &mut aligned, config).unwrap();
+        let mut tlv_buf = [0u8; 4096];
+        let mut chunk = [0u8; keelsign_embassy::DEFAULT_CHUNK_LEN];
+        embassy_futures::block_on(updater.verify_and_mark_updated(&mut tlv_buf, &mut chunk))
+    };
+    (result, shared.into_inner())
+}
+
+/// The writes and erases of `ops`, in order.
+pub fn mutations(ops: &[Op]) -> Vec<Op> {
+    ops.iter().copied().filter(Op::mutates).collect()
 }
