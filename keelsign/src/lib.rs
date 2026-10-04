@@ -13,5 +13,6 @@ pub mod inspect;
 pub mod keyfile;
 pub mod keys;
 pub mod lms_sign;
+pub mod lms_state;
 pub mod sign;
 pub mod verify;

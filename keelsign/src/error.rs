@@ -35,6 +35,32 @@ pub enum KeyFileError {
     Unsupported(String),
 }
 
+/// Why the state of an LMS/HSS key refuses a signature. Carries no path;
+/// [`Error::LmsState`] adds the state file or journal it is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LmsStateError {
+    /// The state file or the journal is missing.
+    Missing,
+    /// The state file belongs to another key.
+    ForeignKey {
+        /// The key ID of the key being used.
+        expected: String,
+        /// The key ID the state file is bound to.
+        found: String,
+    },
+    /// The state file is behind the journal: it was restored from a copy.
+    BehindJournal {
+        /// The next leaf the state file names.
+        next: u64,
+        /// The highest leaf the journal records as used.
+        used: u64,
+    },
+    /// The state file or journal is malformed or does not fit the key.
+    Corrupt(String),
+    /// Another keelsign process holds the key's lock.
+    Locked,
+}
+
 /// A `keelsign` CLI error. [`Error::exit_code`] gives the process exit code.
 #[derive(Debug)]
 pub enum Error {
@@ -99,6 +125,21 @@ pub enum Error {
         /// What the option needs, for example `ML-DSA-44 or ML-DSA-65`.
         expected: &'static str,
     },
+    /// The state of an LMS/HSS key refuses a signature (missing, another key's, rolled
+    /// back, corrupt or locked).
+    LmsState {
+        /// The state file or journal.
+        path: PathBuf,
+        /// Why it refuses.
+        reason: LmsStateError,
+    },
+    /// Every leaf of an LMS/HSS key is used.
+    LeafIndexExhausted {
+        /// The key file.
+        key: PathBuf,
+        /// How many signatures the key could make.
+        leaves: u64,
+    },
     /// The key file holds a different algorithm than `--alg` asks for.
     AlgorithmMismatch {
         /// The key file.
@@ -127,6 +168,8 @@ impl Error {
             Self::Image { .. } => 7,
             Self::AlreadySigned { .. } => 8,
             Self::NotVerified { .. } => 9,
+            Self::LmsState { .. } => 10,
+            Self::LeafIndexExhausted { .. } => 11,
         }
     }
 
@@ -205,6 +248,40 @@ impl fmt::Display for Error {
                     }
                 }
             }
+            Self::LmsState { path, reason } => {
+                let path = path.display();
+                match reason {
+                    LmsStateError::Missing => write!(
+                        f,
+                        "{path} is missing: an LMS/HSS key signs only with its state file and \
+                         journal (docs/keys.md#stateful-lms-keys); if this key has signed \
+                         before, retire it rather than recreate them"
+                    ),
+                    LmsStateError::ForeignKey { expected, found } => write!(
+                        f,
+                        "{path} belongs to another key (key id {found}; this key is \
+                         {expected})"
+                    ),
+                    LmsStateError::BehindJournal { next, used } => write!(
+                        f,
+                        "{path} says the next leaf is {next}, but the journal records leaf \
+                         {used} as used: the state file was restored from a copy; do not \
+                         sign, retire this key"
+                    ),
+                    LmsStateError::Corrupt(reason) => {
+                        write!(f, "{path}: corrupt LMS/HSS state: {reason}")
+                    }
+                    LmsStateError::Locked => write!(
+                        f,
+                        "{path} is locked by another keelsign process signing with this key"
+                    ),
+                }
+            }
+            Self::LeafIndexExhausted { key, leaves } => write!(
+                f,
+                "LeafIndexExhausted: all {leaves} leaves of {} are used; generate a new key",
+                key.display()
+            ),
             Self::AlgorithmMismatch {
                 path,
                 found,

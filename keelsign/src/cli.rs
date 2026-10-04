@@ -329,6 +329,11 @@ fn sign(args: &SignArgs) -> Result<(), Error> {
 fn keygen(args: &KeygenArgs) -> Result<(), Error> {
     let spec = args.alg.key_spec(args.hss_levels)?;
     keyfile::ensure_absent(&args.out, args.force)?;
+    if matches!(spec, KeySpec::LmsHss { .. }) {
+        // The state file and journal are written after the key; refuse up front.
+        keyfile::ensure_absent(&crate::lms_state::state_path(&args.out), args.force)?;
+        keyfile::ensure_absent(&crate::lms_state::journal_path(&args.out), args.force)?;
+    }
     let passphrase = keyfile::read_passphrase(&args.passphrase)?;
     if let KeySpec::LmsHss { params, levels } = spec
         && params.height() >= 20
@@ -340,7 +345,7 @@ fn keygen(args: &KeygenArgs) -> Result<(), Error> {
         )
         .map_err(out_error)?;
     }
-    let (key, _caches) = PrivateKey::generate_with_caches(spec)?;
+    let (key, caches) = PrivateKey::generate_with_caches(spec)?;
     let encoded: zeroize::Zeroizing<Vec<u8>> = match (args.format, &passphrase) {
         (FormatArg::Pem, None) => zeroize::Zeroizing::new(key.to_pem()?.as_bytes().to_vec()),
         (FormatArg::Pem, Some(pw)) => {
@@ -350,6 +355,12 @@ fn keygen(args: &KeygenArgs) -> Result<(), Error> {
         (FormatArg::Der, Some(pw)) => key.to_encrypted_der(pw)?.to_bytes(),
     };
     keyfile::write_private(&args.out, &encoded, args.force)?;
+    let lms_files = match (key.as_lms(), caches) {
+        (Some(lms), Some(caches)) => Some(crate::lms_state::create(
+            &args.out, lms, caches, args.force,
+        )?),
+        _ => None,
+    };
 
     let mut stdout = io::stdout().lock();
     writeln!(stdout, "algorithm: {}", key.algorithm()).map_err(out_error)?;
@@ -372,6 +383,22 @@ fn keygen(args: &KeygenArgs) -> Result<(), Error> {
         }
     )
     .map_err(out_error)?;
+    if let (Some(lms), Some((state, journal))) = (key.as_lms(), &lms_files) {
+        writeln!(stdout, "signatures: {}", lms.leaves()).map_err(out_error)?;
+        writeln!(stdout, "state: {} (next leaf 0)", state.display()).map_err(out_error)?;
+        writeln!(stdout, "journal: {}", journal.display()).map_err(out_error)?;
+        writeln!(
+            io::stderr().lock(),
+            "note: LMS/HSS keys are stateful: every signature uses up one of {} leaves, \
+             recorded in {} and {}. Sign only with keelsign, keep the three files together, \
+             never copy the key to a second machine and never restore it from a backup \
+             (docs/keys.md#stateful-lms-keys).",
+            lms.leaves(),
+            state.display(),
+            journal.display()
+        )
+        .map_err(out_error)?;
+    }
     #[cfg(not(unix))]
     writeln!(
         io::stderr().lock(),

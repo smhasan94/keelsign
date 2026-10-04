@@ -1045,6 +1045,28 @@ fn keygen_lms_h10_rows_round_trip_through_pubkey() {
             "parameter set: LMS_SHA256_M32_H10+LMS_SHA256_M32_H10/LMOTS_SHA256_N32_W8, L=2\n"
         };
         assert!(printed.contains(set), "{printed}");
+        // keygen writes the key, then its state file and an empty journal.
+        let state = keelsign::lms_state::state_path(&key_path);
+        let journal = keelsign::lms_state::journal_path(&key_path);
+        let signatures = if levels == 1 { 1024 } else { 1024 * 1024 };
+        for line in [
+            format!("signatures: {signatures}\n"),
+            format!("state: {} (next leaf 0)\n", state.display()),
+            format!("journal: {}\n", journal.display()),
+        ] {
+            assert!(printed.contains(&line), "{line} in:\n{printed}");
+        }
+        assert!(stderr(&out).contains("stateful"), "{}", stderr(&out));
+        let state_json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&state).expect("state")).expect("JSON");
+        assert_eq!(state_json["format"], "keelsign-lms-state");
+        assert_eq!(state_json["next_leaf"], 0);
+        assert_eq!(state_json["leaves"], signatures);
+        assert_eq!(
+            state_json["levels"].as_array().map(Vec::len),
+            Some(levels as usize)
+        );
+        assert_eq!(std::fs::read(&journal).expect("journal"), b"");
 
         let mut pub_args: Vec<&dyn AsRef<std::ffi::OsStr>> =
             vec![&"pubkey", &"--key", &key_path, &"--alg", &alg];
@@ -1071,6 +1093,20 @@ fn keygen_lms_h10_rows_round_trip_through_pubkey() {
             assert_eq!(identity_line(&printed), sign_and_verify(&key, &spki_pem));
         }
     }
+
+    // An existing state file or journal is never replaced without --force (exit 3).
+    let lone = dir.join("lone.pem");
+    std::fs::write(keelsign::lms_state::state_path(&lone), b"{}").expect("write");
+    let out = keelsign(&[&"keygen", &"--alg", &alg, &"--out", &lone]);
+    assert_exit(&out, 3);
+    assert!(stderr(&out).contains("lone.pem.state"), "{}", stderr(&out));
+    assert!(!lone.exists(), "no key file without its state");
+    std::fs::remove_file(keelsign::lms_state::state_path(&lone)).expect("rm");
+    std::fs::write(keelsign::lms_state::journal_path(&lone), b"").expect("write");
+    assert_exit(&keelsign(&[&"keygen", &"--alg", &alg, &"--out", &lone]), 3);
+    let out = keelsign(&[&"keygen", &"--alg", &alg, &"--out", &lone, &"--force"]);
+    assert_exit(&out, 0);
+    assert!(lone.exists() && keelsign::lms_state::state_path(&lone).exists());
 
     // `--hss-levels` is for LMS/HSS only, and 1 or 2.
     let out = keelsign(&[
