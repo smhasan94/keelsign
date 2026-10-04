@@ -1,5 +1,5 @@
-//! Helpers shared by the `sign`, `inspect` and imgtool integration tests (SHA-51). Each
-//! test binary uses a different subset.
+//! Helpers shared by the `sign`, `inspect`, `verify`, exit-code and imgtool integration
+//! tests (SHA-51, SHA-53). Each test binary uses a different subset.
 #![allow(dead_code)]
 
 use keelsign::keys::PrivateKey;
@@ -9,6 +9,81 @@ use keelsign_verify::{
 };
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+/// The real `keelsign` binary as an `assert_cmd` command (SHA-53 tests), without the
+/// test passphrase variable.
+pub fn cmd() -> assert_cmd::Command {
+    let mut cmd = assert_cmd::Command::new(env!("CARGO_BIN_EXE_keelsign"));
+    cmd.env_remove("KEELSIGN_TEST_PW");
+    cmd
+}
+
+/// The DER `SubjectPublicKeyInfo` of a raw public key, built independently of keelsign's
+/// own encoder. `algorithm` is a MANIFEST.json name (`MlDsa44`, `MlDsa65`, `LmsHss`) or
+/// `Ed25519`. ML-DSA and Ed25519 keys go in the BIT STRING as they are (RFC 9881,
+/// RFC 8410); an HSS/LMS key goes in as the DER OCTET STRING of the key (RFC 8708 §4).
+pub fn spki_der_for(algorithm: &str, raw: &[u8]) -> Vec<u8> {
+    use pkcs8::der::Encode as _;
+    use pkcs8::der::asn1::{BitStringRef, OctetStringRef};
+    let (oid, bits) = match algorithm {
+        "MlDsa44" => (keelsign::keys::ID_ML_DSA_44, raw.to_vec()),
+        "MlDsa65" => (keelsign::keys::ID_ML_DSA_65, raw.to_vec()),
+        "Ed25519" => (keelsign::keys::ID_ED25519, raw.to_vec()),
+        "LmsHss" => (
+            keelsign::keys::ID_HSS_LMS_HASHSIG,
+            OctetStringRef::new(raw)
+                .and_then(|o| o.to_der())
+                .expect("OCTET STRING"),
+        ),
+        other => panic!("unknown algorithm {other}"),
+    };
+    pkcs8::SubjectPublicKeyInfoRef {
+        algorithm: pkcs8::AlgorithmIdentifierRef {
+            oid,
+            parameters: None,
+        },
+        subject_public_key: BitStringRef::from_bytes(&bits).expect("BIT STRING"),
+    }
+    .to_der()
+    .expect("encode SPKI")
+}
+
+/// Write the public key `raw` of `algorithm` (see [`spki_der_for`]) as
+/// `dir/<name>.pub.pem` (PEM) or `dir/<name>.pub.der` (DER).
+pub fn write_pub(dir: &Path, name: &str, algorithm: &str, raw: &[u8], pem: bool) -> PathBuf {
+    let der = spki_der_for(algorithm, raw);
+    if pem {
+        let path = dir.join(format!("{name}.pub.pem"));
+        let text = pkcs8::der::Document::try_from(der.as_slice())
+            .expect("DER")
+            .to_pem("PUBLIC KEY", pkcs8::LineEnding::LF)
+            .expect("PEM");
+        std::fs::write(&path, text).expect("write PEM");
+        path
+    } else {
+        let path = dir.join(format!("{name}.pub.der"));
+        std::fs::write(&path, der).expect("write DER");
+        path
+    }
+}
+
+/// Every output image of MANIFEST.json as (name, entry), sorted by name.
+pub fn manifest_outputs() -> Vec<(String, serde_json::Value)> {
+    manifest()["outputs"]
+        .as_object()
+        .expect("outputs")
+        .iter()
+        .map(|(name, entry)| (name.clone(), entry.clone()))
+        .collect()
+}
+
+/// Bytes of a lowercase hex string.
+pub fn unhex(text: &str) -> Vec<u8> {
+    (0..text.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).expect("hex"))
+        .collect()
+}
 
 /// Run the real `keelsign` binary.
 pub fn keelsign(args: &[&dyn AsRef<std::ffi::OsStr>]) -> Output {

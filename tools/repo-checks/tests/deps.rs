@@ -1,7 +1,7 @@
 //! Dependency rules: the ml-dsa pin (CLAUDE.md; bench crates and, since SHA-44,
 //! keelsign-verify's `ml-dsa` feature, heap-free), the ed25519-dalek pin (SHA-46), the
-//! keelsign CLI's JSON dependencies (SHA-51) and the scoped `unsafe` exception for the
-//! measurement-only `benches/stack-paint` crate.
+//! keelsign CLI's JSON dependencies (SHA-51) and test dependencies (SHA-53), and the scoped
+//! `unsafe` exception for the measurement-only `benches/stack-paint` crate.
 
 use repo_checks::{SHIPPED_CRATES, workspace_root};
 use std::fs;
@@ -368,6 +368,60 @@ fn cli_json_dependencies_pinned_exact() {
     }
     // No HTTP client or TLS stack reaches the lockfile through jsonschema.
     for absent in ["reqwest", "rustls", "aws-lc-rs", "ring"] {
+        assert!(
+            !packages.iter().any(|(name, _, _)| name == absent),
+            "Cargo.lock must not contain {absent}"
+        );
+    }
+}
+
+/// SHA-53: the CLI's integration tests use assert_cmd and predicates, dev-dependencies
+/// only, pinned exactly with default features off. The lockfile resolves exactly those
+/// versions, and predicates' optional default features (float comparison, line-ending
+/// normalization) and assert_cmd's cargo-build helper stay out of it. (difflib is in it:
+/// assert_cmd turns on predicates' `diff` feature unconditionally.)
+#[test]
+fn cli_test_dependencies_pinned_exact() {
+    const ASSERT_CMD_PIN: &str = "2.2.2";
+    const PREDICATES_PIN: &str = "3.1.4";
+    let manifest = read("keelsign/Cargo.toml");
+    for (krate, pin) in [
+        ("assert_cmd", ASSERT_CMD_PIN),
+        ("predicates", PREDICATES_PIN),
+    ] {
+        let (section, line) = dependency_line(&manifest, krate);
+        assert_eq!(
+            section, "[dev-dependencies]",
+            "{krate} is a dev-dependency only"
+        );
+        for needle in [
+            format!("version = \"={pin}\""),
+            "default-features = false".to_owned(),
+        ] {
+            assert!(
+                line.contains(&needle),
+                "{krate} must have `{needle}`: `{line}`"
+            );
+        }
+    }
+    let lock = read("Cargo.lock");
+    let packages = lock_packages(&lock);
+    for (krate, pin) in [
+        ("assert_cmd", ASSERT_CMD_PIN),
+        ("predicates", PREDICATES_PIN),
+    ] {
+        let versions: Vec<&str> = packages
+            .iter()
+            .filter(|(name, _, _)| name == krate)
+            .map(|(_, version, _)| version.as_str())
+            .collect();
+        assert_eq!(
+            versions,
+            [pin],
+            "Cargo.lock: {krate} must resolve to exactly {pin}"
+        );
+    }
+    for absent in ["float-cmp", "normalize-line-endings", "escargot"] {
         assert!(
             !packages.iter().any(|(name, _, _)| name == absent),
             "Cargo.lock must not contain {absent}"
