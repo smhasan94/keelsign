@@ -278,7 +278,9 @@ extern "C" {
 //
 // # Safety
 //
-// - `image` is non-NULL and readable for `len` bytes, at any alignment.
+// - `image` is non-NULL and readable for `len` bytes, at any alignment. A `len` above
+//   `UINT32_MAX`, or on a 32-bit target above `PTRDIFF_MAX`, is rejected with
+//   `KEELSIGN_ERR_IMAGE_TOO_LARGE` before anything is read.
 // - `keys` is NULL only if `n_keys` is 0; otherwise it points to `n_keys` consecutive
 //   `keelsign_key_t` (any alignment).
 // - Each `keys[i].key` is non-NULL and readable for `keys[i].key_len` bytes.
@@ -302,7 +304,9 @@ keelsign_status_t keelsign_verify(const uint8_t *image,
 //
 // # Safety
 //
-// - `image` is non-NULL and readable for `len` bytes, at any alignment.
+// - `image` is non-NULL and readable for `len` bytes, at any alignment. A `len` above
+//   `UINT32_MAX`, or on a 32-bit target above `PTRDIFF_MAX`, is rejected with
+//   `KEELSIGN_ERR_IMAGE_TOO_LARGE` before anything is read.
 // - `out_digest` is non-NULL and writable for 32 bytes.
 // - None of this memory is written by anyone else during the call. Nothing is retained
 //   after the call returns.

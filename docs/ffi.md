@@ -82,8 +82,8 @@ check.
 ### Pointer and length contract
 
 - `image` is non-NULL and readable for `len` bytes, at any alignment; `len` is at most
-  `UINT32_MAX` (`KEELSIGN_ERR_IMAGE_TOO_LARGE` otherwise, checked before anything is
-  read). `len == 0` gives `KEELSIGN_ERR_PARSE_TRUNCATED`.
+  `UINT32_MAX`, and on a 32-bit target at most `PTRDIFF_MAX`
+  (`KEELSIGN_ERR_IMAGE_TOO_LARGE` otherwise, checked before anything is read). `len == 0` gives `KEELSIGN_ERR_PARSE_TRUNCATED`.
 - `keys` is NULL only if `n_keys` is 0; otherwise it points to `n_keys` consecutive
   `keelsign_key_t` (any alignment). Each `key` is non-NULL and readable for `key_len`
   bytes.
