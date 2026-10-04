@@ -28,7 +28,8 @@ fn ci_job(ci: &str, name: &str) -> String {
 }
 
 /// keelsign enables keelsign-verify's `ml-dsa` feature, so `cargo test --workspace`
-/// runs policy-kat with ML-DSA on; the `ci` job runs it alone for the off state.
+/// runs policy-kat with ML-DSA on; the `ci` job runs it alone for the off state. The
+/// same job installs imgtool 2.4.0 and runs the ignored imgtool interop tests.
 #[test]
 fn ci_runs_policy_kat_with_ml_dsa_off_and_the_imgtool_tests() {
     let ci = read(".github/workflows/ci.yml");
@@ -36,6 +37,8 @@ fn ci_runs_policy_kat_with_ml_dsa_off_and_the_imgtool_tests() {
     for needle in [
         "cargo test -p policy-kat --locked\n",
         "cargo test -p policy-kat --locked --features keelsign-verify/ml-dsa",
+        "pip install imgtool==2.4.0",
+        "cargo test -p keelsign --locked --test imgtool -- --ignored",
     ] {
         assert!(host.contains(needle), "ci job must run `{needle}`");
     }
