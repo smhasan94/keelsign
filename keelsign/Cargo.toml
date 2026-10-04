@@ -1,6 +1,6 @@
 [package]
 name = "keelsign"
-description = "Host CLI of the keelsign post-quantum firmware signing kit: key generation, image signing, inspection and verification (pre-release)"
+description = "Host CLI of the keelsign post-quantum firmware signing kit: ML-DSA and stateful LMS/HSS key generation, image signing, inspection and verification (pre-release)"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true
@@ -16,6 +16,8 @@ getrandom = { version = "=0.4.3", default-features = false, features = ["sys_rng
 clap = { version = "=4.6.7", features = ["derive"] }
 zeroize = { version = "=1.9.0", default-features = false, features = ["alloc"] }
 serde_json = { version = "=1.0.151", default-features = false, features = ["std"] }
+# SHA-67: the in-house LMS/HSS signer. Same version keelsign-verify uses, so one sha2 in the lock.
+sha2 = { version = "=0.11.0", default-features = false }
 
 [dev-dependencies]
 # Validates `inspect --json` output against docs/inspect-schema.json (Draft 2020-12) in
@@ -24,6 +26,8 @@ jsonschema = { version = "=0.58.5", default-features = false }
 # SHA-53: integration tests of every subcommand and exit code (the ticket names assert_cmd).
 assert_cmd = { version = "=2.2.2", default-features = false }
 predicates = { version = "=3.1.4", default-features = false }
+# SHA-67: replays the hsslms fixture DRBG to KAT the signer against cases 301/302/303.
+lms-kat = { path = "../benches/lms-kat" }
 
 [lints.rust]
 unsafe_code = "forbid"

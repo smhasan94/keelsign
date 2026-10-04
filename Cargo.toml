@@ -33,3 +33,7 @@ opt-level = 3
 
 [profile.dev.package.salsa20]
 opt-level = 3
+
+# SHA-67: the LMS/HSS signer hashes millions of blocks per tree; keep test builds usable.
+[profile.dev.package.sha2]
+opt-level = 3
