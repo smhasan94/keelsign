@@ -1,0 +1,42 @@
+format: keelsign-inspect
+schema version: 1
+file length: 5832
+tlv end: 5832
+trailing bytes: 0
+header:
+  magic: 0x96f3b83d
+  load address: 0x00000000
+  header size: 512
+  protected TLV size: 0
+  image size: 1536
+  flags: 0x00000000 (none; unknown bits 0x00000000)
+  version: 1.2.3+4
+digest:
+  sha256: e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1
+  sha256 tlv matches: yes
+protected tlv area: none
+unprotected tlv area: magic 0x6907, tlv_tot 3784
+  tlv 0x0010 SHA256, 32 bytes: e72878a8fe7374ccc97aec1ffab2f564… (32 bytes)
+    hash: SHA-256
+    matches digest: yes
+  tlv 0x4ba0 KEELSIGN_KEY_ID, 16 bytes: f7e6078d1f2b541747b299359be05b7d
+    key id: f7e6078d1f2b541747b299359be05b7d
+  tlv 0x4ba3 KEELSIGN_LMS_HSS_SIG, 1296 bytes: 0000000000000000000000045a45d2ae… (1296 bytes)
+    levels: 1
+    lmots types: LMOTS_SHA256_N32_W8
+    lms types: LMS_SHA256_M32_H5
+    parameter set: LMS/HSS
+    q: 0
+  tlv 0x4ba1 KEELSIGN_MLDSA44_SIG, 2420 bytes: 64208fac521360bfdd13915d25e11f1b… (2420 bytes)
+    parameter set: ML-DSA-44
+key ids: f7e6078d1f2b541747b299359be05b7d
+keyhashes: none
+signatures:
+  lms-hss (unprotected, 1296 bytes):
+    key id: f7e6078d1f2b541747b299359be05b7d
+    levels: 1
+    lmots types: LMOTS_SHA256_N32_W8
+    lms types: LMS_SHA256_M32_H5
+    q: 0
+  ml-dsa-44 (unprotected, 2420 bytes):
+    key id: f7e6078d1f2b541747b299359be05b7d

@@ -1,0 +1,33 @@
+format: keelsign-inspect
+schema version: 1
+file length: 5466
+tlv end: 5466
+trailing bytes: 0
+header:
+  magic: 0x96f3b83d
+  load address: 0x00000000
+  header size: 512
+  protected TLV size: 45
+  image size: 1536
+  flags: 0x00000000 (none; unknown bits 0x00000000)
+  version: 1.2.3+4
+digest:
+  sha256: 14bc390be01003e0c0a84e577c1156d8423f93b68337bcf0df0e9ffc189add83
+  sha256 tlv matches: yes
+protected tlv area: magic 0x6908, tlv_tot 45
+  tlv 0x0050 SEC_CNT, 4 bytes: 07000000
+    security counter: 7
+  tlv 0x10a0 unknown, 29 bytes: 6b65656c7369676e2d70726f74656374… (29 bytes)
+unprotected tlv area: magic 0x6907, tlv_tot 3373
+  tlv 0x0010 SHA256, 32 bytes: 14bc390be01003e0c0a84e577c1156d8… (32 bytes)
+    hash: SHA-256
+    matches digest: yes
+  tlv 0x4ba0 KEELSIGN_KEY_ID, 16 bytes: a602e37b4d644240d11cf33cbaccc553
+    key id: a602e37b4d644240d11cf33cbaccc553
+  tlv 0x4ba2 KEELSIGN_MLDSA65_SIG, 3309 bytes: 9e543bdcc42242aea85f3350596fac91… (3309 bytes)
+    parameter set: ML-DSA-65
+key ids: a602e37b4d644240d11cf33cbaccc553
+keyhashes: none
+signatures:
+  ml-dsa-65 (unprotected, 3309 bytes):
+    key id: a602e37b4d644240d11cf33cbaccc553

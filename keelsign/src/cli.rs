@@ -25,6 +25,19 @@ pub enum Command {
     Pubkey(PubkeyArgs),
     /// Add an ML-DSA signature (optionally with an Ed25519 pair) to an MCUboot image.
     Sign(SignArgs),
+    /// Describe an MCUboot image: header, TLVs, digest, key IDs and signatures.
+    Inspect(InspectArgs),
+}
+
+/// Arguments of `keelsign inspect`.
+#[derive(Debug, Args)]
+pub struct InspectArgs {
+    /// Write JSON (docs/inspect-schema.json) instead of text.
+    #[arg(long)]
+    pub json: bool,
+    /// The MCUboot image (bytes after its TLV area are reported, not parsed).
+    #[arg(value_name = "IMAGE")]
+    pub image: PathBuf,
 }
 
 /// Arguments of `keelsign sign`.
@@ -154,7 +167,26 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
         Command::Keygen(args) => keygen(args),
         Command::Pubkey(args) => pubkey(args),
         Command::Sign(args) => sign(args),
+        Command::Inspect(args) => inspect(args),
     }
+}
+
+fn inspect(args: &InspectArgs) -> Result<(), Error> {
+    let bytes = crate::image_file::read_image(&args.image)?;
+    let image = crate::image_file::parse(&args.image, &bytes)?;
+    let digest = crate::image_file::digest(&bytes, &image)?;
+    let report = crate::inspect::to_json(&bytes, &image, &digest);
+    let text = if args.json {
+        let mut text = serde_json::to_string_pretty(&report)
+            .map_err(|e| Error::Internal(format!("could not write JSON: {e}")))?;
+        text.push('\n');
+        text
+    } else {
+        crate::inspect::to_human(&report)
+    };
+    let mut stdout = io::stdout().lock();
+    stdout.write_all(text.as_bytes()).map_err(out_error)?;
+    stdout.flush().map_err(out_error)
 }
 
 fn sign(args: &SignArgs) -> Result<(), Error> {

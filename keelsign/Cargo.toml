@@ -17,5 +17,10 @@ clap = { version = "=4.6.7", features = ["derive"] }
 zeroize = { version = "=1.9.0", default-features = false, features = ["alloc"] }
 serde_json = { version = "=1.0.151", default-features = false, features = ["std"] }
 
+[dev-dependencies]
+# Validates `inspect --json` output against docs/inspect-schema.json (Draft 2020-12) in
+# tests/inspect.rs. Default features off: no HTTP or file resolving, no TLS.
+jsonschema = { version = "=0.58.5", default-features = false }
+
 [lints.rust]
 unsafe_code = "forbid"

@@ -1,0 +1,119 @@
+{
+  "digest": {
+    "sha256": "4eaeaf5d62fb41180444e1679b03c6b489360523d805afc4c5e032b37aac1745",
+    "sha256_tlv_matches": true
+  },
+  "file_len": 2315,
+  "format": "keelsign-inspect",
+  "header": {
+    "flags": {
+      "names": [],
+      "raw": 0,
+      "unknown_bits": 0
+    },
+    "hdr_size": 512,
+    "img_size": 1536,
+    "load_addr": 0,
+    "magic": 2532554813,
+    "protect_tlv_size": 123,
+    "version": {
+      "build_num": 4,
+      "major": 1,
+      "minor": 2,
+      "revision": 3,
+      "string": "1.2.3+4"
+    }
+  },
+  "key_ids": [],
+  "keyhashes": [
+    "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190"
+  ],
+  "protected": {
+    "magic": 26888,
+    "tlv_tot": 123,
+    "tlvs": [
+      {
+        "decoded": {
+          "security_counter": 7
+        },
+        "len": 4,
+        "name": "SEC_CNT",
+        "type": 80,
+        "type_hex": "0x0050",
+        "value_hex": "07000000"
+      },
+      {
+        "decoded": {
+          "encoding": "CBOR"
+        },
+        "len": 91,
+        "name": "BOOT_RECORD",
+        "type": 96,
+        "type_hex": "0x0060",
+        "value_hex": "a501636170700465312e322e3305582015bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b319006665348413235360258200000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "decoded": {
+          "image_index": 1,
+          "version": "1.2.3+4"
+        },
+        "len": 12,
+        "name": "DEPENDENCY",
+        "type": 64,
+        "type_hex": "0x0040",
+        "value_hex": "010000000102030004000000"
+      }
+    ]
+  },
+  "schema_version": 1,
+  "signatures": [
+    {
+      "area": "unprotected",
+      "key_id": null,
+      "keyhash": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190",
+      "kind": "ed25519",
+      "len": 64,
+      "lms": null,
+      "paired": true
+    }
+  ],
+  "tlv_end": 2315,
+  "trailing_bytes": 0,
+  "unprotected": {
+    "magic": 26887,
+    "tlv_tot": 144,
+    "tlvs": [
+      {
+        "decoded": {
+          "hash": "SHA-256",
+          "matches_digest": true
+        },
+        "len": 32,
+        "name": "SHA256",
+        "type": 16,
+        "type_hex": "0x0010",
+        "value_hex": "4eaeaf5d62fb41180444e1679b03c6b489360523d805afc4c5e032b37aac1745"
+      },
+      {
+        "decoded": {
+          "keyhash": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190"
+        },
+        "len": 32,
+        "name": "KEYHASH",
+        "type": 1,
+        "type_hex": "0x0001",
+        "value_hex": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190"
+      },
+      {
+        "decoded": {
+          "algorithm": "Ed25519"
+        },
+        "len": 64,
+        "name": "ED25519",
+        "type": 36,
+        "type_hex": "0x0024",
+        "value_hex": "d4c0de47199800e9c702f1e4d993ba2b0d298c52b997fb07a0effafdac8e1f488d7065d111181e3aed57badadf152499db8e4dcf2f324300a14aee3b19bb390d"
+      }
+    ]
+  }
+}

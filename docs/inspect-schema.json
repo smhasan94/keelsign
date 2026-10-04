@@ -1,0 +1,492 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/smhasan94/keelsign/blob/main/docs/inspect-schema.json",
+  "title": "keelsign inspect --json",
+  "description": "Output of `keelsign inspect --json IMAGE`. Stability: within a schema_version, fields are never removed, renamed or retyped; new fields are optional and added to this schema in the same change; a breaking change bumps schema_version (docs/signing.md).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "format": {
+      "const": "keelsign-inspect"
+    },
+    "file_len": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tlv_end": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "trailing_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "header": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "magic": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "load_addr": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "hdr_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "protect_tlv_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "img_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "flags": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "raw": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "PIC",
+                  "ENCRYPTED_AES128",
+                  "ENCRYPTED_AES256",
+                  "NON_BOOTABLE",
+                  "RAM_LOAD",
+                  "ROM_FIXED",
+                  "COMPRESSED_LZMA1",
+                  "COMPRESSED_LZMA2",
+                  "COMPRESSED_ARM_THUMB_FLT"
+                ]
+              }
+            },
+            "unknown_bits": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          },
+          "required": [
+            "raw",
+            "names",
+            "unknown_bits"
+          ]
+        },
+        "version": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "major": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "minor": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "build_num": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "string": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "major",
+            "minor",
+            "revision",
+            "build_num",
+            "string"
+          ]
+        }
+      },
+      "required": [
+        "magic",
+        "load_addr",
+        "hdr_size",
+        "protect_tlv_size",
+        "img_size",
+        "flags",
+        "version"
+      ]
+    },
+    "digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sha256_tlv_matches": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sha256",
+        "sha256_tlv_matches"
+      ]
+    },
+    "protected": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/area"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "unprotected": {
+      "$ref": "#/$defs/area"
+    },
+    "key_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{32}$"
+      }
+    },
+    "keyhashes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "signatures": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/signature"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "format",
+    "file_len",
+    "tlv_end",
+    "trailing_bytes",
+    "header",
+    "digest",
+    "protected",
+    "unprotected",
+    "key_ids",
+    "keyhashes",
+    "signatures"
+  ],
+  "$defs": {
+    "area": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "magic": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "tlv_tot": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "tlvs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/tlv"
+          }
+        }
+      },
+      "required": [
+        "magic",
+        "tlv_tot",
+        "tlvs"
+      ]
+    },
+    "tlv": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "type_hex": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{4}$"
+        },
+        "name": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "len": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "value_hex": {
+          "type": "string",
+          "pattern": "^([0-9a-f]{2})*$"
+        },
+        "decoded": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/decoded"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "type_hex",
+        "name",
+        "len",
+        "value_hex",
+        "decoded"
+      ]
+    },
+    "decoded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hash": {
+          "enum": [
+            "SHA-256",
+            "SHA-384",
+            "SHA-512"
+          ]
+        },
+        "matches_digest": {
+          "type": "boolean"
+        },
+        "keyhash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "algorithm_oid": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)+$"
+        },
+        "security_counter": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "image_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+\\+[0-9]+$"
+        },
+        "encoding": {
+          "const": "CBOR"
+        },
+        "algorithm": {
+          "enum": [
+            "Ed25519",
+            "RSA-2048-PSS",
+            "RSA-3072-PSS",
+            "ECDSA"
+          ]
+        },
+        "key_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "parameter_set": {
+          "enum": [
+            "ML-DSA-44",
+            "ML-DSA-65",
+            "LMS/HSS"
+          ]
+        },
+        "levels": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "lms_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "lmots_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "q": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "required": [],
+      "description": "What the TLV value means where keelsign knows; null for other TLVs. Which properties appear depends on the TLV type (docs/signing.md)."
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "ed25519",
+            "rsa2048-pss",
+            "rsa3072-pss",
+            "ecdsa-p256",
+            "ml-dsa-44",
+            "ml-dsa-65",
+            "lms-hss"
+          ]
+        },
+        "area": {
+          "enum": [
+            "protected",
+            "unprotected"
+          ]
+        },
+        "len": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "keyhash": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "paired": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lms": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/lms"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "area",
+        "len",
+        "keyhash",
+        "key_id",
+        "paired",
+        "lms"
+      ]
+    },
+    "lms": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "levels": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "lms_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "lmots_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "q": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "levels",
+        "lms_types",
+        "lmots_types",
+        "q"
+      ],
+      "description": "Structure of an HSS signature (RFC 8554 §6.2), read without verifying it: levels L, the LMS and LM-OTS type of each level's signature (top level first), and the leaf index q of the bottom-level signature."
+    }
+  }
+}

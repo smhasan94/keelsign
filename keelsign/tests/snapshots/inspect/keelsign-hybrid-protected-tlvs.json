@@ -1,0 +1,154 @@
+{
+  "digest": {
+    "sha256": "14bc390be01003e0c0a84e577c1156d8423f93b68337bcf0df0e9ffc189add83",
+    "sha256_tlv_matches": true
+  },
+  "file_len": 3557,
+  "format": "keelsign-inspect",
+  "header": {
+    "flags": {
+      "names": [],
+      "raw": 0,
+      "unknown_bits": 0
+    },
+    "hdr_size": 512,
+    "img_size": 1536,
+    "load_addr": 0,
+    "magic": 2532554813,
+    "protect_tlv_size": 45,
+    "version": {
+      "build_num": 4,
+      "major": 1,
+      "minor": 2,
+      "revision": 3,
+      "string": "1.2.3+4"
+    }
+  },
+  "key_ids": [
+    "42a79323dda5ff2dc6ea45ec4abf1b1f"
+  ],
+  "keyhashes": [
+    "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190"
+  ],
+  "protected": {
+    "magic": 26888,
+    "tlv_tot": 45,
+    "tlvs": [
+      {
+        "decoded": {
+          "security_counter": 7
+        },
+        "len": 4,
+        "name": "SEC_CNT",
+        "type": 80,
+        "type_hex": "0x0050",
+        "value_hex": "07000000"
+      },
+      {
+        "decoded": null,
+        "len": 29,
+        "name": null,
+        "type": 4256,
+        "type_hex": "0x10a0",
+        "value_hex": "6b65656c7369676e2d70726f7465637465642d76656e646f722d746c76"
+      }
+    ]
+  },
+  "schema_version": 1,
+  "signatures": [
+    {
+      "area": "unprotected",
+      "key_id": null,
+      "keyhash": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190",
+      "kind": "ed25519",
+      "len": 64,
+      "lms": null,
+      "paired": true
+    },
+    {
+      "area": "unprotected",
+      "key_id": "42a79323dda5ff2dc6ea45ec4abf1b1f",
+      "keyhash": null,
+      "kind": "lms-hss",
+      "len": 1296,
+      "lms": {
+        "levels": 1,
+        "lmots_types": [
+          "LMOTS_SHA256_N32_W8"
+        ],
+        "lms_types": [
+          "LMS_SHA256_M32_H5"
+        ],
+        "q": 0
+      },
+      "paired": null
+    }
+  ],
+  "tlv_end": 3557,
+  "trailing_bytes": 0,
+  "unprotected": {
+    "magic": 26887,
+    "tlv_tot": 1464,
+    "tlvs": [
+      {
+        "decoded": {
+          "hash": "SHA-256",
+          "matches_digest": true
+        },
+        "len": 32,
+        "name": "SHA256",
+        "type": 16,
+        "type_hex": "0x0010",
+        "value_hex": "14bc390be01003e0c0a84e577c1156d8423f93b68337bcf0df0e9ffc189add83"
+      },
+      {
+        "decoded": {
+          "keyhash": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190"
+        },
+        "len": 32,
+        "name": "KEYHASH",
+        "type": 1,
+        "type_hex": "0x0001",
+        "value_hex": "15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190"
+      },
+      {
+        "decoded": {
+          "algorithm": "Ed25519"
+        },
+        "len": 64,
+        "name": "ED25519",
+        "type": 36,
+        "type_hex": "0x0024",
+        "value_hex": "c125121f52caf87e4c365a0f948fabab4a476a4a3223810438756c59180e2fb6bd4cf2e15e335e245b71095a5109b1566dcb2acb68427d74ec0ef60c0afb1e03"
+      },
+      {
+        "decoded": {
+          "key_id": "42a79323dda5ff2dc6ea45ec4abf1b1f"
+        },
+        "len": 16,
+        "name": "KEELSIGN_KEY_ID",
+        "type": 19360,
+        "type_hex": "0x4ba0",
+        "value_hex": "42a79323dda5ff2dc6ea45ec4abf1b1f"
+      },
+      {
+        "decoded": {
+          "levels": 1,
+          "lmots_types": [
+            "LMOTS_SHA256_N32_W8"
+          ],
+          "lms_types": [
+            "LMS_SHA256_M32_H5"
+          ],
+          "parameter_set": "LMS/HSS",
+          "q": 0
+        },
+        "len": 1296,
+        "name": "KEELSIGN_LMS_HSS_SIG",
+        "type": 19363,
+        "type_hex": "0x4ba3",
+        "value_hex": "000000000000000000000004e3ba4957e6aed083f14719eae34d44b978f7cd68eb0f1092c5568942a369e4daec613a50f134c68e94c1a94c07a467b89bd570614fd62ffb13345eb76902ad04d85f8522a4911396d85c94e33a9407f4ab358ccaf854236e650f6796d80ad60e1c6111cd57615766e0fe5e19269100437ce8d13382d21e2f98a01e025186aa9acbc758a48cda6547d5b2deee3b9129fb8ca203890567cee38c97626bad4d3c08710494fdcbbbe564bf7418195199e8db8013e9ad7b15eb9a9086ec9ba376aeca5eb7e5d1f57adc1893030a1f3a755b6f435346c77d1a7f7cce9c5b9f291a027b51680a27ea916a9a0cc58ef70e461f9cd41bdf8e803014d19f8b2b381429c37088178962bfe4986ce7fb38d7ceeef14d374929fa6467b708e6be3ae4f86c90a5a0259935da34a9776e9da8d3f1ca92547c6d15eaaae24aedcb72ca427244caef8cfe9837a8e4913812a850b2e74cb957b5abc1c6ece90b796dec8b5be6943361d7058ae0cd7cbbc6a454af35ff3f1f0b3c946554af9226ae20bfa170f29552beb8c8259d9d040bfcd2075adfaccc00e97a72339edde4708d99366bf42bd3e7beb366352b0f831745877a8ed17d9293de8c7cf5bcc5190bf83e301b22d418a3c2a20fac816ac9374ef2e08b05e5f8e8bb9bffa2689de532cb89e767cabd32699085c164c6115fd8f7fc4484333bbed7f58824d18d239fa9a310dbd7caa774146a71a86d466b78d58c04eecb37b480c2b2ca671d161dab5b54e52de569f4c6db0b015aa9f4ed4b7d394fc1713c9334475d38a72e9d7058ede5f4b34a3841f3f71c06a2916d131489513069dee740978873a6e67a15e0b3a36298a54b790b78be68138df53dbb1a3fa3394c93c3390710901bd5dd42bb50071b0796375b59134593ac1ac131eeb310567b7f611eaf8286285a75151192ddb6a1aed202211d8c2c904fd2d9ac578653de9898462aacc003e793d84809684242967806fea47f6bd2d42857fd0e42df395e290bb796ec086718c8044ba12157ea6831b097b952f934e92cdc32ab1bbe00a4a06baa0ae792d5a0c433fb9c35f73ac9f9955e989ae5a510791c264757f2dc51a356c730d250a6dcf0b0bc737d95c509a2914fdb061e7aa5854ee9e3952b48ebaf8f91fb270d444abc8d5b25d2a8ccb036e9e145521a6c96027adfdd17703da804dfdeaf518ceac80a442678ebd7b400514e674b89ff2c5abd28a4fb05359300817f93fe1462a45a9dac70a4aeb98b626e8bc3ae1a771d903256003d23ec86155081fd26b50375f58d4c92be8dcf77ccf6b752458f30652c63b8f1cb14bbd04d122f6bd8eecafb6b6a1ed132350131aec22955956033325edd2d004a7b823209467bacdcedde2fc29c1c663b2b12d0cf9089f2372e2dc86a3b07ec51ffa6f1b6a73f5c39454dd9b6ce690dd47f77e5317bd31a5fd6ad453ea6975c4fee62394307913699f2aa8f4801e4c6ef22b429c250b11b97b606cfece5c3dc331990040bac52bdf082ebde06c4643851a733707ed4105052badb7b0233cc2340d034286bb834c06bd556ca4e44bcc7135fc2e6ce428d54b08288a01a00000005960f9f0175881bc4deb243efc4a4dce3003abc59ab46ddf1f507af4537910dc6f383b9fdd16cac1ecdbb5b19bb4554315ef634f72379ec4509cec887d23e42b02432726daab7c1528659663862ea6af32c8606666e88399dc8f4cb6514788faba106b70cb9dc86470a91451bd71cf3d6b4384e50244d8c9561791b54a5916ec9ebcd9d4b7ac9bb52e5e8f2f599c6400cda4a54452401330a4167f7d5fffa13c9"
+      }
+    ]
+  }
+}

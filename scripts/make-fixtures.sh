@@ -5,10 +5,14 @@
 #   2. scripts/gen_lms_vectors.py     LMS/HSS KATs    benches/lms-kat/fixtures/    (network)
 #   3. scripts/gen_image_fixtures.py  MCUboot images  tests/fixtures/images/       (network, imgtool 2.4.0)
 #   4. scripts/gen_fuzz_corpus.py     fuzz seeds      fuzz/corpus/                 (offline, from 3)
+#   5. scripts/gen_inspect_snapshots.py  inspect output  keelsign/tests/snapshots/inspect/  (offline, from 3)
 #
 # Usage:
-#   scripts/make-fixtures.sh [--imgtool PATH]           # rewrite every fixture
-#   scripts/make-fixtures.sh --check [--imgtool PATH]   # regenerate into temp dirs and diff
+#   scripts/make-fixtures.sh [--imgtool PATH] [--keelsign PATH]           # rewrite every fixture
+#   scripts/make-fixtures.sh --check [--imgtool PATH] [--keelsign PATH]   # regenerate into temp dirs and diff
+#
+# --keelsign PATH is the keelsign binary step 5 runs (default: `cargo run -p keelsign`);
+# pass it when this script runs under cargo, so cargo is not nested.
 #
 # Write mode is byte-identical: the image generator reuses the committed classical
 # signatures under tests/fixtures/images/sigs/ (it is never passed --resign), so
@@ -16,18 +20,24 @@
 set -euo pipefail
 
 usage() {
-    echo "usage: scripts/make-fixtures.sh [--check] [--imgtool PATH]" >&2
+    echo "usage: scripts/make-fixtures.sh [--check] [--imgtool PATH] [--keelsign PATH]" >&2
     exit 2
 }
 
 check=()
 imgtool=()
+keelsign=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --check) check=(--check) ;;
         --imgtool)
             [ $# -ge 2 ] || usage
             imgtool=(--imgtool "$2")
+            shift
+            ;;
+        --keelsign)
+            [ $# -ge 2 ] || usage
+            keelsign=(--keelsign "$2")
             shift
             ;;
         *) usage ;;
@@ -46,6 +56,7 @@ run python3 scripts/gen_mldsa_vectors.py ${check[@]+"${check[@]}"}
 run python3 scripts/gen_lms_vectors.py ${check[@]+"${check[@]}"}
 run python3 scripts/gen_image_fixtures.py ${check[@]+"${check[@]}"} ${imgtool[@]+"${imgtool[@]}"}
 run python3 scripts/gen_fuzz_corpus.py ${check[@]+"${check[@]}"}
+run python3 scripts/gen_inspect_snapshots.py ${check[@]+"${check[@]}"} ${keelsign[@]+"${keelsign[@]}"}
 
 if [ ${#check[@]} -gt 0 ]; then
     echo "make-fixtures: every fixture matches a fresh regeneration"

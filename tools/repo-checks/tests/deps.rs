@@ -312,11 +312,13 @@ fn dependency_line(manifest: &str, name: &str) -> (String, String) {
 }
 
 /// SHA-51: `keelsign inspect --json` writes JSON with serde_json, pinned exactly with
-/// default features off (`std` only: no `preserve_order`, no float tricks), and the
-/// lockfile resolves exactly that version.
+/// default features off (`std` only: no `preserve_order`, no float tricks); its tests
+/// validate it with jsonschema, a dev-dependency pinned exactly with default features off
+/// (no HTTP or file resolving, no TLS). The lockfile resolves exactly those versions.
 #[test]
 fn cli_json_dependencies_pinned_exact() {
     const SERDE_JSON_PIN: &str = "1.0.151";
+    const JSONSCHEMA_PIN: &str = "0.58.5";
     let manifest = read("keelsign/Cargo.toml");
     let (section, line) = dependency_line(&manifest, "serde_json");
     assert_eq!(
@@ -333,17 +335,44 @@ fn cli_json_dependencies_pinned_exact() {
             "serde_json must have `{needle}`: `{line}`"
         );
     }
-    let lock = read("Cargo.lock");
-    let versions: Vec<String> = lock_packages(&lock)
-        .into_iter()
-        .filter(|(name, _, _)| name == "serde_json")
-        .map(|(_, version, _)| version)
-        .collect();
+    let (section, line) = dependency_line(&manifest, "jsonschema");
     assert_eq!(
-        versions,
-        [SERDE_JSON_PIN],
-        "Cargo.lock: serde_json must resolve to exactly {SERDE_JSON_PIN}"
+        section, "[dev-dependencies]",
+        "jsonschema is a dev-dependency only"
     );
+    for needle in [
+        format!("version = \"={JSONSCHEMA_PIN}\""),
+        "default-features = false".to_owned(),
+    ] {
+        assert!(
+            line.contains(&needle),
+            "jsonschema must have `{needle}`: `{line}`"
+        );
+    }
+    let lock = read("Cargo.lock");
+    let packages = lock_packages(&lock);
+    for (krate, pin) in [
+        ("serde_json", SERDE_JSON_PIN),
+        ("jsonschema", JSONSCHEMA_PIN),
+    ] {
+        let versions: Vec<&str> = packages
+            .iter()
+            .filter(|(name, _, _)| name == krate)
+            .map(|(_, version, _)| version.as_str())
+            .collect();
+        assert_eq!(
+            versions,
+            [pin],
+            "Cargo.lock: {krate} must resolve to exactly {pin}"
+        );
+    }
+    // No HTTP client or TLS stack reaches the lockfile through jsonschema.
+    for absent in ["reqwest", "rustls", "aws-lc-rs", "ring"] {
+        assert!(
+            !packages.iter().any(|(name, _, _)| name == absent),
+            "Cargo.lock must not contain {absent}"
+        );
+    }
 }
 
 /// Every Cargo.toml in the repository outside `target/` directories.

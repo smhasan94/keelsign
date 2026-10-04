@@ -1,0 +1,38 @@
+format: keelsign-inspect
+schema version: 1
+file length: 2315
+tlv end: 2315
+trailing bytes: 0
+header:
+  magic: 0x96f3b83d
+  load address: 0x00000000
+  header size: 512
+  protected TLV size: 123
+  image size: 1536
+  flags: 0x00000000 (none; unknown bits 0x00000000)
+  version: 1.2.3+4
+digest:
+  sha256: 4eaeaf5d62fb41180444e1679b03c6b489360523d805afc4c5e032b37aac1745
+  sha256 tlv matches: yes
+protected tlv area: magic 0x6908, tlv_tot 123
+  tlv 0x0050 SEC_CNT, 4 bytes: 07000000
+    security counter: 7
+  tlv 0x0060 BOOT_RECORD, 91 bytes: a501636170700465312e322e33055820… (91 bytes)
+    encoding: CBOR
+  tlv 0x0040 DEPENDENCY, 12 bytes: 010000000102030004000000
+    image index: 1
+    version: 1.2.3+4
+unprotected tlv area: magic 0x6907, tlv_tot 144
+  tlv 0x0010 SHA256, 32 bytes: 4eaeaf5d62fb41180444e1679b03c6b4… (32 bytes)
+    hash: SHA-256
+    matches digest: yes
+  tlv 0x0001 KEYHASH, 32 bytes: 15bd85175f163ec727380037b5c48ae9… (32 bytes)
+    keyhash: 15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190
+  tlv 0x0024 ED25519, 64 bytes: d4c0de47199800e9c702f1e4d993ba2b… (64 bytes)
+    algorithm: Ed25519
+key ids: none
+keyhashes: 15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190
+signatures:
+  ed25519 (unprotected, 64 bytes):
+    keyhash: 15bd85175f163ec727380037b5c48ae9f83fc2cb8e12fa5a678be4809f2b3190
+    paired: yes
