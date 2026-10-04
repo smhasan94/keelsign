@@ -239,7 +239,8 @@ RFC 8554 §6.2 over the image digest `M` itself, in the `0x4BA3` TLV
 
 LMS/HSS keys are stateful: a leaf (one-time key) must never sign twice. The key file
 `FILE` comes with `FILE.state` (the next leaf, bound to the key ID, plus cached tree
-nodes) and `FILE.journal` (one `reserved LEAF TIME` line per signature, and the lock).
+nodes) and `FILE.journal` (a header line with the key ID, then one `reserved LEAF TIME`
+line per signature; also the lock).
 After it has parsed the image, loaded the keys and computed `M`, and before it computes
 any signature, `sign` locks the journal, checks the state file, writes it with the next
 leaf advanced and appends the leaf to the journal; it holds the lock until `OUT` is
@@ -296,8 +297,14 @@ marks NEEDS-HARDWARE until a human has run it on the nRF52840-DK and the Pico 2 
    KEELSIGN_LMS_TARGET=/tmp/lms-leaves.bin cargo test --release --locked --test lms -- lms_kat
    ```
 
-4. Expect `KAT board=... set=LMS passed=3/3` and `lms_kat` passing on both boards: every
-   case verifies under the device default policy and `DefaultBackend::cnsa_2_0()`. Paste
-   the two logs into the pull request and the Linear ticket.
+4. Expect, on both boards, `KAT board=... set=LMS passed=3/3`, then
+   `ROTATION board=... rotation: skipped (override fixture has no rotation cases)`, and
+   `lms_kat` passing: every case verifies under the device default policy and
+   `DefaultBackend::cnsa_2_0()`. The rotation check needs the default fixture's rotation
+   keys, which the override lacks; lms-kat's `build.rs` exports
+   `LMS_KAT_TARGET_OVERRIDDEN`, and `lms_kat::target_rotation` skips it only then
+   (`lms_rotation_key_b_verifies_against_a_b_and_fails_against_a` passes with the same
+   skip line). Paste the two logs into the pull request and the Linear ticket.
 5. Build once more without `KEELSIGN_LMS_TARGET` so the benches embed the 14-case fixture
-   again.
+   again; `lms_kat` then logs `passed=14/14` and runs the rotation check (`ROTATION
+   board=... {A,B} accepts B and A, {A} rejects B: ok`).

@@ -343,13 +343,14 @@ pub fn next_leaf(key: &Path) -> u64 {
     read_state(key)["next_leaf"].as_u64().expect("next_leaf")
 }
 
-/// The lines of an LMS/HSS key's journal.
+/// The `reserved` lines of an LMS/HSS key's journal (after its
+/// `keelsign-lms-journal 1 <key id>` header line, which this checks).
 pub fn journal_lines(key: &Path) -> Vec<String> {
-    std::fs::read_to_string(journal_path(key))
-        .expect("read journal")
-        .lines()
-        .map(str::to_owned)
-        .collect()
+    let text = std::fs::read_to_string(journal_path(key)).expect("read journal");
+    let mut lines = text.lines();
+    let header = lines.next().expect("journal header");
+    assert!(header.starts_with("keelsign-lms-journal 1 "), "{header}");
+    lines.map(str::to_owned).collect()
 }
 
 /// The bottom-level leaf index `q` of the LMS/HSS signature TLV of a signed image.

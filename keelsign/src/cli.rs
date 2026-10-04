@@ -436,6 +436,16 @@ fn pubkey(args: &PubkeyArgs) -> Result<(), Error> {
             requested,
         });
     }
+    // An LMS/HSS `--alg` names a height too: the key's top tree must have it.
+    if let (Some(wanted), Some(lms)) = (args.alg.and_then(AlgArg::lms_params), key.as_lms())
+        && wanted != lms.top_params()
+    {
+        return Err(Error::ParameterSetMismatch {
+            path: args.key.clone(),
+            found: lms.parameter_set(),
+            requested: wanted.name(),
+        });
+    }
 
     let public = match args.format {
         FormatArg::Pem => key.public_key_spki_pem()?.into_bytes(),

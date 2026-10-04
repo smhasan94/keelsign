@@ -4,8 +4,9 @@
 //!
 //! - One-time private keys follow RFC 8554 Appendix A:
 //!   `x_q[i] = H(I || u32str(q) || u16str(i) || u8str(0xff) || SEED)`.
-//! - The randomizer `C` of each signature is derived the same way with `i = 0xFFFD`
-//!   (Appendix A's suggestion), so signing is deterministic:
+//! - The randomizer `C` of each signature is derived the same way with `i = 0xFFFD`, the
+//!   convention of the Cisco hash-sigs reference implementation (RFC 8554 Appendix A
+//!   specifies only the one-time key derivation), so signing is deterministic:
 //!   `C = H(I || u32str(q) || u16str(0xFFFD) || u8str(0xFF) || SEED)`. A leaf is never
 //!   used twice (the state file, [`crate::lms_state`], enforces that); a deterministic
 //!   `C` means a repeated top-level signature over the same bottom-tree public key (after
@@ -54,7 +55,8 @@ const D_MESG: [u8; 2] = 0x8181u16.to_be_bytes();
 const D_LEAF: [u8; 2] = 0x8282u16.to_be_bytes();
 const D_INTR: [u8; 2] = 0x8383u16.to_be_bytes();
 
-/// The chain index Appendix A reserves for deriving `C`.
+/// The chain index used to derive `C` with the Appendix A construction, following the
+/// Cisco hash-sigs reference implementation (not part of RFC 8554 itself).
 const C_INDEX: u16 = 0xFFFD;
 
 /// SHA-256 initial hash value (FIPS 180-4 §5.3.3).
@@ -740,11 +742,13 @@ impl HssPrivateKey {
         if i == 0 {
             return Ok(stored.clone());
         }
-        let seed = Zeroizing::new(sha256(&[
-            stored.seed.as_ref(),
-            &i.to_be_bytes(),
-            b"keelsign-hss-seed",
-        ]));
+        // Finalize straight into the zeroizing buffer: no plain copy of the child seed.
+        let mut seed = Zeroizing::new([0u8; SEED_LEN]);
+        let mut hasher = Sha256::new();
+        hasher.update(stored.seed.as_ref());
+        hasher.update(i.to_be_bytes());
+        hasher.update(b"keelsign-hss-seed");
+        hasher.finalize_into((&mut *seed).into());
         let id_hash = sha256(&[&stored.id, &i.to_be_bytes(), b"keelsign-hss-id"]);
         let mut id = [0u8; ID_LEN];
         id.copy_from_slice(&id_hash[..ID_LEN]);

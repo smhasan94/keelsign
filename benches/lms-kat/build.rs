@@ -4,13 +4,16 @@
 //! absolute path, that KSLM v2 file is embedded instead: the on-target check of
 //! keelsign-signed images (docs/signing.md, "On-target check") packs them with
 //! `scripts/lms_image_kat.py` and builds the bench tests with it. The case count is read
-//! from the fixture header and exported as `LMS_KAT_TARGET_CASES` (`TARGET_CASES`).
+//! from the fixture header and exported as `LMS_KAT_TARGET_CASES` (`TARGET_CASES`);
+//! `LMS_KAT_TARGET_OVERRIDDEN` is `1` with the override and `0` without it
+//! (`TARGET_OVERRIDDEN`).
 
 use std::path::PathBuf;
 
 fn main() -> Result<(), String> {
     println!("cargo:rerun-if-env-changed=KEELSIGN_LMS_TARGET");
     println!("cargo:rerun-if-changed=build.rs");
+    let mut overridden = false;
     let path = match std::env::var_os("KEELSIGN_LMS_TARGET") {
         Some(path) if !path.is_empty() => {
             let path = PathBuf::from(path);
@@ -20,6 +23,7 @@ fn main() -> Result<(), String> {
                     path.display()
                 ));
             }
+            overridden = true;
             path
         }
         _ => {
@@ -46,5 +50,9 @@ fn main() -> Result<(), String> {
         .map_err(|_| format!("{text}: truncated header"))?;
     println!("cargo:rustc-env=LMS_KAT_TARGET_FIXTURE={text}");
     println!("cargo:rustc-env=LMS_KAT_TARGET_CASES={count}");
+    println!(
+        "cargo:rustc-env=LMS_KAT_TARGET_OVERRIDDEN={}",
+        u8::from(overridden)
+    );
     Ok(())
 }

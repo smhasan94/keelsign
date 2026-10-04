@@ -225,12 +225,21 @@ fn sign_pq(
 ) -> Result<Vec<u8>, Error> {
     match (pq, reservation) {
         (PrivateKey::LmsHss(key), Some(r)) => {
+            // The leaf is already reserved: say that it is spent, so nobody tries to
+            // "retry" it by editing the state file.
+            let spent = format!(
+                "leaf {} is reserved in {} and is now spent (it is never reused; the next \
+                 sign uses leaf {})",
+                r.leaf,
+                r.state_path.display(),
+                r.leaf + 1
+            );
             key.sign(r.leaf, m, &r.caches, None).map_err(|e| match e {
                 crate::lms_sign::LmsError::Cache(reason) => Error::LmsState {
                     path: r.state_path.clone(),
-                    reason: crate::error::LmsStateError::Corrupt(reason),
+                    reason: crate::error::LmsStateError::Corrupt(format!("{reason}; {spent}")),
                 },
-                other => Error::Internal(format!("LMS/HSS signing failed: {other}")),
+                other => Error::Internal(format!("LMS/HSS signing failed: {other}; {spent}")),
             })
         }
         (PrivateKey::LmsHss(_), None) => Err(Error::Internal(

@@ -255,6 +255,8 @@ fn lms_on_target_procedure_is_documented() {
         "scripts/lms_image_kat.py --pub lms.pub.pem --out /tmp/lms-leaves.bin leaf-0.bin leaf-1.bin leaf-1023.bin",
         "KEELSIGN_LMS_TARGET=/tmp/lms-leaves.bin cargo test --release --locked --test lms -- lms_kat",
         "passed=3/3",
+        "rotation: skipped (override fixture has no rotation cases)",
+        "LMS_KAT_TARGET_OVERRIDDEN",
         "benches/nrf52840-mldsa",
         "benches/rp2350-mldsa",
     ] {
@@ -295,6 +297,7 @@ fn lms_on_target_procedure_is_documented() {
         "is_absolute",
         "LMS_KAT_TARGET_FIXTURE",
         "LMS_KAT_TARGET_CASES",
+        "LMS_KAT_TARGET_OVERRIDDEN",
     ] {
         assert!(
             build.contains(needle),
@@ -304,4 +307,5 @@ fn lms_on_target_procedure_is_documented() {
     let lib = read("benches/lms-kat/src/lib.rs");
     assert!(lib.contains("include_bytes!(env!(\"LMS_KAT_TARGET_FIXTURE\"))"));
     assert!(lib.contains("env!(\"LMS_KAT_TARGET_CASES\")"));
+    assert!(lib.contains("env!(\"LMS_KAT_TARGET_OVERRIDDEN\")"));
 }

@@ -92,14 +92,11 @@ fn sync_dir(path: &Path) -> io::Result<()> {
     }
 }
 
-fn open_options(create_new: bool) -> OpenOptions {
+/// Options that create a new file with mode 0600 on Unix and fail if anything (a file or
+/// a symbolic link) already has the name, so no link is ever followed.
+fn create_new_options() -> OpenOptions {
     let mut options = OpenOptions::new();
-    options.write(true);
-    if create_new {
-        options.create_new(true);
-    } else {
-        options.create(true).truncate(true);
-    }
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
@@ -108,10 +105,39 @@ fn open_options(create_new: bool) -> OpenOptions {
     options
 }
 
-/// Write `bytes` to `path` whole: a temporary file next to it, flushed, renamed over
-/// `path`, then the directory flushed. With `create_new`, an existing `path` is
-/// [`Error::Exists`] (checked with a hard link, so it is never replaced).
+/// Create `path` (never replacing anything there), write `bytes` and flush them, then
+/// flush the directory. A partly written file is removed.
+fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = create_new_options().open(path)?;
+    if let Err(e) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(e);
+    }
+    drop(file);
+    sync_dir(path)
+}
+
+/// Write `bytes` to `path`.
+///
+/// - With `create_new`, `path` must not exist (as anything, even a dangling link):
+///   it is created exclusively (`O_EXCL`), written and flushed, and the directory
+///   flushed; an existing `path` is [`Error::Exists`] and is left alone. This needs no
+///   hard links, so it works on FAT, exFAT and SMB volumes too.
+/// - Otherwise `path` is replaced whole: a new temporary file `.NAME.keelsign-tmp-PID`
+///   next to it (created exclusively, so a link planted under that name is not followed;
+///   a stale one from a crashed run is removed first), flushed, renamed over `path`, and
+///   the directory flushed.
 fn write_atomically(path: &Path, bytes: &[u8], create_new: bool) -> Result<(), Error> {
+    if create_new {
+        return write_new(path, bytes).map_err(|e| {
+            if e.kind() == io::ErrorKind::AlreadyExists {
+                Error::Exists(path.to_path_buf())
+            } else {
+                io_error("write", path, e)
+            }
+        });
+    }
     let name = path
         .file_name()
         .ok_or_else(|| Error::Usage(format!("{} does not name a file", path.display())))?;
@@ -120,24 +146,23 @@ fn write_atomically(path: &Path, bytes: &[u8], create_new: bool) -> Result<(), E
     temp_name.push(format!(".keelsign-tmp-{}", std::process::id()));
     let temp = path.with_file_name(temp_name);
     let result = (|| -> io::Result<()> {
-        let mut file = open_options(false).open(&temp)?;
+        let mut file = match create_new_options().open(&temp) {
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                // Left by a crashed run with the same process ID (removing a link
+                // removes the link, not its target).
+                fs::remove_file(&temp)?;
+                create_new_options().open(&temp)?
+            }
+            other => other?,
+        };
         file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
-        if create_new {
-            // link() fails if `path` exists: never replace a file that appeared since.
-            fs::hard_link(&temp, path)?;
-            fs::remove_file(&temp)?;
-        } else {
-            fs::rename(&temp, path)?;
-        }
+        fs::rename(&temp, path)?;
         sync_dir(path)
     })();
     if let Err(e) = result {
         let _ = fs::remove_file(&temp);
-        if e.kind() == io::ErrorKind::AlreadyExists {
-            return Err(Error::Exists(path.to_path_buf()));
-        }
         return Err(io_error("write", path, e));
     }
     Ok(())
@@ -373,22 +398,43 @@ fn read_state_bytes(path: &Path) -> Result<Vec<u8>, Error> {
     Ok(bytes)
 }
 
+/// The first line of a journal: `keelsign-lms-journal 1 <key id in hex>`.
+pub fn journal_header(key_id: &[u8; 16]) -> String {
+    format!("{JOURNAL_MAGIC} {JOURNAL_VERSION} {}\n", hex(key_id))
+}
+
+/// The first word of a journal's header line.
+pub const JOURNAL_MAGIC: &str = "keelsign-lms-journal";
+/// The journal format version in its header line.
+pub const JOURNAL_VERSION: u32 = 1;
+
+/// `text` is a non-empty run of ASCII digits (no sign, no spaces), as a `u64`.
+fn digits(text: &str) -> Option<u64> {
+    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    text.parse().ok()
+}
+
 /// The journal of an LMS/HSS key, opened and exclusively locked.
 #[derive(Debug)]
 pub struct Journal {
     file: File,
     path: PathBuf,
+    key_id: [u8; 16],
     high_water: Option<u64>,
 }
 
 impl Journal {
-    /// Create an empty journal at `path` (replacing an existing one only with `force`).
-    pub fn create(path: &Path, force: bool) -> Result<(), Error> {
-        write_atomically(path, b"", !force)
+    /// Create the journal of the key with key ID `key_id` at `path`: its header line and
+    /// no reservations (replacing an existing journal only with `force`).
+    pub fn create(path: &Path, key_id: &[u8; 16], force: bool) -> Result<(), Error> {
+        write_atomically(path, journal_header(key_id).as_bytes(), !force)
     }
 
     /// Open the journal at `path` and take its exclusive lock without waiting: another
-    /// process holding it is [`LmsStateError::Locked`]. Reads the highest reserved leaf.
+    /// process holding it is [`LmsStateError::Locked`]. Reads its header (the key ID it
+    /// belongs to) and the highest reserved leaf.
     pub fn open_locked(path: &Path) -> Result<Self, Error> {
         let mut file = OpenOptions::new()
             .read(true)
@@ -410,42 +456,89 @@ impl Journal {
         }
         file.seek(io::SeekFrom::Start(0))
             .map_err(|e| io_error("read", path, e))?;
-        let high_water = Self::high_water_of(path, io::BufReader::new(&file))?;
+        let (key_id, high_water) = Self::read_lines(path, io::BufReader::new(&file))?;
         Ok(Self {
             file,
             path: path.to_path_buf(),
+            key_id,
             high_water,
         })
     }
 
-    /// The highest leaf of the complete `reserved <leaf> <time>` lines; a last line
-    /// without its newline (torn by a crash) is ignored.
-    fn high_water_of(path: &Path, mut reader: impl io::BufRead) -> Result<Option<u64>, Error> {
-        let mut high = None;
+    /// The next line of `reader` without its newline: `Some((text, true))` for a complete
+    /// line, `Some((text, false))` for a last line without its newline (torn by a
+    /// crash), `None` at the end. A line of more than [`MAX_JOURNAL_LINE`] bytes (newline
+    /// not counted), complete or not, is corrupt.
+    fn next_line(
+        path: &Path,
+        reader: &mut impl io::BufRead,
+        number: u64,
+    ) -> Result<Option<(String, bool)>, Error> {
         let mut line = Vec::new();
-        let mut number = 0u64;
-        loop {
-            line.clear();
-            let read = (&mut reader)
-                .take(MAX_JOURNAL_LINE as u64 + 1)
-                .read_until(b'\n', &mut line)
-                .map_err(|e| io_error("read", path, e))?;
-            if read == 0 || line.last() != Some(&b'\n') {
-                if line.len() > MAX_JOURNAL_LINE {
-                    return Err(corrupt(
-                        path,
-                        format!("journal line {} is too long", number + 1),
-                    ));
+        let read = reader
+            .take(MAX_JOURNAL_LINE as u64 + 1)
+            .read_until(b'\n', &mut line)
+            .map_err(|e| io_error("read", path, e))?;
+        if read == 0 {
+            return Ok(None);
+        }
+        let complete = line.last() == Some(&b'\n');
+        if complete {
+            line.pop();
+        }
+        if line.len() > MAX_JOURNAL_LINE {
+            return Err(corrupt(path, format!("journal line {number} is too long")));
+        }
+        let text = String::from_utf8(line)
+            .map_err(|_| corrupt(path, format!("journal line {number} is not text")))?;
+        Ok(Some((text, complete)))
+    }
+
+    /// The key ID of the header line and the highest leaf of the complete
+    /// `reserved <leaf> <time>` lines after it; a torn last line is ignored.
+    fn read_lines(
+        path: &Path,
+        mut reader: impl io::BufRead,
+    ) -> Result<([u8; 16], Option<u64>), Error> {
+        let no_header = || {
+            corrupt(
+                path,
+                format!(
+                    "the journal does not start with its `{JOURNAL_MAGIC} {JOURNAL_VERSION} \
+                     <key id>` line"
+                ),
+            )
+        };
+        let key_id = match Self::next_line(path, &mut reader, 1)? {
+            Some((header, true)) => {
+                let mut words = header.split(' ');
+                match (words.next(), words.next(), words.next(), words.next()) {
+                    (Some(JOURNAL_MAGIC), Some(version), Some(id), None)
+                        if digits(version) == Some(u64::from(JOURNAL_VERSION)) =>
+                    {
+                        unhex(id).and_then(|b| <[u8; 16]>::try_from(b).ok())
+                    }
+                    _ => None,
                 }
-                // End of file, or a torn last line.
-                return Ok(high);
             }
+            _ => None,
+        }
+        .ok_or_else(no_header)?;
+        let mut high = None;
+        let mut number = 1u64;
+        loop {
             number += 1;
-            let text = std::str::from_utf8(&line).unwrap_or("");
-            let mut words = text.trim_end_matches('\n').split(' ');
+            let Some((text, complete)) = Self::next_line(path, &mut reader, number)? else {
+                return Ok((key_id, high));
+            };
+            if !complete {
+                // A torn last line: the append it belongs to did not finish.
+                return Ok((key_id, high));
+            }
+            let mut words = text.split(' ');
             let leaf = match (words.next(), words.next(), words.next(), words.next()) {
-                (Some("reserved"), Some(leaf), Some(time), None) if time.parse::<u64>().is_ok() => {
-                    leaf.parse::<u64>().ok()
+                (Some("reserved"), Some(leaf), Some(time), None) if digits(time).is_some() => {
+                    digits(leaf)
                 }
                 _ => None,
             }
@@ -457,6 +550,11 @@ impl Journal {
             })?;
             high = high.max(Some(leaf));
         }
+    }
+
+    /// The key ID the journal's header binds it to.
+    pub fn key_id(&self) -> &[u8; 16] {
+        &self.key_id
     }
 
     /// The highest leaf the journal records as reserved.
@@ -495,7 +593,8 @@ pub fn create(
         StateFile::new(key, caches).to_json().as_bytes(),
         !force,
     )?;
-    Journal::create(&journal, force)?;
+    let key_id = keelsign_verify::key_id_of(key.public_key());
+    Journal::create(&journal, &key_id, force)?;
     Ok((state, journal))
 }
 
@@ -524,7 +623,18 @@ impl Reservation {
 /// Reserve the next leaf of the LMS/HSS key `key` (the key file `key_path`), before any
 /// signature is computed. See the module documentation for the checks and their order.
 pub fn reserve(key_path: &Path, key: &HssPrivateKey) -> Result<Reservation, Error> {
-    let mut journal = Journal::open_locked(&journal_path(key_path))?;
+    let journal_path = journal_path(key_path);
+    let mut journal = Journal::open_locked(&journal_path)?;
+    let expected = keelsign_verify::key_id_of(key.public_key());
+    if *journal.key_id() != expected {
+        return Err(state_error(
+            &journal_path,
+            LmsStateError::ForeignKey {
+                expected: hex(&expected),
+                found: hex(journal.key_id()),
+            },
+        ));
+    }
     let state_path = state_path(key_path);
     let mut state = StateFile::read(key_path, key)?;
     let leaf = state.next_leaf;
@@ -617,12 +727,16 @@ mod tests {
         (path, key)
     }
 
+    /// The `reserved` lines of the journal (after its header line).
     fn journal_lines(key_path: &Path) -> Vec<String> {
-        fs::read_to_string(journal_path(key_path))
-            .expect("journal")
-            .lines()
-            .map(str::to_owned)
-            .collect()
+        let text = fs::read_to_string(journal_path(key_path)).expect("journal");
+        let mut lines = text.lines();
+        assert!(
+            lines
+                .next()
+                .is_some_and(|h| h.starts_with("keelsign-lms-journal 1 "))
+        );
+        lines.map(str::to_owned).collect()
     }
 
     fn reason(e: Error) -> LmsStateError {
@@ -746,6 +860,31 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert!(journal_lines(&path).is_empty(), "nothing reserved");
+        // Another key's journal (its header) is refused before the state file is read.
+        let other_key = other;
+        Journal::create(
+            &journal_path(&path),
+            &keelsign_verify::key_id_of(other_key.public_key()),
+            true,
+        )
+        .expect("foreign journal");
+        let e = reserve(&path, &key).expect_err("foreign journal");
+        assert_eq!(e.exit_code(), 10);
+        assert!(
+            e.to_string()
+                .contains("k.pem.journal belongs to another key"),
+            "{e}"
+        );
+        match reason(e) {
+            LmsStateError::ForeignKey { expected, found } => {
+                assert_eq!(expected, hex(&keelsign_verify::key_id_of(key.public_key())));
+                assert_eq!(
+                    found,
+                    hex(&keelsign_verify::key_id_of(other_key.public_key()))
+                );
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
@@ -764,11 +903,39 @@ mod tests {
             matches!(reason(reserve(&path, &key).expect_err("x")), LmsStateError::Corrupt(r) if r.contains("cached root"))
         );
         fs::write(state_path(&path), &good).expect("write");
-        fs::write(journal_path(&path), b"reserved x 1\n").expect("write");
-        assert!(
-            matches!(reason(reserve(&path, &key).expect_err("x")), LmsStateError::Corrupt(r) if r.contains("journal line 1"))
-        );
-        fs::write(journal_path(&path), b"").expect("write");
+        let header = journal_header(&keelsign_verify::key_id_of(key.public_key()));
+        let bad_journal = |body: &str| {
+            fs::write(journal_path(&path), format!("{header}{body}")).expect("write");
+            match reason(reserve(&path, &key).expect_err("refused")) {
+                LmsStateError::Corrupt(r) => r,
+                other => panic!("{body:?}: {other:?}"),
+            }
+        };
+        assert!(bad_journal("reserved x 1\n").contains("journal line 2"));
+        // Digits only: no sign, no spaces.
+        assert!(bad_journal("reserved +5 1\n").contains("journal line 2"));
+        assert!(bad_journal("reserved 5 -1\n").contains("journal line 2"));
+        assert!(bad_journal("reserved  5 1\n").contains("journal line 2"));
+        // The length cap holds for complete and torn lines alike.
+        let long = format!("reserved {} 1", "1".repeat(MAX_JOURNAL_LINE));
+        assert!(bad_journal(&format!("{long}\n")).contains("too long"));
+        assert!(bad_journal(&long).contains("too long"));
+        // A line of exactly the cap is fine, and so is a torn one below it.
+        let at_cap = format!("reserved 0 {}", "0".repeat(MAX_JOURNAL_LINE - 11));
+        assert_eq!(at_cap.len(), MAX_JOURNAL_LINE);
+        fs::write(journal_path(&path), format!("{header}{at_cap}\nreserved 1")).expect("write");
+        let journal = Journal::open_locked(&journal_path(&path)).expect("open");
+        assert_eq!(journal.high_water(), Some(0));
+        drop(journal);
+        // A missing or wrong header.
+        for body in ["", "reserved 0 1\n", "keelsign-lms-journal 2 00\n"] {
+            fs::write(journal_path(&path), body).expect("write");
+            assert!(
+                matches!(reason(reserve(&path, &key).expect_err("x")), LmsStateError::Corrupt(r) if r.contains("does not start with")),
+                "{body:?}"
+            );
+        }
+        fs::write(journal_path(&path), &header).expect("write");
         // Missing.
         fs::remove_file(state_path(&path)).expect("rm");
         assert_eq!(
@@ -781,7 +948,12 @@ mod tests {
             reason(reserve(&path, &key).expect_err("x")),
             LmsStateError::Missing
         );
-        Journal::create(&journal_path(&path), false).expect("journal");
+        Journal::create(
+            &journal_path(&path),
+            &keelsign_verify::key_id_of(key.public_key()),
+            false,
+        )
+        .expect("journal");
         // Exhausted: the last leaf signs, then the key is used up.
         StateFile::set_next_leaf(&path, 31).expect("skip ahead");
         assert!(StateFile::set_next_leaf(&path, 30).is_err(), "never back");

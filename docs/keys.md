@@ -55,7 +55,8 @@ The same OID identifies the private key and the public key. The `AlgorithmIdenti
 `parameters` field is absent for all of them (RFC 9881 §2: MUST be absent; RFC 8410 §3
 and RFC 8708 §3: absent); a key file with parameters present, even `NULL`, is rejected.
 ML-DSA-87 is not generated: keelsign images use ML-DSA-44/65. `pubkey --alg` with an
-LMS/HSS value checks that the key is an LMS/HSS key (not its height).
+LMS/HSS value checks that the key is an LMS/HSS key whose top-level tree has that
+height; a key of another height fails with exit code 6, naming both parameter sets.
 
 ## Private key files
 
@@ -149,8 +150,9 @@ recomputes at most 1,024 leaves, about 0.1 s on the same machine.
   them where its policy allows). Neither are more than two levels.
 - The one-time keys follow RFC 8554 Appendix A,
   `x_q[i] = H(I || u32(q) || u16(i) || u8(0xff) || SEED)`, and the randomizer `C` of
-  each signature is derived the same way with `i = 0xFFFD`, so signing is
-  deterministic. keelsign's own signer is checked against the independent signer hsslms
+  each signature is derived the same way with `i = 0xFFFD` (the convention of Cisco's
+  hash-sigs reference implementation; RFC 8554 Appendix A specifies only the one-time
+  keys), so signing is deterministic. keelsign's own signer is checked against the independent signer hsslms
   0.1.3 (byte-identical public keys and signatures for the fixture cases 301, 302 and
   303) and every signature it writes is verified with keelsign-verify first.
 
@@ -216,8 +218,11 @@ same leaf let anyone forge signatures, so the key carries state: which leaves ar
   spare `sign` from recomputing the whole tree. It is only ever replaced whole: written
   to a temporary file `.FILE.state.keelsign-tmp-PID`, flushed to disk, renamed over the
   old file, and the directory flushed.
-- `FILE.journal`: an append-only log, one line `reserved LEAF UNIX-SECONDS` per
-  signature, each flushed to disk before `sign` goes on. It is also the key's lock.
+- `FILE.journal`: an append-only log. Its first line, `keelsign-lms-journal 1 KEYID`
+  (the key ID in hex), binds it to the key; then one line `reserved LEAF UNIX-SECONDS`
+  per signature (digits only), each flushed to disk before `sign` goes on. A journal
+  without that header, or with another key's ID, is refused (exit 10). It is also the
+  key's lock.
 
 `sign` with an LMS/HSS key, after it has parsed the image, loaded the keys and computed
 the image digest `M`, and before it computes any signature:
@@ -259,6 +264,9 @@ Rules for an LMS/HSS key:
   its public key on the devices, then switch.
 - `keygen` refuses to replace an existing key, state file or journal without `--force`
   (exit 3). `--force` writes a new key with fresh state; the old key's state is gone.
+  Never run `keygen --force` over a key while a `sign` with it is running: the running
+  `sign` can then write the old key's state over the new key's state file, and the new
+  key is refused with exit code 10 (its state belongs to another key) from then on.
 
 ## Passphrase encryption
 

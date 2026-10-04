@@ -216,6 +216,21 @@ fn missing_rolled_back_foreign_or_corrupt_state_is_refused_with_exit_10() {
     refuse("k.pem.journal is missing");
     std::fs::rename(dir.join("journal.bak"), &journal).expect("mv back");
 
+    // A journal without its header line, or another key's journal.
+    let good_journal = std::fs::read(&journal).expect("read");
+    std::fs::write(&journal, b"").expect("write");
+    refuse("does not start with its `keelsign-lms-journal 1 <key id>` line");
+    std::fs::write(&journal, b"reserved 0 1\n").expect("write");
+    refuse("does not start with its `keelsign-lms-journal 1 <key id>` line");
+    std::fs::write(
+        &journal,
+        b"keelsign-lms-journal 1 00000000000000000000000000000000\n",
+    )
+    .expect("write");
+    refuse("k.pem.journal belongs to another key");
+    std::fs::write(&journal, &good_journal).expect("restore");
+    assert_eq!(next_leaf(&key), 0, "no refusal reserves a leaf");
+
     // Rolled back: sign twice, then restore the state file copied after the first sign.
     assert_exit(&sign(&key, &image(), &dir.join("a.bin"), &[]), 0);
     let after_first = std::fs::read(&state).expect("read");
@@ -424,6 +439,28 @@ fn images_at_leaves_0_1_and_1023_verify_with_keelsign_verify_and_cnsa_2_0() {
     .expect("fixture parses");
     assert_eq!((summary.total, summary.passed), (3, 3));
     assert_eq!(ids, [700, 701, 702]);
+    // What the boards' `lms_kat` test decides with this fixture as the
+    // KEELSIGN_LMS_TARGET override (TARGET_CASES = 3, TARGET_OVERRIDDEN): the KAT passes and
+    // the rotation check, which needs cases this fixture lacks, is skipped. With the
+    // default fixture it still runs.
+    assert_eq!(lms_kat::check_kat_summary(&summary, 3), Ok(()));
+    assert_eq!(
+        lms_kat::target_rotation(&bytes, true),
+        Ok(lms_kat::Rotation::Skipped)
+    );
+    assert_eq!(
+        lms_kat::target_rotation(&bytes, false),
+        Err("no rotation key A")
+    );
+    let overridden = std::hint::black_box(lms_kat::TARGET_OVERRIDDEN);
+    assert!(
+        !overridden,
+        "keelsign tests run with the default lms-kat fixture"
+    );
+    assert_eq!(
+        lms_kat::target_rotation(lms_kat::LMS_TARGET, lms_kat::TARGET_OVERRIDDEN),
+        Ok(lms_kat::Rotation::Checked)
+    );
     println!(
         "on-target inputs (docs/signing.md#on-target-check): {}",
         dir.display()

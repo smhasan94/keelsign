@@ -1066,7 +1066,15 @@ fn keygen_lms_h10_rows_round_trip_through_pubkey() {
             state_json["levels"].as_array().map(Vec::len),
             Some(levels as usize)
         );
-        assert_eq!(std::fs::read(&journal).expect("journal"), b"");
+        // The journal holds only its header line, binding it to the key ID.
+        let key_id = identity_line(&printed)
+            .strip_prefix("key id: ")
+            .expect("key id")
+            .to_owned();
+        assert_eq!(
+            std::fs::read_to_string(&journal).expect("journal"),
+            format!("keelsign-lms-journal 1 {key_id}\n")
+        );
 
         let mut pub_args: Vec<&dyn AsRef<std::ffi::OsStr>> =
             vec![&"pubkey", &"--key", &key_path, &"--alg", &alg];
@@ -1133,6 +1141,25 @@ fn keygen_lms_h10_rows_round_trip_through_pubkey() {
         assert_exit(&out, 2);
     }
     assert!(!dir.join("x.pem").exists() && !dir.join("y.pem").exists());
+
+    // `pubkey --alg` with another LMS height is a parameter-set mismatch naming both.
+    let out = keelsign(&[
+        &"pubkey",
+        &"--key",
+        &dir.join("pem.key"),
+        &"--alg",
+        &"lms-sha256-m32-h15",
+        &"--out",
+        &dir.join("h15.pub.pem"),
+    ]);
+    assert_exit(&out, 6);
+    let err = stderr(&out);
+    assert!(
+        err.contains("LMS_SHA256_M32_H10/LMOTS_SHA256_N32_W8, L=1")
+            && err.contains("LMS_SHA256_M32_H15"),
+        "{err}"
+    );
+    assert!(!dir.join("h15.pub.pem").exists());
 
     // `pubkey --alg` with another family is an algorithm mismatch.
     let out = keelsign(&[

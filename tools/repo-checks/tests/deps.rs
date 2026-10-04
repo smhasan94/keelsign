@@ -542,3 +542,61 @@ fn stack_paint_is_only_unsafe_exception_and_not_shipped() {
         }
     }
 }
+
+/// SHA-67: the keelsign CLI's in-house LMS/HSS signer uses sha2, a normal dependency
+/// pinned exactly with default features off, at the version keelsign-verify pins, so the
+/// lockfile holds one sha2.
+#[test]
+fn sha2_pinned_exact_in_keelsign() {
+    const SHA2_PIN: &str = "0.11.0";
+    let manifest = read("keelsign/Cargo.toml");
+    let (section, line) = dependency_line(&manifest, "sha2");
+    assert_eq!(section, "[dependencies]", "sha2 is a normal dependency");
+    for needle in [
+        format!("version = \"={SHA2_PIN}\""),
+        "default-features = false".to_owned(),
+    ] {
+        assert!(
+            line.contains(&needle),
+            "sha2 must have `{needle}`: `{line}`"
+        );
+    }
+    let (_, verify_line) = dependency_line(&read("keelsign-verify/Cargo.toml"), "sha2");
+    assert!(
+        verify_line.contains(&format!("version = \"={SHA2_PIN}\"")),
+        "keelsign and keelsign-verify pin the same sha2: `{verify_line}`"
+    );
+    let versions: Vec<String> = lock_packages(&read("Cargo.lock"))
+        .into_iter()
+        .filter(|(name, _, _)| name == "sha2")
+        .map(|(_, version, _)| version)
+        .collect();
+    assert_eq!(versions, [SHA2_PIN], "Cargo.lock: one sha2, {SHA2_PIN}");
+}
+
+/// SHA-67: keelsign's signer KAT uses the unpublished benches/lms-kat crate as a
+/// dev-dependency by path only (no version), so `cargo publish` drops it from the
+/// published manifest, and never as a normal or build dependency.
+#[test]
+fn lms_kat_is_a_path_only_dev_dependency() {
+    let manifest = read("keelsign/Cargo.toml");
+    let (section, line) = dependency_line(&manifest, "lms-kat");
+    assert_eq!(
+        section, "[dev-dependencies]",
+        "lms-kat is a dev-dependency only"
+    );
+    assert_eq!(line, "lms-kat = { path = \"../benches/lms-kat\" }");
+    assert_eq!(
+        manifest
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#') && l.contains("lms-kat"))
+            .count(),
+        1,
+        "keelsign/Cargo.toml names lms-kat on one line"
+    );
+    let lms_kat = read("benches/lms-kat/Cargo.toml");
+    assert!(
+        lms_kat.lines().any(|l| l.trim() == "publish = false"),
+        "lms-kat is never published"
+    );
+}

@@ -143,6 +143,15 @@ pub enum Error {
         /// How many signatures the key could make.
         leaves: u64,
     },
+    /// The key file holds an LMS/HSS key of another parameter set than `--alg` asks for.
+    ParameterSetMismatch {
+        /// The key file.
+        path: PathBuf,
+        /// The key's parameter set, for example `LMS_SHA256_M32_H15/LMOTS_SHA256_N32_W8, L=1`.
+        found: String,
+        /// The top-level LMS parameter set `--alg` names, for example `LMS_SHA256_M32_H10`.
+        requested: String,
+    },
     /// The key file holds a different algorithm than `--alg` asks for.
     AlgorithmMismatch {
         /// The key file.
@@ -167,7 +176,9 @@ impl Error {
                 | KeyFileError::WrongPassphrase => 4,
                 KeyFileError::Corrupt(_) | KeyFileError::Unsupported(_) => 5,
             },
-            Self::AlgorithmMismatch { .. } | Self::WrongKeyKind { .. } => 6,
+            Self::AlgorithmMismatch { .. }
+            | Self::ParameterSetMismatch { .. }
+            | Self::WrongKeyKind { .. } => 6,
             Self::Image { .. } => 7,
             Self::AlreadySigned { .. } => 8,
             Self::NotVerified { .. } => 9,
@@ -280,6 +291,16 @@ impl fmt::Display for Error {
                     ),
                 }
             }
+            Self::ParameterSetMismatch {
+                path,
+                found,
+                requested,
+            } => write!(
+                f,
+                "{} holds an LMS/HSS key of parameter set {found}, but --alg asks for \
+                 {requested} (top level)",
+                path.display()
+            ),
             Self::LeafIndexExhausted { key, leaves } => write!(
                 f,
                 "LeafIndexExhausted: all {leaves} leaves of {} are used; generate a new key",
@@ -352,6 +373,14 @@ mod tests {
                     path: path(),
                     found: KeyAlgorithm::MlDsa44,
                     requested: KeyAlgorithm::MlDsa65,
+                },
+                6,
+            ),
+            (
+                Error::ParameterSetMismatch {
+                    path: path(),
+                    found: "LMS_SHA256_M32_H15/LMOTS_SHA256_N32_W8, L=1".into(),
+                    requested: "LMS_SHA256_M32_H10".into(),
                 },
                 6,
             ),

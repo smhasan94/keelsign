@@ -21,8 +21,8 @@ use cortex_m::peripheral::DWT;
 use defmt::info;
 use defmt_rtt as _;
 use lms_kat::{
-    Case, Error, Expect, Fixture, KeyInfo, LMS_TARGET, TARGET_CASES, check_rotation, ids,
-    result_name, run_fixture, verify_case,
+    Case, Error, Expect, Fixture, KeyInfo, LMS_TARGET, Rotation, TARGET_CASES, TARGET_OVERRIDDEN,
+    check_kat_summary, result_name, run_fixture, target_rotation, verify_case,
 };
 use mldsa_kat::measure::Cycles;
 use stack_paint::Watermark;
@@ -79,26 +79,23 @@ fn kat() -> Result<(), &'static str> {
         "KAT board={=str} set=LMS passed={=u32}/{=u32}",
         BOARD, summary.passed, summary.total
     );
-    if summary.total != TARGET_CASES {
-        return Err("fixture does not hold the expected number of cases");
-    }
-    if summary.all_passed() {
-        Ok(())
-    } else {
-        Err("a KAT case did not match its expectation")
-    }
+    check_kat_summary(&summary, TARGET_CASES)
 }
 
-/// The key-rotation check with the fixture's keys A and B.
+/// The key-rotation check with the fixture's keys A and B (`check_rotation` through
+/// `lms_kat::target_rotation`). With the `KEELSIGN_LMS_TARGET` override fixture
+/// (docs/signing.md, "On-target check"), which has no rotation cases, it is skipped.
 fn rotation() -> Result<(), &'static str> {
-    let fixture = Fixture::parse(LMS_TARGET).map_err(|_| "fixture does not parse")?;
-    let a = fixture.case(ids::ROTATION_A).ok_or("no rotation key A")?;
-    let b = fixture.case(ids::ROTATION_B).ok_or("no rotation key B")?;
-    check_rotation(&a, &b)?;
-    info!(
-        "ROTATION board={=str} {{A,B}} accepts B and A, {{A}} rejects B: ok",
-        BOARD
-    );
+    match target_rotation(LMS_TARGET, TARGET_OVERRIDDEN)? {
+        Rotation::Checked => info!(
+            "ROTATION board={=str} {{A,B}} accepts B and A, {{A}} rejects B: ok",
+            BOARD
+        ),
+        Rotation::Skipped => info!(
+            "ROTATION board={=str} rotation: skipped (override fixture has no rotation cases)",
+            BOARD
+        ),
+    }
     Ok(())
 }
 

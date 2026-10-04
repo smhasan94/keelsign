@@ -53,6 +53,12 @@ pub const LMS_TARGET: &[u8] = include_bytes!(env!("LMS_KAT_TARGET_FIXTURE"));
 /// embedded fixture by `build.rs`.
 pub const TARGET_CASES: u32 = parse_u32(env!("LMS_KAT_TARGET_CASES"));
 
+/// Whether [`LMS_TARGET`] is the `KEELSIGN_LMS_TARGET` override rather than
+/// `fixtures/lms-target.bin` (`build.rs`). An override fixture (keelsign-signed images,
+/// docs/signing.md "On-target check") has no rotation cases, so [`target_rotation`]
+/// skips the rotation check for it.
+pub const TARGET_OVERRIDDEN: bool = parse_u32(env!("LMS_KAT_TARGET_OVERRIDDEN")) != 0;
+
 /// The decimal number `text` (`build.rs` writes it); 0 for an empty string.
 const fn parse_u32(text: &str) -> u32 {
     let mut digits = text.as_bytes();
@@ -552,6 +558,42 @@ impl KeyInfo {
             lmots_typecode: next()?,
         })
     }
+}
+
+/// Whether [`target_rotation`] ran the rotation check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rotation {
+    /// [`check_rotation`] ran with the fixture's rotation keys A and B and passed.
+    Checked,
+    /// The fixture is an override (`overridden`), which has no rotation cases.
+    Skipped,
+}
+
+/// The on-target `lms_kat` verdict on a fixture run: `summary` must have `expected` cases
+/// and every one must match its expectations.
+pub fn check_kat_summary(summary: &Summary, expected: u32) -> Result<(), &'static str> {
+    if summary.total != expected {
+        return Err("fixture does not hold the expected number of cases");
+    }
+    if summary.all_passed() {
+        Ok(())
+    } else {
+        Err("a KAT case did not match its expectation")
+    }
+}
+
+/// The on-target rotation check of the fixture `bytes`: [`check_rotation`] with cases
+/// [`ids::ROTATION_A`] and [`ids::ROTATION_B`], or [`Rotation::Skipped`] when
+/// `overridden` (pass [`TARGET_OVERRIDDEN`] for [`LMS_TARGET`]).
+pub fn target_rotation(bytes: &[u8], overridden: bool) -> Result<Rotation, &'static str> {
+    if overridden {
+        return Ok(Rotation::Skipped);
+    }
+    let fixture = Fixture::parse(bytes).map_err(|_| "fixture does not parse")?;
+    let a = fixture.case(ids::ROTATION_A).ok_or("no rotation key A")?;
+    let b = fixture.case(ids::ROTATION_B).ok_or("no rotation key B")?;
+    check_rotation(&a, &b)?;
+    Ok(Rotation::Checked)
 }
 
 /// The key-rotation check (SHA-171 TP3): with `a` and `b` signed by two different keys
