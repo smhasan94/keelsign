@@ -90,9 +90,16 @@ fn publishable_versions_are_0_0_1() {
 }
 
 /// keelsign depends on keelsign-verify by path and by the exact workspace version, so
-/// `cargo publish` rewrites the dependency to that version on crates.io. It enables no
-/// keelsign-verify features: a feature here would be unified into every workspace build
-/// and remove CI's feature-off runs.
+/// `cargo publish` rewrites the dependency to that version on crates.io.
+///
+/// Since SHA-51 it enables exactly the `ed25519` and `ml-dsa` features: `sign`
+/// self-verifies every image it writes under `PqOnly` (and `Hybrid` with an Ed25519 key),
+/// which needs both halves compiled in (SHA-44 deferred "the CLI enables ml-dsa" here).
+/// Cargo unifies these features into every workspace build that includes keelsign
+/// (`cargo test --workspace`, the workspace clippy runs), so the feature-off states are
+/// covered by CI steps that select packages alone: `cargo test -p keelsign-verify` in four
+/// feature states, the `-p keelsign-verify` clippy runs, and `cargo test -p policy-kat`
+/// with `ml-dsa` off (repo_checks::cli::ci_runs_policy_kat_with_ml_dsa_off_and_the_imgtool_tests).
 #[test]
 fn keelsign_requires_keelsign_verify_at_the_workspace_version() {
     let root = read("Cargo.toml");
@@ -154,8 +161,8 @@ fn keelsign_requires_keelsign_verify_at_the_workspace_version() {
         );
     }
     assert!(
-        !line.contains("features"),
-        "keelsign must enable no keelsign-verify features: `{line}`"
+        line.contains("features = [\"ed25519\", \"ml-dsa\"]"),
+        "keelsign must enable exactly keelsign-verify's ed25519 and ml-dsa features: `{line}`"
     );
 }
 

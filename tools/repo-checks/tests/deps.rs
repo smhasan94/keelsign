@@ -1,6 +1,7 @@
 //! Dependency rules: the ml-dsa pin (CLAUDE.md; bench crates and, since SHA-44,
-//! keelsign-verify's `ml-dsa` feature, heap-free), the ed25519-dalek pin (SHA-46) and the
-//! scoped `unsafe` exception for the measurement-only `benches/stack-paint` crate.
+//! keelsign-verify's `ml-dsa` feature, heap-free), the ed25519-dalek pin (SHA-46), the
+//! keelsign CLI's JSON dependencies (SHA-51) and the scoped `unsafe` exception for the
+//! measurement-only `benches/stack-paint` crate.
 
 use repo_checks::{SHIPPED_CRATES, workspace_root};
 use std::fs;
@@ -291,6 +292,58 @@ fn ed25519_dalek_pinned_exact() {
             );
         }
     }
+}
+
+/// The section and line of the dependency `name` in a manifest (`name = {` at the start
+/// of a line), or panic.
+fn dependency_line(manifest: &str, name: &str) -> (String, String) {
+    let mut section = String::new();
+    let mut found = Vec::new();
+    for line in manifest.lines() {
+        let l = line.trim();
+        if l.starts_with('[') {
+            section = l.to_owned();
+        } else if l.starts_with(&format!("{name} = {{")) {
+            found.push((section.clone(), l.to_owned()));
+        }
+    }
+    assert_eq!(found.len(), 1, "exactly one `{name}` dependency: {found:?}");
+    found.remove(0)
+}
+
+/// SHA-51: `keelsign inspect --json` writes JSON with serde_json, pinned exactly with
+/// default features off (`std` only: no `preserve_order`, no float tricks), and the
+/// lockfile resolves exactly that version.
+#[test]
+fn cli_json_dependencies_pinned_exact() {
+    const SERDE_JSON_PIN: &str = "1.0.151";
+    let manifest = read("keelsign/Cargo.toml");
+    let (section, line) = dependency_line(&manifest, "serde_json");
+    assert_eq!(
+        section, "[dependencies]",
+        "serde_json is a normal dependency"
+    );
+    for needle in [
+        format!("version = \"={SERDE_JSON_PIN}\""),
+        "default-features = false".to_owned(),
+        "features = [\"std\"]".to_owned(),
+    ] {
+        assert!(
+            line.contains(&needle),
+            "serde_json must have `{needle}`: `{line}`"
+        );
+    }
+    let lock = read("Cargo.lock");
+    let versions: Vec<String> = lock_packages(&lock)
+        .into_iter()
+        .filter(|(name, _, _)| name == "serde_json")
+        .map(|(_, version, _)| version)
+        .collect();
+    assert_eq!(
+        versions,
+        [SERDE_JSON_PIN],
+        "Cargo.lock: serde_json must resolve to exactly {SERDE_JSON_PIN}"
+    );
 }
 
 /// Every Cargo.toml in the repository outside `target/` directories.
