@@ -1,0 +1,13 @@
+[target.thumbv8m.main-none-eabihf]
+# `cargo run` flashes the application at 0x10007200 through the Raspberry Pi Debug Probe (SWD)
+# and streams defmt over RTT; the embassy-boot bootloader must already be at 0x10000000
+# (docs/embassy.md).
+runner = "probe-rs run --chip RP235x"
+# flip-link puts the stack below .bss/.data so a stack overflow faults instead of corrupting memory.
+rustflags = ["-C", "linker=flip-link"]
+
+[build]
+target = "thumbv8m.main-none-eabihf"
+
+[env]
+DEFMT_LOG = "info"

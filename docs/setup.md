@@ -230,20 +230,25 @@ The exact commands, the measurement method and the results are in
 
 ## CI
 
-`.github/workflows/ci.yml` has two jobs:
+`.github/workflows/ci.yml` has these jobs:
 
 - `ci`: host fmt, clippy and tests for the root workspace (including the host ML-DSA
   KATs in `benches/mldsa-kat`), the packaging repo-checks (`--test packaging -- --ignored`)
   and the publish dry runs.
-- `cross-build`: for each example (`nrf52840-hello` on `thumbv7em-none-eabihf`,
-  `rp2350-hello` on `thumbv8m.main-none-eabihf`) it installs the target and flip-link and
+- `verify-cross`: `keelsign-verify` and (SHA-55) `keelsign-embassy` with its board
+  module, for both targets with every feature state.
+- `cross-build`: for each example (`nrf52840-hello` and the embassy-boot application
+  `nrf52840-boot-app` on `thumbv7em-none-eabihf`, `rp2350-hello` and `rp2350-boot-app` on
+  `thumbv8m.main-none-eabihf`; docs/embassy.md) it installs the target and flip-link and
   runs `cargo fmt --check`, `cargo clippy --locked --target <triple> -- -D warnings` and
-  `cargo build --release --locked --target <triple>` in the example directory. For each
+  `cargo build --release --locked --target <triple>` in the example directory (the
+  boot apps also `cargo clippy` with `--features b,soak`). For each
   bench project (`benches/nrf52840-mldsa`, `benches/rp2350-mldsa`) it runs
   `cargo fmt --check`, `cargo clippy --locked --target <triple> --all-targets -- -D warnings`,
   `cargo test --no-run --release --locked --target <triple>` (builds the on-target test
   binary without running it) and `cargo build --release --locked --target <triple> --bins`.
 
 CI never flashes a board. The ignored repo-checks tests (`toolchain::*`,
-`examples::*_cross_builds`, `benches::*_cross_builds`, `benches::flash_sizes_script_runs`)
+`examples::*_cross_builds`, `embassy::*_cross_build*`, `benches::*_cross_builds`,
+`benches::flash_sizes_script_runs`)
 are for local machines; CI covers the cross-builds in the `cross-build` job instead.

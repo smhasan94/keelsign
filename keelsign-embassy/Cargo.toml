@@ -1,0 +1,47 @@
+[package]
+name = "keelsign-embassy"
+description = "embassy-boot adapter for keelsign: verify a post-quantum signed MCUboot image in the DFU slot before marking it for swap (pre-release, API unstable)."
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# The Ed25519 half of hybrid images (`Policy::ClassicalOnly` / `Policy::Hybrid`).
+ed25519 = ["keelsign-verify/ed25519"]
+# ML-DSA-44/65 verification. Its verify needs about 98 KB / 158 KB of stack (SHA-169).
+ml-dsa = ["keelsign-verify/ml-dsa"]
+# defmt logging of rejects and accepts, and defmt::Format for the error types. Off by
+# default (D6).
+defmt = ["dep:defmt", "embassy-boot/defmt", "embassy-embedded-hal/defmt", "embassy-sync/defmt"]
+# Board helpers (`nrf` / `rp` modules). The application picks the chip feature of the HAL
+# (for example `embassy-nrf/nrf52840` or `embassy-rp/rp235xa`).
+nrf = ["dep:embassy-nrf"]
+rp = ["dep:embassy-rp"]
+
+[dependencies]
+keelsign-verify = { path = "../keelsign-verify", version = "=0.0.1" }
+# The embassy-boot 0.7.0 updater. Its ed25519 features must stay off: they remove
+# `mark_updated`, which this adapter calls only after keelsign-verify accepts the image.
+embassy-boot = { version = "=0.7.0", default-features = false }
+embassy-embedded-hal = { version = "=0.6.0", default-features = false }
+embassy-sync = { version = "=0.8.0", default-features = false }
+embedded-storage = { version = "=0.3.2", default-features = false }
+embedded-storage-async = { version = "=0.4.2", default-features = false }
+defmt = { version = "=1.1.1", optional = true }
+# The HAL versions examples/*-hello pin; embassy-boot-nrf 0.12.0 / embassy-boot-rp 0.10.0
+# pair them with embassy-boot 0.7.0.
+embassy-nrf = { version = "=0.11.0", optional = true, default-features = false }
+embassy-rp = { version = "=0.10.0", optional = true, default-features = false }
+
+[dev-dependencies]
+# Polls the async updater in host tests.
+embassy-futures = "=0.1.2"
+# The SHA-46 policy matrix (images, keys, expected verdicts) for the mark / no-mark
+# sweep. Unpublished and path-only.
+policy-kat = { path = "../benches/policy-kat" }
+
+[lints]
+workspace = true

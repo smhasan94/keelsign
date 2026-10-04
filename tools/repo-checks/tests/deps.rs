@@ -600,3 +600,139 @@ fn lms_kat_is_a_path_only_dev_dependency() {
         "lms-kat is never published"
     );
 }
+
+/// SHA-55: keelsign-embassy's dependencies, as (name, exact version). The HAL pins are the
+/// ones `examples/*-hello` use; embassy-boot 0.7.0 is what embassy-boot-nrf 0.12.0 and
+/// embassy-boot-rp 0.10.0 pair with those HALs.
+const EMBASSY_PINS: [(&str, &str); 9] = [
+    ("keelsign-verify", "0.0.1"),
+    ("embassy-boot", "0.7.0"),
+    ("embassy-embedded-hal", "0.6.0"),
+    ("embassy-sync", "0.8.0"),
+    ("embedded-storage", "0.3.2"),
+    ("embedded-storage-async", "0.4.2"),
+    ("defmt", "1.1.1"),
+    ("embassy-nrf", "0.11.0"),
+    ("embassy-rp", "0.10.0"),
+];
+
+/// Lockfiles that resolve keelsign-embassy's embassy-boot: the root workspace (every
+/// pinned crate) and the boot-app examples (the crates their board needs).
+const EMBASSY_LOCKFILES: [&str; 3] = [
+    "Cargo.lock",
+    "examples/nrf52840-boot-app/Cargo.lock",
+    "examples/rp2350-boot-app/Cargo.lock",
+];
+
+/// SHA-55 AC1: keelsign-embassy pins every dependency exactly, its HAL pins match the
+/// hello examples, and every lockfile resolves exactly the pinned embassy crates. embassy-
+/// boot's own ed25519 features stay off: no `salty` and no ed25519-dalek 2.x in any lock
+/// (they would remove `mark_updated`).
+#[test]
+fn embassy_dependencies_pinned_exact() {
+    let manifest = read("keelsign-embassy/Cargo.toml");
+    for (krate, pin) in EMBASSY_PINS {
+        let (section, line) = dependency_line(&manifest, krate);
+        assert_eq!(
+            section, "[dependencies]",
+            "{krate} is a normal dependency of keelsign-embassy"
+        );
+        assert!(
+            line.contains(&format!("version = \"={pin}\"")),
+            "keelsign-embassy: {krate} must be pinned to ={pin}: `{line}`"
+        );
+        if krate.starts_with("embassy-") || krate.starts_with("embedded-") {
+            assert!(
+                line.contains("default-features = false"),
+                "keelsign-embassy: {krate} must disable default features: `{line}`"
+            );
+        }
+    }
+    for feature_line in manifest.lines().filter(|l| l.starts_with("defmt =")) {
+        assert!(
+            !feature_line.contains("ed25519") && !feature_line.contains("salty"),
+            "the defmt feature must not turn on embassy-boot's verify: `{feature_line}`"
+        );
+    }
+    assert!(
+        !manifest.contains("embassy-boot/ed25519") && !manifest.contains("embassy-boot/_verify"),
+        "keelsign-embassy must never enable embassy-boot's ed25519 features"
+    );
+    // The HAL pins equal the hello examples' pins.
+    for (example, hal) in [
+        ("examples/nrf52840-hello/Cargo.toml", "embassy-nrf"),
+        ("examples/rp2350-hello/Cargo.toml", "embassy-rp"),
+    ] {
+        let pin = EMBASSY_PINS
+            .iter()
+            .find(|(k, _)| *k == hal)
+            .map(|(_, v)| *v)
+            .expect("HAL pinned");
+        let text = read(example);
+        let line = text
+            .lines()
+            .find(|l| l.starts_with(&format!("{hal} = {{")))
+            .unwrap_or_else(|| panic!("{example} must depend on {hal}"));
+        assert!(
+            line.contains(&format!("version = \"={pin}\"")),
+            "{example}: {hal} must be ={pin}, as keelsign-embassy pins it: `{line}`"
+        );
+    }
+    for lockfile in EMBASSY_LOCKFILES {
+        let lock = read(lockfile);
+        let packages = lock_packages(&lock);
+        for (krate, pin) in EMBASSY_PINS {
+            if krate == "keelsign-verify" {
+                continue;
+            }
+            let versions: Vec<&str> = packages
+                .iter()
+                .filter(|(name, _, _)| name == krate)
+                .map(|(_, version, _)| version.as_str())
+                .collect();
+            // The root lock resolves every optional dependency; a boot app only its board's
+            // HAL and (with its `defmt` feature) defmt.
+            let required = lockfile == "Cargo.lock"
+                || !matches!(krate, "embassy-nrf" | "embassy-rp")
+                || lockfile.contains(if krate == "embassy-nrf" {
+                    "nrf52840"
+                } else {
+                    "rp2350"
+                });
+            if required {
+                assert_eq!(
+                    versions,
+                    [pin],
+                    "{lockfile}: {krate} must resolve to exactly {pin}"
+                );
+            } else {
+                assert!(versions.is_empty(), "{lockfile}: {krate} must not resolve");
+            }
+        }
+        assert!(
+            !packages.iter().any(|(name, _, _)| name == "salty"),
+            "{lockfile}: embassy-boot's ed25519-salty feature must stay off"
+        );
+        let dalek: Vec<&str> = packages
+            .iter()
+            .filter(|(name, _, _)| name == "ed25519-dalek")
+            .map(|(_, version, _)| version.as_str())
+            .collect();
+        assert!(
+            dalek.iter().all(|v| *v == ED25519_DALEK_PIN),
+            "{lockfile}: only keelsign-verify's ed25519-dalek {ED25519_DALEK_PIN} may resolve \
+             (embassy-boot's ed25519-dalek feature must stay off): {dalek:?}"
+        );
+        let boot = packages
+            .iter()
+            .find(|(name, _, _)| name == "embassy-boot")
+            .map(|(_, _, block)| block.as_str())
+            .unwrap_or_else(|| panic!("{lockfile}: embassy-boot must resolve"));
+        for absent in ["\"salty", "\"ed25519-dalek"] {
+            assert!(
+                !boot.contains(absent),
+                "{lockfile}: embassy-boot must not depend on {absent}"
+            );
+        }
+    }
+}
