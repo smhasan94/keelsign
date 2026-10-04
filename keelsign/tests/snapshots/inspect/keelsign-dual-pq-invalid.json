@@ -38,6 +38,9 @@
       "kind": "lms-hss",
       "len": 1296,
       "lms": {
+        "leaf_indices": [
+          0
+        ],
         "levels": 1,
         "lmots_types": [
           "LMOTS_SHA256_N32_W8"
@@ -88,6 +91,9 @@
       },
       {
         "decoded": {
+          "leaf_indices": [
+            0
+          ],
           "levels": 1,
           "lmots_types": [
             "LMOTS_SHA256_N32_W8"

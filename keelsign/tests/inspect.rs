@@ -343,8 +343,15 @@ fn inspect_decodes_known_tlvs() {
         manifest_entry("keelsign-hss2-m32-h5h5.bin")["key_id_hex"]
     );
     assert_eq!(tlv(&hss, "unprotected", 0x4BA3)["decoded"]["levels"], 2);
+    // SHA-67: the leaf of every level, top first.
+    assert_eq!(lms["leaf_indices"], serde_json::json!([0, 0]));
+    assert_eq!(lms["leaf_indices"][1], lms["q"]);
     let single = inspect_json(&fixture_path("keelsign-lms-m32-h5.bin"));
     assert_eq!(single["signatures"][0]["lms"]["levels"], 1);
+    assert_eq!(
+        single["signatures"][0]["lms"]["leaf_indices"],
+        serde_json::json!([single["signatures"][0]["lms"]["q"]])
+    );
 
     let mldsa = inspect_json(&fixture_path("keelsign-mldsa65-protected-tlvs.bin"));
     assert_eq!(

@@ -360,3 +360,19 @@ pub fn signed_leaf(bytes: &[u8]) -> u32 {
         .expect("HSS signature")
         .q
 }
+
+/// The `lms.leaf_indices` (top level first) of the first LMS/HSS signature that
+/// `keelsign inspect --json` reports for `image`.
+pub fn inspect_leaf_indices(image: &Path) -> Vec<u64> {
+    let out = keelsign(&[&"inspect", &"--json", &image]);
+    assert_exit(&out, 0);
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    report["signatures"]
+        .as_array()
+        .and_then(|sigs| sigs.iter().find(|s| s["kind"] == "lms-hss"))
+        .and_then(|s| s["lms"]["leaf_indices"].as_array())
+        .expect("an LMS/HSS signature with leaf_indices")
+        .iter()
+        .map(|v| v.as_u64().expect("index"))
+        .collect()
+}

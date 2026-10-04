@@ -150,7 +150,9 @@ reports:
   TLV, a decoded value: hash algorithm and digest match, KEYHASH, the algorithm OID of a
   PUBKEY, the security counter, a dependency's image index and minimum version,
   BOOT_RECORD as CBOR (not decoded), the key ID, the ML-DSA parameter set, and an HSS
-  signature's levels `L`, LMS and LM-OTS type names and leaf index `q`;
+  signature's levels `L`, LMS and LM-OTS type names, leaf index `q` of the bottom level
+  and `leaf_indices`, the leaf index of every level, top first (SHA-67; optional in the
+  schema): which leaves of a stateful key the signature used;
 - the key IDs and keyhashes in the image, and every signature TLV with its kind, area,
   length, the 32-byte `KEYHASH` immediately before it (classical signatures; `paired`
   means a 32-byte `KEYHASH` immediately before it, otherwise `keyhash` is `null` and

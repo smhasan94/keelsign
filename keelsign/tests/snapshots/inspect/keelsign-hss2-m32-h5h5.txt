@@ -22,6 +22,7 @@ unprotected tlv area: magic 0x6907, tlv_tot 2708
   tlv 0x4ba0 KEELSIGN_KEY_ID, 16 bytes: 76d91a3bd3171a9a49a03660c2f4424d
     key id: 76d91a3bd3171a9a49a03660c2f4424d
   tlv 0x4ba3 KEELSIGN_LMS_HSS_SIG, 2644 bytes: 000000010000000000000004de95e44e… (2644 bytes)
+    leaf indices: 0, 0
     levels: 2
     lmots types: LMOTS_SHA256_N32_W8, LMOTS_SHA256_N32_W8
     lms types: LMS_SHA256_M32_H5, LMS_SHA256_M32_H5
@@ -32,6 +33,7 @@ keyhashes: none
 signatures:
   lms-hss (unprotected, 2644 bytes):
     key id: 76d91a3bd3171a9a49a03660c2f4424d
+    leaf indices: 0, 0
     levels: 2
     lmots types: LMOTS_SHA256_N32_W8, LMOTS_SHA256_N32_W8
     lms types: LMS_SHA256_M32_H5, LMS_SHA256_M32_H5

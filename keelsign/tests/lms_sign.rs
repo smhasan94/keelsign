@@ -468,6 +468,10 @@ fn keygen_pubkey_sign_verify_round_trip_for_h10_l1_and_l2() {
         assert_exit(&sign(&key, &image(), &again, &[]), 0);
         assert_eq!(signed_leaf(&std::fs::read(&again).expect("read")), 1);
         verify_cli(&[&pem], &again, &[], 0);
+        // `inspect` shows the leaf of every level, top first.
+        let expected: &[u64] = if levels == 1 { &[1] } else { &[0, 1] };
+        assert_eq!(inspect_leaf_indices(&again), expected);
+        assert_eq!(inspect_leaf_indices(&output), vec![0; usize::from(levels)]);
     }
 }
 
