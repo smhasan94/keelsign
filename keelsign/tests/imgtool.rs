@@ -1,5 +1,6 @@
-//! Interoperability of `keelsign sign` with MCUboot's imgtool 2.4.0 (SHA-51 AC1, AC2,
-//! TP1). Ignored by default: they need imgtool on `PATH`. Run with
+//! Interoperability of `keelsign sign` and `keelsign verify` with MCUboot's imgtool 2.4.0
+//! (SHA-51 AC1, AC2, TP1; SHA-53 AC2). Ignored by default: they need imgtool on `PATH`.
+//! Run with
 //!
 //! ```sh
 //! PATH=/path/to/imgtool-venv/bin:$PATH \
@@ -200,4 +201,205 @@ fn imgtool_built_unsigned_image_signs_hybrid_and_verifies_with_imgtool() {
                 .unwrap_or_else(|e| panic!("{alg} {policy:?}: {e}"));
         }
     }
+}
+
+/// An image built and signed by `imgtool sign` from a fresh body (`--key`, if given).
+fn imgtool_sign(dir: &Path, name: &str, key: Option<&Path>) -> std::path::PathBuf {
+    let body: Vec<u8> = (0..1536u32).map(|i| (i * 13 + 5) as u8).collect();
+    let body_path = dir.join(format!("{name}.body.bin"));
+    std::fs::write(&body_path, &body).expect("write body");
+    let output = dir.join(name);
+    let mut cmd = imgtool();
+    cmd.args([
+        "sign",
+        "--header-size",
+        "0x200",
+        "--pad-header",
+        "--align",
+        "4",
+        "--version",
+        "1.2.3+4",
+        "--slot-size",
+        "0x10000",
+    ]);
+    if let Some(key) = key {
+        cmd.arg("--key").arg(key);
+    }
+    run_ok(cmd.arg(&body_path).arg(&output));
+    output
+}
+
+/// `imgtool getpub -e pem` of `key`, written to `out`.
+fn imgtool_getpub_pem(key: &Path, out: &Path) -> std::path::PathBuf {
+    let pem = run_ok(imgtool().args(["getpub", "-e", "pem", "-k"]).arg(key));
+    std::fs::write(out, &pem.stdout).expect("write getpub output");
+    out.to_path_buf()
+}
+
+/// SHA-53 AC2: an image signed by `imgtool sign` with a keelsign Ed25519 key verifies with
+/// `keelsign verify --policy classical`, trusting either `keelsign pubkey`'s or `imgtool
+/// getpub -e pem`'s public key file; a flipped body byte fails both keelsign (exit 9) and
+/// `imgtool verify`.
+#[test]
+#[ignore = "needs imgtool 2.4.0 on PATH"]
+fn imgtool_signed_ed25519_image_round_trips_through_keelsign_verify() {
+    let dir = scratch("imgtool", "round_trip");
+    let key = keygen(&dir, "ed25519", "ed", None);
+    let keelsign_pub = dir.join("ed.pub.pem");
+    assert_exit(
+        &keelsign(&[&"pubkey", &"--key", &key, &"--out", &keelsign_pub]),
+        0,
+    );
+    let imgtool_pub = imgtool_getpub_pem(&key, &dir.join("ed.imgtool.pub.pem"));
+    let signed = imgtool_sign(&dir, "signed.bin", Some(&key));
+    assert_imgtool_validates(&key, &signed);
+    for public in [&keelsign_pub, &imgtool_pub] {
+        let out = keelsign(&[
+            &"verify",
+            &"--pub",
+            public,
+            &"--policy",
+            &"classical",
+            &signed,
+        ]);
+        assert_exit(&out, 0);
+        assert!(
+            stdout(&out).contains("policy: classical\n"),
+            "{}",
+            stdout(&out)
+        );
+    }
+
+    let mut bytes = std::fs::read(&signed).expect("read");
+    bytes[0x200 + 100] ^= 0x01;
+    let tampered = dir.join("tampered.bin");
+    std::fs::write(&tampered, &bytes).expect("write");
+    let out = keelsign(&[
+        &"verify",
+        &"--pub",
+        &keelsign_pub,
+        &"--policy",
+        &"classical",
+        &tampered,
+    ]);
+    assert_exit(&out, 9);
+    assert!(
+        stderr(&out).contains("image digest does not match the SHA256 TLV"),
+        "{}",
+        stderr(&out)
+    );
+    let out = imgtool()
+        .arg("verify")
+        .arg("--key")
+        .arg(&key)
+        .arg(&tampered)
+        .output()
+        .expect("run imgtool verify");
+    assert!(
+        !out.status.success(),
+        "imgtool verify accepts the tampered image"
+    );
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("Image was correctly validated"));
+}
+
+/// SHA-53: imgtool's RSA-2048 and ECDSA P-256 images carry no Ed25519 signature, so
+/// `keelsign verify --policy classical` refuses them (exit 9); an RSA public key file from
+/// `imgtool getpub` is not a key keelsign reads (exit 5).
+#[test]
+#[ignore = "needs imgtool 2.4.0 on PATH"]
+fn rsa_and_ecdsa_imgtool_images_are_not_classically_verifiable_by_keelsign() {
+    let dir = scratch("imgtool", "rsa_ecdsa");
+    let ed_pub = fixture_path("keys/ed25519-test-key.spki.der");
+    for key in ["keys/rsa2048-test-key.pem", "keys/ecdsa-p256-test-key.pem"] {
+        let key = fixture_path(key);
+        let name = format!("{}.bin", key.file_stem().expect("name").to_string_lossy());
+        let signed = imgtool_sign(&dir, &name, Some(&key));
+        assert_imgtool_validates(&key, &signed);
+        let out = keelsign(&[
+            &"verify",
+            &"--pub",
+            &ed_pub,
+            &"--policy",
+            &"classical",
+            &signed,
+        ]);
+        assert_exit(&out, 9);
+        assert!(
+            stderr(&out).contains("Ed25519 half rejected: no ED25519 signature TLV"),
+            "{}",
+            stderr(&out)
+        );
+    }
+    let rsa_pub = imgtool_getpub_pem(
+        &fixture_path("keys/rsa2048-test-key.pem"),
+        &dir.join("rsa.pub.pem"),
+    );
+    let out = keelsign(&[
+        &"verify",
+        &"--pub",
+        &rsa_pub,
+        &fixture_path("mcuboot-rsa2048.bin"),
+    ]);
+    assert_exit(&out, 5);
+    assert!(
+        stderr(&out).contains("unsupported public key algorithm OID 1.2.840.113549.1.1.1"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+/// SHA-53: an unsigned imgtool image signed by `keelsign sign --hybrid-key` validates with
+/// `imgtool verify` and with `keelsign verify` (hybrid, inferred; and classical with the
+/// `imgtool getpub` key).
+#[test]
+#[ignore = "needs imgtool 2.4.0 on PATH"]
+fn keelsign_hybrid_output_verifies_with_both_imgtool_and_keelsign_verify() {
+    let dir = scratch("imgtool", "hybrid_verify");
+    let unsigned = imgtool_sign(&dir, "unsigned.bin", None);
+    let pq = keygen(&dir, "ml-dsa-65", "pq", None);
+    let ed = keygen(&dir, "ed25519", "ed", None);
+    let pq_pub = dir.join("pq.pub.der");
+    assert_exit(
+        &keelsign(&[
+            &"pubkey",
+            &"--key",
+            &pq,
+            &"--format",
+            &"der",
+            &"--out",
+            &pq_pub,
+        ]),
+        0,
+    );
+    let ed_pub = imgtool_getpub_pem(&ed, &dir.join("ed.imgtool.pub.pem"));
+    let signed = dir.join("hybrid.bin");
+    assert_exit(
+        &keelsign(&[
+            &"sign",
+            &"--key",
+            &pq,
+            &"--hybrid-key",
+            &ed,
+            &unsigned,
+            &signed,
+        ]),
+        0,
+    );
+    assert_imgtool_validates(&ed, &signed);
+    let out = keelsign(&[&"verify", &"--pub", &pq_pub, &"--pub", &ed_pub, &signed]);
+    assert_exit(&out, 0);
+    assert!(
+        stdout(&out).contains("policy: hybrid (inferred from the keys given)\n"),
+        "{}",
+        stdout(&out)
+    );
+    let out = keelsign(&[
+        &"verify",
+        &"--pub",
+        &ed_pub,
+        &"--policy",
+        &"classical",
+        &signed,
+    ]);
+    assert_exit(&out, 0);
 }
