@@ -56,6 +56,12 @@ jobs:
       - name: cargo test
         run: cargo test --workspace --locked
 
+      # SHA-60: the C99 harness linked against libkeelsign.a (default and ed25519,ml-dsa
+      # builds) under AddressSanitizer + UBSan: the policy matrix, digests, tampered and
+      # wrong-key images, NULL and malformed arguments (repo_checks::ffi).
+      - name: C harness (libkeelsign, ASan+UBSan)
+        run: cargo test -p repo-checks --locked --test ffi
+
       # keelsign-verify alone, so no workspace member's features are unified in: both
       # features off (ClassicalOnly / Hybrid fail closed with Ed25519(NotEnabled)).
       - name: cargo test (keelsign-verify, no features)
