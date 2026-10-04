@@ -33,7 +33,8 @@ keelsign verify --pub signing.pub.pem app.keelsign.bin
 
 `--pub` reads an X.509 `SubjectPublicKeyInfo` (RFC 5280 §4.1.2.7), PEM label
 `PUBLIC KEY` or DER; the format is detected from the contents, and text before a PEM
-header is ignored. `keelsign pubkey` writes these files (PEM or DER), and so does
+header is ignored, but text after the PEM footer is refused as a corrupt key file (exit
+5). `keelsign pubkey` writes these files (PEM or DER), and so does
 `imgtool getpub -e pem` for an Ed25519 key.
 
 | Algorithm | OID | ASN.1 name | `subjectPublicKey` BIT STRING holds | Source |

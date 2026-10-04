@@ -60,6 +60,12 @@ if [ -z "$block" ]; then
     exit 1
 fi
 
+# The quickstart's `mktemp -d` work directory lands under this scratch TMPDIR, which is
+# removed on exit so repeated runs leave nothing behind.
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+export TMPDIR="$scratch"
+
 echo "check-quickstart: running the README quickstart with $(command -v keelsign)"
 SECONDS=0
 bash -euo pipefail -c "$block"
