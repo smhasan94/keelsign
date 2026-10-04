@@ -299,3 +299,64 @@ pub fn strip_ed25519_pair(bytes: &[u8]) -> Vec<u8> {
 pub fn hex(bytes: &[u8]) -> String {
     keelsign::keys::hex(bytes)
 }
+
+/// SHA-67: generate an LMS/HSS H10 key `dir/<name>.pem` (with `levels` HSS levels and,
+/// optionally, encrypted) and its state file and journal with `keelsign keygen`.
+pub fn keygen_lms(dir: &Path, name: &str, levels: u8, passphrase_file: Option<&Path>) -> PathBuf {
+    let path = dir.join(format!("{name}.pem"));
+    let levels = levels.to_string();
+    let mut args: Vec<&dyn AsRef<std::ffi::OsStr>> = vec![
+        &"keygen",
+        &"--alg",
+        &"lms-sha256-m32-h10",
+        &"--hss-levels",
+        &levels,
+        &"--out",
+        &path,
+    ];
+    if let Some(pw) = &passphrase_file {
+        args.push(&"--passphrase-file");
+        args.push(pw);
+    }
+    assert_exit(&keelsign(&args), 0);
+    path
+}
+
+/// The state file of an LMS/HSS key file.
+pub fn state_path(key: &Path) -> PathBuf {
+    keelsign::lms_state::state_path(key)
+}
+
+/// The journal of an LMS/HSS key file.
+pub fn journal_path(key: &Path) -> PathBuf {
+    keelsign::lms_state::journal_path(key)
+}
+
+/// The state file of an LMS/HSS key file, as JSON.
+pub fn read_state(key: &Path) -> serde_json::Value {
+    let bytes = std::fs::read(state_path(key)).expect("read state file");
+    serde_json::from_slice(&bytes).expect("state file is JSON")
+}
+
+/// The `next_leaf` of an LMS/HSS key's state file.
+pub fn next_leaf(key: &Path) -> u64 {
+    read_state(key)["next_leaf"].as_u64().expect("next_leaf")
+}
+
+/// The lines of an LMS/HSS key's journal.
+pub fn journal_lines(key: &Path) -> Vec<String> {
+    std::fs::read_to_string(journal_path(key))
+        .expect("read journal")
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The bottom-level leaf index `q` of the LMS/HSS signature TLV of a signed image.
+pub fn signed_leaf(bytes: &[u8]) -> u32 {
+    let image = Image::parse(bytes).expect("parse");
+    let sig = unprotected_value(&image, keelsign_verify::tlv::TLV_LMS_HSS_SIG);
+    keelsign::inspect::hss_summary(sig)
+        .expect("HSS signature")
+        .q
+}
