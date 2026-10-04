@@ -2,7 +2,8 @@
 //! and the go/no-go decision, and that the benchmark log tooling works.
 
 use repo_checks::{
-    BENCHES, Example, ScratchDir, python_script, run_capture, run_ok, workspace_root,
+    BENCHES, Example, ScratchDir, bench_target_lock, python_script, run_capture, run_ok,
+    workspace_root,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -2228,6 +2229,7 @@ fn recorded_flash_tables_match_a_fresh_build() {
     let mut flash = BTreeMap::new();
     let mut ram = BTreeMap::new();
     for bench in &BENCHES {
+        let _guard = bench_target_lock(bench);
         assert_recorded_rustc(
             bench,
             toolchain.as_deref(),
@@ -2518,6 +2520,7 @@ fn recorded_stable_mldsa_prologues_match_objdump() {
     let mut measured = BTreeMap::new();
     let mut report = Vec::new();
     for bench in &BENCHES {
+        let _guard = bench_target_lock(bench);
         assert_recorded_rustc(
             bench,
             toolchain.as_deref(),
