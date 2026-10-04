@@ -62,9 +62,11 @@ pub const BENCHES: [Example; 2] = [
 /// `target/mldsa`) against each other within one test binary: cargo unlinks and
 /// re-creates `release/<bin>` on every invocation, even a fresh no-op one, so a
 /// sibling test reading the ELFs (`elf_sizes.py`, `objdump`) can see them missing
-/// (SHA-282). One lock per bench keeps the two boards building in parallel. Test
-/// binaries run one at a time, so a process-wide lock is enough. A test that panics
-/// while holding it must not poison the others (`--no-fail-fast`).
+/// (SHA-282). One lock per bench keeps the two boards building in parallel. `cargo
+/// test` runs test binaries one at a time, so a process-wide lock is enough (a
+/// runner that puts each test in its own process, such as `cargo nextest`, would
+/// need a file lock instead). A test that panics while holding it must not poison
+/// the others (`--no-fail-fast`).
 pub fn bench_target_lock(bench: &Example) -> MutexGuard<'static, ()> {
     static LOCKS: [Mutex<()>; BENCHES.len()] = [const { Mutex::new(()) }; BENCHES.len()];
     let i = BENCHES
@@ -397,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn bench_target_lock_is_per_bench_and_reentrant_after_drop() {
+    fn bench_target_lock_is_per_bench_and_relockable_after_drop() {
         assert_eq!(BENCHES.len(), 2, "the test pairs the two boards");
 
         // Holding one bench's lock does not block the other bench.
