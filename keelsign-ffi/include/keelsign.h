@@ -7,8 +7,10 @@
  *
  * Build the library from the repository root:
  *   cargo build -p keelsign-ffi --profile ffi --locked [--target <triple>] [--features ed25519,ml-dsa]
- * which writes target[/<triple>]/ffi/libkeelsign.a. Pointer and length contract: see
- * each function below and docs/ffi.md.
+ * which writes target[/<triple>]/ffi/libkeelsign.a. Always use --profile ffi: a host
+ * --release or dev build of keelsign-ffi links std and unwinds on panic, so it is not
+ * the shipped library. Pointer and length contract: see each function below and
+ * docs/ffi.md.
  */
 
 #ifndef KEELSIGN_H
@@ -63,7 +65,7 @@ enum keelsign_status_t
   KEELSIGN_OK = 0,
   // A pointer argument that must not be NULL is NULL.
   KEELSIGN_ERR_NULL_POINTER = 1,
-  // `len` is above `UINT32_MAX`.
+  // `len` is above `UINT32_MAX` (or, on a 32-bit target, above `PTRDIFF_MAX`).
   KEELSIGN_ERR_IMAGE_TOO_LARGE = 2,
   // `policy` is not a `KEELSIGN_POLICY_*` value.
   KEELSIGN_ERR_INVALID_POLICY = 3,
@@ -284,7 +286,8 @@ extern "C" {
 // - `keys` is NULL only if `n_keys` is 0; otherwise it points to `n_keys` consecutive
 //   `keelsign_key_t` (any alignment).
 // - Each `keys[i].key` is non-NULL and readable for `keys[i].key_len` bytes.
-// - `out` is NULL or writable for one `keelsign_result_t` (any alignment).
+// - `out` is NULL or writable for one `keelsign_result_t` (any alignment), and does
+//   not overlap `image`, `keys` or any key's bytes.
 // - None of this memory is written by anyone else during the call. Nothing is retained
 //   after the call returns.
 keelsign_status_t keelsign_verify(const uint8_t *image,
@@ -307,7 +310,7 @@ keelsign_status_t keelsign_verify(const uint8_t *image,
 // - `image` is non-NULL and readable for `len` bytes, at any alignment. A `len` above
 //   `UINT32_MAX`, or on a 32-bit target above `PTRDIFF_MAX`, is rejected with
 //   `KEELSIGN_ERR_IMAGE_TOO_LARGE` before anything is read.
-// - `out_digest` is non-NULL and writable for 32 bytes.
+// - `out_digest` is non-NULL and writable for 32 bytes, and does not overlap `image`.
 // - None of this memory is written by anyone else during the call. Nothing is retained
 //   after the call returns.
 keelsign_status_t keelsign_digest(const uint8_t *image, size_t len, uint8_t *out_digest);

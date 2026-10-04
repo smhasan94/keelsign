@@ -572,11 +572,11 @@ fn unsafe_exceptions_are_stack_paint_and_keelsign_ffi() {
         if name == "abi.rs" {
             assert!(code.contains("unsafe {"), "abi.rs holds the unsafe code");
             assert_eq!(
-                code.matches("unsafe {").count(),
+                code.matches("unsafe {").count() + code.matches("unsafe extern \"C\" {").count(),
                 text.lines()
                     .filter(|l| l.trim_start().starts_with("// SAFETY:"))
                     .count(),
-                "every unsafe block in keelsign-ffi/src/abi.rs carries a SAFETY comment"
+                "every unsafe block and extern block in keelsign-ffi/src/abi.rs carries a SAFETY comment"
             );
         } else {
             for keyword in [

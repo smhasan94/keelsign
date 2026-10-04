@@ -265,9 +265,11 @@ fn header_documents_the_pointer_contract_and_build_command() {
         "`image` is non-NULL and readable for `len` bytes, at any alignment.",
         "`keys` is NULL only if `n_keys` is 0",
         "Each `keys[i].key` is non-NULL and readable for `keys[i].key_len` bytes.",
-        "`out` is NULL or writable for one `keelsign_result_t` (any alignment).",
+        "`out` is NULL or writable for one `keelsign_result_t` (any alignment), and does",
+        "not overlap `image`, `keys` or any key's bytes.",
+        "Always use --profile ffi",
         "On any error `*out` is left untouched.",
-        "`out_digest` is non-NULL and writable for 32 bytes.",
+        "`out_digest` is non-NULL and writable for 32 bytes, and does not overlap `image`.",
         "Nothing is retained",
         "`len > UINT32_MAX` (`KEELSIGN_ERR_IMAGE_TOO_LARGE`)",
         "`len == 0` gives\n// `KEELSIGN_ERR_PARSE_TRUNCATED`",
@@ -976,17 +978,62 @@ const FORMATTING: [&str; 9] = [
     "9Arguments",
 ];
 
-/// The allowlisted libcore trap funnels (scripts/staticlib_sizes.py `PANIC_ALLOWLIST`).
-const PANIC_FUNNELS: [&str; 8] = [
-    "9panicking9panic_fmt",
-    "panic_const_div_by_zero",
-    "len_mismatch_fail",
-    "panic_bounds_check",
-    "9panicking5panic17h",
-    "16slice_index_fail",
-    "6option13expect_failed",
-    "6result13unwrap_failed",
+/// When an allowlisted libcore trap funnel may appear (scripts/staticlib_sizes.py
+/// `ALWAYS` / `ED25519_OR_ML_DSA` / `ML_DSA`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Funnel {
+    Always,
+    Ed25519OrMlDsa,
+    MlDsa,
+}
+
+impl Funnel {
+    /// The constant the script's `PANIC_ALLOWLIST` entry names.
+    fn script_name(self) -> &'static str {
+        match self {
+            Funnel::Always => "ALWAYS",
+            Funnel::Ed25519OrMlDsa => "ED25519_OR_ML_DSA",
+            Funnel::MlDsa => "ML_DSA",
+        }
+    }
+
+    fn allowed_in(self, build: Build) -> bool {
+        match self {
+            Funnel::Always => true,
+            Funnel::Ed25519OrMlDsa => build.ed25519() || build.ml_dsa(),
+            Funnel::MlDsa => build.ml_dsa(),
+        }
+    }
+}
+
+/// The allowlisted libcore trap funnels per feature state, as measured
+/// (scripts/staticlib_sizes.py `PANIC_ALLOWLIST`; docs/ffi.md#nm-check).
+const PANIC_FUNNELS: [(&str, Funnel); 8] = [
+    ("9panicking9panic_fmt", Funnel::Always),
+    ("panic_const_div_by_zero", Funnel::Always),
+    ("len_mismatch_fail", Funnel::Always),
+    ("panic_bounds_check", Funnel::Ed25519OrMlDsa),
+    ("16slice_index_fail", Funnel::Ed25519OrMlDsa),
+    ("9panicking5panic", Funnel::MlDsa),
+    ("6option13expect_failed", Funnel::MlDsa),
+    ("6result13unwrap_failed", Funnel::MlDsa),
 ];
+
+/// The funnel `name` is, if any (`9panicking5panic` only when not followed by more of
+/// an identifier, so `panic_fmt` and `panic_bounds_check` do not match it).
+fn funnel_of(name: &str) -> Option<Funnel> {
+    PANIC_FUNNELS.iter().find_map(|(fragment, funnel)| {
+        let hit = if *fragment == "9panicking5panic" {
+            name.match_indices(fragment).any(|(at, _)| {
+                !name[at + fragment.len()..]
+                    .starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            })
+        } else {
+            name.contains(fragment)
+        };
+        hit.then_some(*funnel)
+    })
+}
 
 /// Panic message text that must not be in the library.
 const PANIC_STRINGS: [&str; 5] = [
@@ -1053,9 +1100,11 @@ fn staticlib_has_no_formatting_symbols_or_panic_strings() {
                 .iter()
                 .any(|m| name.contains(m));
             if panicky && kind != "U" {
+                let funnel = funnel_of(name);
                 assert!(
-                    PANIC_FUNNELS.iter().any(|f| name.contains(f)),
-                    "{} build: panic symbol {name} is not an allowlisted trap funnel",
+                    funnel.is_some_and(|f| f.allowed_in(build)),
+                    "{} build: panic symbol {name} is not a trap funnel allowed in this \
+                     feature state ({funnel:?})",
                     build.name()
                 );
             }
@@ -1077,13 +1126,29 @@ fn staticlib_has_no_formatting_symbols_or_panic_strings() {
             );
         }
     }
-    // The script's allowlist is this one.
+    // The script's allowlist is this one, entry for entry and condition for condition.
     let script = read("scripts/staticlib_sizes.py");
-    for funnel in PANIC_FUNNELS {
-        let funnel = funnel.trim_end_matches("17h");
+    let entries: Vec<&str> = script
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with('"') && l.contains("\": (\""))
+        .collect();
+    assert_eq!(
+        entries.len(),
+        PANIC_FUNNELS.len(),
+        "PANIC_ALLOWLIST: {entries:?}"
+    );
+    for (fragment, funnel) in PANIC_FUNNELS {
+        let entry = entries
+            .iter()
+            .find(|l| l.starts_with(&format!("\"{fragment}\": (")))
+            .unwrap_or_else(|| {
+                panic!("scripts/staticlib_sizes.py PANIC_ALLOWLIST lacks {fragment}")
+            });
         assert!(
-            script.contains(&format!("\"{funnel}\"")),
-            "scripts/staticlib_sizes.py PANIC_ALLOWLIST must name {funnel}"
+            entry.ends_with(&format!(", {}),", funnel.script_name())),
+            "scripts/staticlib_sizes.py: {fragment} must be allowed with {} (`{entry}`)",
+            funnel.script_name()
         );
     }
     assert!(script.contains("PANIC_FUNNEL_MAX = 32"));

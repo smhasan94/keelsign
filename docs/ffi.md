@@ -18,7 +18,16 @@ cargo build -p keelsign-ffi --profile ffi --locked --target thumbv8m.main-none-e
 cargo build -p keelsign-ffi --profile ffi --locked --features ed25519,ml-dsa           # + Ed25519, ML-DSA
 ```
 
-The library is `target[/<triple>]/ffi/libkeelsign.a`. The `ffi` profile is in the root
+The library is `target[/<triple>]/ffi/libkeelsign.a`.
+
+**Always build it with `--profile ffi`.** On a hosted target a `--release` or dev build
+of `keelsign-ffi` (for example `cargo build -p keelsign-ffi --release`) succeeds but
+produces a different library: those profiles unwind on panic, which stable Rust only
+supports with `std`, so the archive links `std` and its allocator and is about 16 MB.
+Only `panic = "abort"` builds (the `ffi` profile, every bare-metal target) are the
+`no_std` library this document describes. A compile-time guard is not possible without
+breaking `cargo build --release` of the whole workspace, which builds every member with
+the release profile. The `ffi` profile is in the root
 `Cargo.toml`: `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`,
 no debug info. Sizes per target and feature state are in
 [benchmarks.md](benchmarks.md#c-static-library-sha-60).
@@ -39,6 +48,11 @@ it calls libc `abort()` on a panic; on bare metal it executes `udf #0` (HardFaul
 panic message is never formatted. It leaves `memcpy`, `memset`, `memcmp` (on Arm the
 `__aeabi_memcpy*` / `__aeabi_memclr*` helpers) and, in some feature states, `memmove`
 undefined: the C library the bootloader links (newlib, picolibc, its own) provides them.
+
+Rustdoc: `keelsign-ffi`'s library target is named `keelsign`, like the CLI's, so
+`cargo doc --workspace` stops with a "document output filename collision". Document the
+workspace with `cargo doc --workspace --exclude keelsign-ffi` and this crate on its own
+with `cargo doc -p keelsign-ffi`.
 
 ## Header
 
@@ -90,6 +104,7 @@ check.
 - `out` is NULL or writable for one `keelsign_result_t` (any alignment). It is written
   only on `KEELSIGN_OK`.
 - `out_digest` is non-NULL and writable for 32 bytes, written only on `KEELSIGN_OK`.
+- `out` and `out_digest` do not overlap the image, the `keys` array or any key's bytes.
 - Nobody writes this memory during the call; nothing is retained after it returns. The
   functions are reentrant (no global state).
 
@@ -225,17 +240,22 @@ strings)`). They require:
 The ticket asked for "no `panic_fmt`". That is not reachable on stable Rust: libcore's
 panic entry points, called from sha2 0.11 and the other dependencies' bounds checks, stay
 in the archive even though no valid input reaches them. The check therefore allows exactly
-these funnels:
+these funnels, each only in the feature states it was measured in
+(`PANIC_ALLOWLIST` in the script, `PANIC_FUNNELS` in the repo-check, which checks the two
+agree):
 
-| Funnel | Builds |
+| Funnel | Allowed in |
 |---|---|
-| `core::panicking::panic_fmt` | all |
-| `core::slice::copy_from_slice::len_mismatch_fail` | all |
-| `core::panicking::panic_const::panic_const_div_by_zero` | default, `ed25519`, `ed25519,ml-dsa` |
-| `core::panicking::panic_bounds_check` | `ed25519`, `ml-dsa`, `ed25519,ml-dsa` |
-| `core::slice::index::slice_index_fail` | `ed25519`, `ml-dsa`, `ed25519,ml-dsa` |
-| `core::panicking::panic` | `ml-dsa`, `ed25519,ml-dsa` |
-| `core::option::expect_failed`, `core::result::unwrap_failed` | `ml-dsa`, `ed25519,ml-dsa` |
+| `core::panicking::panic_fmt` | every build |
+| `core::slice::copy_from_slice::len_mismatch_fail` | every build |
+| `core::panicking::panic_const::panic_const_div_by_zero` | every build (absent with `ml-dsa` alone) |
+| `core::panicking::panic_bounds_check` | builds with `ed25519` or `ml-dsa` |
+| `core::slice::index::slice_index_fail` | builds with `ed25519` or `ml-dsa` |
+| `core::panicking::panic` | builds with `ml-dsa` |
+| `core::option::expect_failed`, `core::result::unwrap_failed` | builds with `ml-dsa` |
+
+The default (LMS/HSS only) library may therefore contain only the first three.
+`staticlib_sizes.py --check` takes the feature state from `--features`.
 
 Removing them needs a nightly `panic_immediate_abort` build, or audited
 dependencies (follow-up).

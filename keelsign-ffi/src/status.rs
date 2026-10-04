@@ -25,7 +25,7 @@ pub enum keelsign_status_t {
     KEELSIGN_OK = 0,
     /// A pointer argument that must not be NULL is NULL.
     KEELSIGN_ERR_NULL_POINTER = 1,
-    /// `len` is above `UINT32_MAX`.
+    /// `len` is above `UINT32_MAX` (or, on a 32-bit target, above `PTRDIFF_MAX`).
     KEELSIGN_ERR_IMAGE_TOO_LARGE = 2,
     /// `policy` is not a `KEELSIGN_POLICY_*` value.
     KEELSIGN_ERR_INVALID_POLICY = 3,
@@ -251,10 +251,11 @@ mod tests {
 
     use super::*;
 
-    /// Every variant this crate knows, as (status code, error). Each `match` below is
-    /// exhaustive over the variants of keelsign-verify 0.0.1 apart from the wildcard
-    /// `#[non_exhaustive]` forces, so a new upstream variant shows up here as a mapping
-    /// to a catch-all and fails the test until it gets its own code.
+    /// Every variant this crate knows, as (status code, enum name). The lists are
+    /// hand-maintained; `known_error_lists_cover_every_upstream_variant` counts the
+    /// variants in the keelsign-verify sources, so a new upstream variant (which the
+    /// mappings would send to a catch-all, as `#[non_exhaustive]` forces a wildcard)
+    /// fails CI until it is listed here and given its own code.
     fn every_known_error() -> Vec<(keelsign_status_t, &'static str)> {
         let parse = [
             ParseError::BadMagic,
@@ -338,6 +339,107 @@ mod tests {
         // 14 flat + 8 + 3 + 9 + 11 nested Error variants, 3 KeySetError variants.
         assert_eq!(all.len(), 14 + 8 + 3 + 9 + 11 + 3);
         all
+    }
+
+    /// The keelsign-verify sources the error enums are defined in.
+    const VERIFY_SOURCES: [(&str, &str); 5] = [
+        (
+            "error.rs",
+            include_str!("../../keelsign-verify/src/error.rs"),
+        ),
+        (
+            "image.rs",
+            include_str!("../../keelsign-verify/src/image.rs"),
+        ),
+        (
+            "reader.rs",
+            include_str!("../../keelsign-verify/src/reader.rs"),
+        ),
+        (
+            "ed25519.rs",
+            include_str!("../../keelsign-verify/src/ed25519.rs"),
+        ),
+        (
+            "policy.rs",
+            include_str!("../../keelsign-verify/src/policy.rs"),
+        ),
+    ];
+
+    /// The variant names of `pub enum <name>` in `source`: each line of the enum body
+    /// that starts with an upper-case identifier (doc comments, attributes and blank
+    /// lines skipped).
+    fn enum_variants(source: &str, name: &str) -> Vec<std::string::String> {
+        let header = std::format!("pub enum {name} {{");
+        let start = source
+            .find(&header)
+            .unwrap_or_else(|| panic!("no `{header}`"))
+            + header.len();
+        let body = &source[start..];
+        let body = &body[..body.find("\n}").expect("enum is closed")];
+        body.lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with(|c: char| c.is_ascii_uppercase()))
+            .map(|l| {
+                l.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                    .next()
+                    .unwrap_or_default()
+                    .into()
+            })
+            .collect()
+    }
+
+    /// N3: the hand-maintained lists in `every_known_error` have exactly as many
+    /// entries as each keelsign-verify enum has variants (Error 18, KeySetError 3,
+    /// ParseError 8, ReadError 3, Ed25519Error 9, ImageError 11), so an added upstream
+    /// variant fails this test.
+    #[test]
+    fn known_error_lists_cover_every_upstream_variant() {
+        let all = every_known_error();
+        let listed = |group: &str| all.iter().filter(|(_, g)| *g == group).count();
+        let nested = ["ParseError", "ReadError", "Ed25519Error", "ImageError"];
+        let source = |file: &str| {
+            VERIFY_SOURCES
+                .iter()
+                .find(|(f, _)| *f == file)
+                .map(|(_, s)| *s)
+                .unwrap()
+        };
+        let error = enum_variants(source("error.rs"), "Error");
+        // The four wrapping variants are exercised through their inner enums.
+        assert_eq!(
+            error.len(),
+            listed("Error") + nested.len(),
+            "Error: {error:?}"
+        );
+        for wrapper in ["Parse", "Read", "Ed25519", "Image"] {
+            assert!(error.iter().any(|v| v == wrapper), "Error::{wrapper}");
+        }
+        for (file, name, group) in [
+            ("error.rs", "KeySetError", "KeySetError"),
+            ("image.rs", "ParseError", "ParseError"),
+            ("reader.rs", "ReadError", "ReadError"),
+            ("ed25519.rs", "Ed25519Error", "Ed25519Error"),
+            ("policy.rs", "ImageError", "ImageError"),
+        ] {
+            let variants = enum_variants(source(file), name);
+            assert_eq!(
+                variants.len(),
+                listed(group),
+                "keelsign-verify {name} has {variants:?}; list every variant in \
+                 every_known_error and give it a status code"
+            );
+        }
+        // The counts this ABI version was written against.
+        assert_eq!(
+            [
+                error.len(),
+                listed("KeySetError"),
+                listed("ParseError"),
+                listed("ReadError")
+            ],
+            [18, 3, 8, 3]
+        );
+        assert_eq!([listed("Ed25519Error"), listed("ImageError")], [9, 11]);
     }
 
     /// TP1: every known error variant has its own code, none of them a catch-all, and

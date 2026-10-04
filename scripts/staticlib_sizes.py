@@ -21,8 +21,8 @@ the member has no `.data` or `.bss`. The triple is read from the path
 --check fails (exit 1) unless, for every archive:
   * the exported functions are exactly keelsign_verify and keelsign_digest;
   * no symbol is formatting code (core::fmt, Formatter, Display, Debug, LowerHex, ...);
-  * every panic-related symbol is one of the allowlisted libcore/sha2 trap funnels
-    (PANIC_ALLOWLIST) and at most 32 bytes;
+  * every panic-related symbol is one of the libcore trap funnels PANIC_ALLOWLIST
+    allows for the `--features` state given, and at most 32 bytes;
   * `.rodata*` holds no printable run of 8 or more characters other than
     `keelsign-mcuboot-image-v1`, and none mentioning `.rs`, `panicked` or `attempt to`;
   * the member has no `.data*` / `.bss*`.
@@ -39,17 +39,21 @@ from pathlib import Path
 # The libcore panic entry points (called from sha2, ed25519-dalek, ml-dsa) that survive on stable with `panic = "abort"`
 # and a panic handler that never formats (docs/ffi.md#nm-check): name fragment of the
 # (legacy or v0) mangled symbol -> description.
+# Feature conditions of the allowlist, as tools/repo-checks/tests/ffi.rs names them too.
+ALWAYS = "always"
+ED25519_OR_ML_DSA = "ed25519 or ml-dsa"
+ML_DSA = "ml-dsa"
+# fragment -> (description, the feature states it is allowed in). Measured per state
+# (docs/ffi.md#nm-check); the default LMS-only build gets only the ALWAYS three.
 PANIC_ALLOWLIST = {
-    "9panicking9panic_fmt": "core::panicking::panic_fmt",
-    "panic_const_div_by_zero": "core::panicking::panic_const::panic_const_div_by_zero",
-    "len_mismatch_fail": "core::slice::copy_from_slice::len_mismatch_fail",
-    "panic_bounds_check": "core::panicking::panic_bounds_check",
-    "9panicking5panic": "core::panicking::panic",
-    # With `ed25519` or `ml-dsa` (dependency slice indexing).
-    "16slice_index_fail": "core::slice::index::slice_index_fail",
-    # Reached from ml-dsa's `unwrap` / `expect` calls (`ml-dsa` feature only).
-    "6option13expect_failed": "core::option::expect_failed",
-    "6result13unwrap_failed": "core::result::unwrap_failed",
+    "9panicking9panic_fmt": ("core::panicking::panic_fmt", ALWAYS),
+    "panic_const_div_by_zero": ("core::panicking::panic_const::panic_const_div_by_zero", ALWAYS),
+    "len_mismatch_fail": ("core::slice::copy_from_slice::len_mismatch_fail", ALWAYS),
+    "panic_bounds_check": ("core::panicking::panic_bounds_check", ED25519_OR_ML_DSA),
+    "16slice_index_fail": ("core::slice::index::slice_index_fail", ED25519_OR_ML_DSA),
+    "9panicking5panic": ("core::panicking::panic", ML_DSA),
+    "6option13expect_failed": ("core::option::expect_failed", ML_DSA),
+    "6result13unwrap_failed": ("core::result::unwrap_failed", ML_DSA),
 }
 # A trap funnel is a branch into the panic handler: a few instructions.
 PANIC_FUNNEL_MAX = 32
@@ -188,14 +192,35 @@ def panic_symbol(name):
     return any(m in name for m in PANIC_MARKERS)
 
 
-def allowlisted(name):
-    for fragment, description in PANIC_ALLOWLIST.items():
+def condition_holds(condition, features):
+    """Whether an allowlist condition holds for a `--features` value."""
+    on = {f.strip() for f in features.split(",") if f.strip()}
+    if condition == ALWAYS:
+        return True
+    if condition == ED25519_OR_ML_DSA:
+        return bool(on & {"ed25519", "ml-dsa"})
+    if condition == ML_DSA:
+        return "ml-dsa" in on
+    raise ValueError(f"unknown allowlist condition {condition!r}")
+
+
+def funnel_of(name):
+    """(description, condition) of the allowlisted funnel `name` is, or None."""
+    for fragment, entry in PANIC_ALLOWLIST.items():
         if fragment == "9panicking5panic":
             # core::panicking::panic itself, not panic_fmt / panic_bounds_check / ...
             if re.search(r"9panicking5panic(?![A-Za-z_])", name):
-                return description
+                return entry
         elif fragment in name:
-            return description
+            return entry
+    return None
+
+
+def allowlisted(name, features):
+    """The description of `name` if it is a funnel allowed in this feature state."""
+    entry = funnel_of(name)
+    if entry and condition_holds(entry[1], features):
+        return entry[0]
     return None
 
 
@@ -207,7 +232,7 @@ def strings_of(elf):
     return out
 
 
-def check(path, elf, show_symbols, show_strings):
+def check(path, elf, show_symbols, show_strings, features=""):
     problems = []
     symbols = elf.symbols()
     exports = sorted(n for n, _s, bind, typ, d in symbols if d and bind == 1 and typ == 2)
@@ -220,9 +245,11 @@ def check(path, elf, show_symbols, show_strings):
         if hit:
             problems.append(f"formatting symbol {name} ({hit})")
     for name, size in panics:
-        what = allowlisted(name)
+        what = allowlisted(name, features)
         if what is None:
-            problems.append(f"panic symbol {name} is not an allowlisted trap funnel")
+            entry = funnel_of(name)
+            why = f"allowed only with {entry[1]}" if entry else "not an allowlisted trap funnel"
+            problems.append(f"panic symbol {name}: {why} (features `{features}`)")
         elif size > PANIC_FUNNEL_MAX:
             problems.append(f"panic funnel {what} is {size} bytes (> {PANIC_FUNNEL_MAX})")
     for name, text in strings_of(elf):
@@ -238,7 +265,7 @@ def check(path, elf, show_symbols, show_strings):
         print(f"  exports: {' '.join(exports)}")
         print(f"  undefined: {' '.join(undefined)}")
         for name, size in panics:
-            print(f"  panic: {name} ({size} B) -> {allowlisted(name) or 'NOT ALLOWLISTED'}")
+            print(f"  panic: {name} ({size} B) -> {allowlisted(name, features) or 'NOT ALLOWLISTED'}")
     if show_strings:
         for name, text in strings_of(elf):
             print(f"  string {name}: {text!r}")
@@ -267,7 +294,7 @@ def main():
             f"| `{triple_of(path)}` | {features} | {grouped(text)} B | {grouped(rodata)} B "
             f"| {grouped(text + rodata)} B |"
         )
-        problems = check(path, elf, args.symbols, args.strings)
+        problems = check(path, elf, args.symbols, args.strings, args.features)
         if args.check and problems:
             failed = True
             for p in problems:

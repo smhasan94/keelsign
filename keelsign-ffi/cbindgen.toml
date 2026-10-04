@@ -21,8 +21,10 @@ header = """/*
  *
  * Build the library from the repository root:
  *   cargo build -p keelsign-ffi --profile ffi --locked [--target <triple>] [--features ed25519,ml-dsa]
- * which writes target[/<triple>]/ffi/libkeelsign.a. Pointer and length contract: see
- * each function below and docs/ffi.md.
+ * which writes target[/<triple>]/ffi/libkeelsign.a. Always use --profile ffi: a host
+ * --release or dev build of keelsign-ffi links std and unwinds on panic, so it is not
+ * the shipped library. Pointer and length contract: see each function below and
+ * docs/ffi.md.
  */"""
 
 [export]
