@@ -40,10 +40,13 @@
 #[cfg(test)]
 extern crate std;
 
+mod blocking;
 mod config;
 mod error;
+mod log;
 mod sync_flash;
 
+pub use blocking::BlockingUpdater;
 pub use config::Config;
 pub use error::{ConfigError, Error};
 pub use sync_flash::SyncFlash;

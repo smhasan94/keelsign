@@ -1,13 +1,15 @@
 //! The device's verify configuration: policy, trusted keys and backend.
 
-use keelsign_verify::{DefaultBackend, Ed25519Key, Policy, TrustedKey};
+use keelsign_verify::{DefaultBackend, Ed25519Key, Policy, TrustedKey, TrustedKeys};
+
+use crate::error::Error;
 
 /// What an updater accepts: the [`Policy`], up to `N` trusted post-quantum keys, up to `E`
 /// trusted Ed25519 keys (the classical half of hybrid images) and the post-quantum
 /// backend.
 ///
 /// The keys are borrowed (typically from flash) and checked once, when an updater is
-/// built ([`Error::KeySet`](crate::Error::KeySet)). A `Config` can be a `const`:
+/// built ([`Error::KeySet`]). A `Config` can be a `const`:
 ///
 /// ```
 /// use keelsign_embassy::{Algorithm, Config, Policy, TrustedKey};
@@ -57,6 +59,11 @@ impl<'k, const N: usize, const E: usize> Config<'k, N, E> {
             ..self
         }
     }
+
+    /// The trusted key set, checked.
+    pub(crate) fn trusted_keys(&self) -> Result<TrustedKeys<'k, N, E>, Error> {
+        TrustedKeys::with_ed25519(&self.pq_keys, &self.ed25519_keys).map_err(Error::KeySet)
+    }
 }
 
 #[cfg(test)]
@@ -69,7 +76,7 @@ mod tests {
         clippy::indexing_slicing
     )]
 
-    use keelsign_verify::Algorithm;
+    use keelsign_verify::{Algorithm, KeySetError};
 
     use super::*;
 
@@ -96,5 +103,27 @@ mod tests {
         assert_eq!(STRICT.policy, DEFAULT.policy);
         assert_eq!(STRICT.pq_keys, DEFAULT.pq_keys);
         assert_eq!(STRICT.ed25519_keys, DEFAULT.ed25519_keys);
+        // The all-zero key is not a valid LMS/HSS key: the set is checked when an updater
+        // is built, not when the const is.
+        assert_eq!(
+            DEFAULT.trusted_keys().err(),
+            Some(Error::KeySet(KeySetError::InvalidPublicKeyLength(
+                Algorithm::LmsHss
+            )))
+        );
+        // A real key from the policy matrix builds a set.
+        let fixture = policy_kat::Fixture::parse(policy_kat::POLICY_TARGET).unwrap();
+        let case = fixture.case("keelsign-lms-m32-h5.bin").unwrap();
+        let config: Config<'_, 1> = Config::new(
+            Policy::PqOnly,
+            [TrustedKey {
+                algorithm: case.algorithm.unwrap(),
+                public_key: case.public_key,
+            }],
+            [],
+        );
+        let keys = config.trusted_keys().unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys.ed25519_len(), 0);
     }
 }
