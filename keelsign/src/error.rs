@@ -8,7 +8,7 @@
 //! | 3 | output file exists and `--force` was not given |
 //! | 4 | passphrase problem: wrong, missing, or given for an unencrypted key |
 //! | 5 | corrupt or unsupported key file, private or public (a `--pub` file that is not a supported `SubjectPublicKeyInfo`, or is a private key) |
-//! | 6 | the key file holds a different algorithm than `--alg` asks for (or, for `sign`, `--key` is Ed25519 / `--hybrid-key` is not Ed25519) |
+//! | 6 | the key file holds a different algorithm than `--alg` asks for (or, for an LMS/HSS key, a different height than the `lms-sha256-m32-hNN` value) (or, for `sign`, `--key` is Ed25519 / `--hybrid-key` is not Ed25519) |
 //! | 7 | the input image is rejected as malformed: not an MCUboot image or too large (`verify`, `inspect`, `sign`); for `sign` also an image rule broken or bytes after its TLV area |
 //! | 8 | the input image already carries keelsign TLVs (or, with `--hybrid-key`, an Ed25519 pair) and `--replace` was not given |
 //! | 9 | `verify`: the image is not verified under the policy (a signature invalid or malformed, a key not trusted, a TLV missing or repeated, the Ed25519 half rejected, an image rule broken, an unsupported parameter set) |

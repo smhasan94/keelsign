@@ -127,7 +127,10 @@ fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// - Otherwise `path` is replaced whole: a new temporary file `.NAME.keelsign-tmp-PID`
 ///   next to it (created exclusively, so a link planted under that name is not followed;
 ///   a stale one from a crashed run is removed first), flushed, renamed over `path`, and
-///   the directory flushed.
+///   the directory flushed. Removing a stale temporary file is safe here, unlike the
+///   key-file temporaries of `crate::keyfile` (which may hold a private key and are
+///   reported instead): a state file or journal holds no secret, only public tree nodes,
+///   leaf numbers and the key ID.
 fn write_atomically(path: &Path, bytes: &[u8], create_new: bool) -> Result<(), Error> {
     if create_new {
         return write_new(path, bytes).map_err(|e| {
@@ -514,7 +517,7 @@ impl Journal {
                 let mut words = header.split(' ');
                 match (words.next(), words.next(), words.next(), words.next()) {
                     (Some(JOURNAL_MAGIC), Some(version), Some(id), None)
-                        if digits(version) == Some(u64::from(JOURNAL_VERSION)) =>
+                        if version == JOURNAL_VERSION.to_string() =>
                     {
                         unhex(id).and_then(|b| <[u8; 16]>::try_from(b).ok())
                     }
@@ -928,7 +931,16 @@ mod tests {
         assert_eq!(journal.high_water(), Some(0));
         drop(journal);
         // A missing or wrong header.
-        for body in ["", "reserved 0 1\n", "keelsign-lms-journal 2 00\n"] {
+        // The version token must be exactly `1` (not `01` or `+1`).
+        let padded = header.replacen(" 1 ", " 01 ", 1);
+        let signed = header.replacen(" 1 ", " +1 ", 1);
+        for body in [
+            "",
+            "reserved 0 1\n",
+            "keelsign-lms-journal 2 00\n",
+            padded.as_str(),
+            signed.as_str(),
+        ] {
             fs::write(journal_path(&path), body).expect("write");
             assert!(
                 matches!(reason(reserve(&path, &key).expect_err("x")), LmsStateError::Corrupt(r) if r.contains("does not start with")),

@@ -917,6 +917,38 @@ fn pubkey_refuses_to_overwrite_its_own_key() {
     }
 }
 
+/// SHA-67: a dangling symbolic link at an LMS/HSS key's FILE.state or FILE.journal is
+/// refused (exit 3, before anything is generated), and nothing is written through it.
+#[cfg(unix)]
+#[test]
+fn dangling_symlink_at_lms_state_or_journal_is_refused() {
+    let dir = scratch("dangling_lms");
+    for suffix in ["state", "journal"] {
+        let key = dir.join(format!("{suffix}.pem"));
+        let link = dir.join(format!("{suffix}.pem.{suffix}"));
+        let target = dir.join(format!("nonexistent-{suffix}"));
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+        let out = keelsign(&[&"keygen", &"--alg", &"lms-sha256-m32-h10", &"--out", &key]);
+        assert_exit(&out, 3);
+        let err = stderr(&out);
+        assert!(
+            err.contains("--force") && err.contains(&format!(".pem.{suffix}")),
+            "{err}"
+        );
+        assert!(
+            !target.exists(),
+            "{suffix}: nothing is written through the link"
+        );
+        assert!(!key.exists(), "{suffix}: no key without its state");
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .expect("link")
+                .file_type()
+                .is_symlink()
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn dangling_symlink_at_out_is_refused() {

@@ -376,7 +376,7 @@ Worked examples with published test vectors:
 | 3 | the output file exists and `--force` was not given |
 | 4 | passphrase: wrong, missing for an encrypted key, or given for an unencrypted key |
 | 5 | corrupt or unsupported key file (not PEM/DER PKCS#8, over 1 MiB, a public key, an unsupported algorithm, ML-DSA `expandedKey`/`both`, parameters present, a v2 public key that does not match, an unsupported encryption scheme or out-of-range KDF parameters; for `verify --pub`: not a PEM/DER `SubjectPublicKeyInfo`, an unknown OID, parameters present, the wrong length, or a private key) |
-| 6 | the key file holds a different algorithm than `--alg` (for `sign`: `--key` is Ed25519 or `--hybrid-key` is not Ed25519) |
+| 6 | the key file holds a different algorithm than `--alg` (or, for an LMS/HSS key, a different height than the `lms-sha256-m32-hNN` value) (for `sign`: `--key` is Ed25519 or `--hybrid-key` is not Ed25519) |
 | 7 | `sign` / `inspect` / `verify`: the input image is rejected as malformed (see [signing.md](signing.md#exit-codes)) |
 | 8 | `sign`: the input image already carries keelsign TLVs and `--replace` was not given (see [signing.md](signing.md#exit-codes)) |
 | 9 | `verify`: the image is not verified under the policy (see [verify.md](verify.md#exit-codes)) |

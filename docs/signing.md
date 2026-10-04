@@ -203,7 +203,7 @@ Readers should check `schema_version` and ignore fields they do not know.
 | 3 | `OUT` exists and `--force` was not given |
 | 4 | passphrase: wrong, missing for an encrypted key, or given when neither key is encrypted |
 | 5 | corrupt or unsupported key file (as in [keys.md](keys.md#exit-codes)) |
-| 6 | `--key` is an Ed25519 key (it must be ML-DSA or LMS/HSS) or `--hybrid-key` is not an Ed25519 key |
+| 6 | `--key` is an Ed25519 key (it must be ML-DSA or LMS/HSS) or `--hybrid-key` is not an Ed25519 key; for `pubkey --alg`, a different algorithm (or, for an LMS/HSS key, a different height than the `lms-sha256-m32-hNN` value) |
 | 7 | the input image is rejected: not an MCUboot image, an image rule broken, bytes after the TLV area, larger than 64 MiB, TLV area too large (`verify` and `inspect`: not an MCUboot image or larger than 64 MiB) |
 | 8 | the input image already carries keelsign TLVs (or, with `--hybrid-key`, an Ed25519 signature) and `--replace` was not given |
 | 9 | `verify`: the image is not verified under the policy (see [verify.md](verify.md#exit-codes)) |

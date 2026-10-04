@@ -227,13 +227,7 @@ fn sign_pq(
         (PrivateKey::LmsHss(key), Some(r)) => {
             // The leaf is already reserved: say that it is spent, so nobody tries to
             // "retry" it by editing the state file.
-            let spent = format!(
-                "leaf {} is reserved in {} and is now spent (it is never reused; the next \
-                 sign uses leaf {})",
-                r.leaf,
-                r.state_path.display(),
-                r.leaf + 1
-            );
+            let spent = spent_leaf_message(r.leaf, r.leaves, &r.state_path);
             key.sign(r.leaf, m, &r.caches, None).map_err(|e| match e {
                 crate::lms_sign::LmsError::Cache(reason) => Error::LmsState {
                     path: r.state_path.clone(),
@@ -247,6 +241,20 @@ fn sign_pq(
         )),
         (other, _) => sign_ml_dsa(other, m),
     }
+}
+
+/// What a signing failure after the reservation adds: the reserved leaf is spent, and
+/// what the next `sign` does (the next leaf, or nothing if that was the last one).
+fn spent_leaf_message(leaf: u64, leaves: u64, state_path: &Path) -> String {
+    let next = if leaf.saturating_add(1) >= leaves {
+        format!("it was the last of the key's {leaves} leaves, so the key is now exhausted")
+    } else {
+        format!("the next sign uses leaf {}", leaf + 1)
+    };
+    format!(
+        "leaf {leaf} is reserved in {} and is now spent (it is never reused; {next})",
+        state_path.display()
+    )
 }
 
 /// An image ready to sign: its existing keelsign TLVs (and, for a hybrid image, Ed25519
@@ -532,6 +540,18 @@ mod tests {
         assert_eq!(lines[0], "algorithm: ml-dsa-65");
         assert!(lines[3].starts_with("signed: out.bin ("), "{lines:?}");
         assert!(lines[3].contains(" bytes, +"), "{lines:?}");
+    }
+
+    #[test]
+    fn spent_leaf_message_names_the_next_leaf_or_exhaustion() {
+        let state = Path::new("k.pem.state");
+        let middle = spent_leaf_message(5, 1024, state);
+        assert!(middle.contains("leaf 5 is reserved in k.pem.state and is now spent"));
+        assert!(middle.contains("the next sign uses leaf 6"), "{middle}");
+        let last = spent_leaf_message(1023, 1024, state);
+        assert!(last.contains("leaf 1023 is reserved"), "{last}");
+        assert!(last.contains("the key is now exhausted"), "{last}");
+        assert!(!last.contains("leaf 1024"), "{last}");
     }
 
     #[test]

@@ -584,14 +584,18 @@ pub fn check_kat_summary(summary: &Summary, expected: u32) -> Result<(), &'stati
 
 /// The on-target rotation check of the fixture `bytes`: [`check_rotation`] with cases
 /// [`ids::ROTATION_A`] and [`ids::ROTATION_B`], or [`Rotation::Skipped`] when
-/// `overridden` (pass [`TARGET_OVERRIDDEN`] for [`LMS_TARGET`]).
+/// `overridden` (pass [`TARGET_OVERRIDDEN`] for [`LMS_TARGET`]) and the fixture has
+/// neither rotation case.
 pub fn target_rotation(bytes: &[u8], overridden: bool) -> Result<Rotation, &'static str> {
-    if overridden {
+    let fixture = Fixture::parse(bytes).map_err(|_| "fixture does not parse")?;
+    let (a, b) = (fixture.case(ids::ROTATION_A), fixture.case(ids::ROTATION_B));
+    // Skipped only for an override fixture that has no rotation cases; an override that
+    // has them (such as a copy of the default fixture) is checked.
+    if overridden && a.is_none() && b.is_none() {
         return Ok(Rotation::Skipped);
     }
-    let fixture = Fixture::parse(bytes).map_err(|_| "fixture does not parse")?;
-    let a = fixture.case(ids::ROTATION_A).ok_or("no rotation key A")?;
-    let b = fixture.case(ids::ROTATION_B).ok_or("no rotation key B")?;
+    let a = a.ok_or("no rotation key A")?;
+    let b = b.ok_or("no rotation key B")?;
     check_rotation(&a, &b)?;
     Ok(Rotation::Checked)
 }

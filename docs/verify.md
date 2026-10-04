@@ -183,7 +183,7 @@ keelsign/src/error.rs assigns these codes, and [keys.md](keys.md#exit-codes) and
 | 3 | the output file exists and `--force` was not given |
 | 4 | passphrase: wrong, missing or unexpected |
 | 5 | corrupt or unsupported key file, private or public (for `--pub`: not a `SubjectPublicKeyInfo`, an unknown OID, parameters present, the wrong length, a private key) |
-| 6 | a key of the wrong kind (`--alg`, `sign --key`, `--hybrid-key`) |
+| 6 | a key of the wrong kind (`--alg`, `sign --key`, `--hybrid-key`) (or, for an LMS/HSS key, a different height than the `lms-sha256-m32-hNN` value) |
 | 7 | the image is rejected as malformed (`verify`, `inspect`, `sign`): not an MCUboot image or larger than 64 MiB; for `sign` also an image rule broken or bytes after the TLV area |
 | 8 | `sign`: the image already carries keelsign TLVs (or, with `--hybrid-key`, an Ed25519 pair) and `--replace` was not given |
 | 9 | `verify`: the image is not verified under the policy: a signature invalid or malformed, a key not trusted, a TLV missing or repeated, the Ed25519 half rejected, an image rule broken (including a digest mismatch), an unsupported parameter set |

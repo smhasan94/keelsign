@@ -633,7 +633,9 @@ fn target_kat_runs_rotation_on_the_default_fixture_and_skips_it_for_an_override(
         target_rotation(LMS_TARGET, TARGET_OVERRIDDEN),
         Ok(Rotation::Checked)
     );
-    assert_eq!(target_rotation(LMS_TARGET, true), Ok(Rotation::Skipped));
+    // Overridden with a fixture that has the rotation cases (here the default one):
+    // the rotation check still runs.
+    assert_eq!(target_rotation(LMS_TARGET, true), Ok(Rotation::Checked));
     // A fixture without the rotation cases (the 14-case header cut to its first case).
     let first = Fixture::parse(LMS_TARGET)
         .expect("parses")
