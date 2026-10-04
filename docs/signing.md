@@ -187,12 +187,15 @@ Readers should check `schema_version` and ignore fields they do not know.
 | 3 | `OUT` exists and `--force` was not given |
 | 4 | passphrase: wrong, missing for an encrypted key, or given when neither key is encrypted |
 | 5 | corrupt or unsupported key file (as in [keys.md](keys.md#exit-codes)) |
-| 6 | `--key` is not an ML-DSA key or `--hybrid-key` is not an Ed25519 key |
+| 6 | `--key` is an Ed25519 key (it must be ML-DSA or LMS/HSS) or `--hybrid-key` is not an Ed25519 key |
 | 7 | the input image is rejected: not an MCUboot image, an image rule broken, bytes after the TLV area, larger than 64 MiB, TLV area too large (`verify` and `inspect`: not an MCUboot image or larger than 64 MiB) |
 | 8 | the input image already carries keelsign TLVs (or, with `--hybrid-key`, an Ed25519 signature) and `--replace` was not given |
 | 9 | `verify`: the image is not verified under the policy (see [verify.md](verify.md#exit-codes)) |
+| 10 | `sign` with an LMS/HSS key: its state is refused: the state file or journal is missing, the state file belongs to another key, is behind the journal (restored from a copy: retire the key), or is corrupt, or another keelsign process holds the key's lock (see [keys.md](keys.md#stateful-lms-keys)) |
+| 11 | `sign` with an LMS/HSS key: `LeafIndexExhausted`, every leaf of the key is used; generate a new key |
 
-The table is final; see [verify.md](verify.md#exit-codes) for `verify`'s codes. Error
+The table is final for codes 0 to 9; SHA-67 added 10 and 11 for stateful LMS/HSS keys. See
+[verify.md](verify.md#exit-codes) for `verify`'s codes. Error
 messages go to standard error, start with `error:` and name the file.
 
 ## Interoperability checks

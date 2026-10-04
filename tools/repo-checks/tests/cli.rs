@@ -85,17 +85,18 @@ fn exit_code_rows(text: &str, prefix: &str) -> Vec<u8> {
 }
 
 /// docs/signing.md, docs/keys.md and docs/verify.md list exactly the exit codes
-/// keelsign/src/error.rs documents and assigns (0 to 9; SHA-53 made the table final).
+/// keelsign/src/error.rs documents and assigns (0 to 9, final since SHA-53; SHA-67 added
+/// 10 and 11 for stateful LMS/HSS keys).
 #[test]
 fn signing_doc_exit_codes_match_error_rs() {
     let error_rs = read("keelsign/src/error.rs");
     let documented = exit_code_rows(&error_rs, "//! ");
-    let expected: Vec<u8> = (0..=9).collect();
+    let expected: Vec<u8> = (0..=11).collect();
     assert_eq!(
         documented, expected,
         "keelsign/src/error.rs exit-code table"
     );
-    for code in 1..=9 {
+    for code in 1..=11 {
         assert!(
             error_rs.contains(&format!("=> {code},")) || error_rs.contains(&format!("=> {code}\n")),
             "error.rs assigns exit code {code}"

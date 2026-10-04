@@ -25,7 +25,8 @@ pub enum Command {
     Keygen(KeygenArgs),
     /// Export the public key of a private key file (SubjectPublicKeyInfo).
     Pubkey(PubkeyArgs),
-    /// Add an ML-DSA signature (optionally with an Ed25519 pair) to an MCUboot image.
+    /// Add an ML-DSA or LMS/HSS signature (optionally with an Ed25519 pair) to an MCUboot
+    /// image.
     Sign(SignArgs),
     /// Describe an MCUboot image: header, TLVs, digest, key IDs and signatures.
     Inspect(InspectArgs),
@@ -89,7 +90,9 @@ pub struct InspectArgs {
 /// Arguments of `keelsign sign`.
 #[derive(Debug, Args)]
 pub struct SignArgs {
-    /// ML-DSA-44 or ML-DSA-65 private key file (PKCS#8 PEM or DER, encrypted or not).
+    /// ML-DSA-44, ML-DSA-65 or LMS/HSS private key file (PKCS#8 PEM or DER, encrypted or
+    /// not). An LMS/HSS key uses up one leaf per signature, recorded in FILE.state and
+    /// FILE.journal before it signs.
     #[arg(long, value_name = "FILE")]
     pub key: PathBuf,
     /// Ed25519 private key file: also add MCUboot's KEYHASH + ED25519 pair (hybrid image).

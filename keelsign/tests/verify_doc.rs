@@ -73,13 +73,13 @@ fn verify_md_documents_the_final_exit_code_table() {
         assert!(doc.contains(needle), "docs/verify.md lacks `{needle}`");
     }
 
-    // The final table: one row per code 0..=9, the same codes as docs/keys.md and
+    // The table: one row per code 0..=11 (SHA-67 added 10 and 11), the same codes as docs/keys.md and
     // docs/signing.md, and the meanings keelsign/src/error.rs gives the new code.
     let rows = exit_rows(&doc);
     let codes: Vec<u8> = rows.iter().map(|(c, _)| *c).collect();
     assert_eq!(
         codes,
-        (0..=9).collect::<Vec<u8>>(),
+        (0..=11).collect::<Vec<u8>>(),
         "docs/verify.md exit codes"
     );
     for other in ["docs/keys.md", "docs/signing.md"] {
