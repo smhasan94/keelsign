@@ -137,7 +137,8 @@ fn pq_algorithm(key: &PrivateKey) -> Result<Algorithm, Error> {
     match key.algorithm() {
         KeyAlgorithm::MlDsa44 => Ok(Algorithm::MlDsa44),
         KeyAlgorithm::MlDsa65 => Ok(Algorithm::MlDsa65),
-        KeyAlgorithm::Ed25519 => Err(Error::Internal("not an ML-DSA key".into())),
+        KeyAlgorithm::LmsHss => Ok(Algorithm::LmsHss),
+        KeyAlgorithm::Ed25519 => Err(Error::Internal("not a post-quantum key".into())),
     }
 }
 
@@ -158,7 +159,9 @@ fn sign_ml_dsa(key: &PrivateKey, m: &[u8; 32]) -> Result<Vec<u8>, Error> {
             .map_err(rng_error)?
             .encode()
             .to_vec()),
-        PrivateKey::Ed25519(_) => Err(Error::Internal("not an ML-DSA key".into())),
+        PrivateKey::Ed25519(_) | PrivateKey::LmsHss(_) => {
+            Err(Error::Internal("not an ML-DSA key".into()))
+        }
     }
 }
 
@@ -376,7 +379,13 @@ mod tests {
     }
 
     fn key(alg: KeyAlgorithm) -> PrivateKey {
-        PrivateKey::generate(alg).expect("generate")
+        let spec = match alg {
+            KeyAlgorithm::MlDsa44 => crate::keys::KeySpec::MlDsa44,
+            KeyAlgorithm::MlDsa65 => crate::keys::KeySpec::MlDsa65,
+            KeyAlgorithm::Ed25519 => crate::keys::KeySpec::Ed25519,
+            KeyAlgorithm::LmsHss => panic!("LMS keys need a parameter set"),
+        };
+        PrivateKey::generate(spec).expect("generate")
     }
 
     #[test]

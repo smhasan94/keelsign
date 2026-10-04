@@ -191,11 +191,12 @@ pub fn ed25519_public(key: &PrivateKey) -> [u8; 32] {
     }
 }
 
-/// The keelsign-verify algorithm of an ML-DSA key.
+/// The keelsign-verify algorithm of a post-quantum (ML-DSA or LMS/HSS) key.
 pub fn pq_algorithm(key: &PrivateKey) -> Algorithm {
     match key {
         PrivateKey::MlDsa44(_) => Algorithm::MlDsa44,
         PrivateKey::MlDsa65(_) => Algorithm::MlDsa65,
+        PrivateKey::LmsHss(_) => Algorithm::LmsHss,
         PrivateKey::Ed25519(_) => panic!("not an ML-DSA key"),
     }
 }

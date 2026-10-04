@@ -2,7 +2,8 @@
 
 use crate::error::Error;
 use crate::keyfile;
-use crate::keys::{KeyAlgorithm, PrivateKey};
+use crate::keys::{KeyAlgorithm, KeySpec, PrivateKey};
+use crate::lms_sign::LmsParams;
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -19,7 +20,8 @@ pub struct Cli {
 /// A `keelsign` command.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Generate a private key file (PKCS#8, mode 0600).
+    /// Generate a private key file (PKCS#8, mode 0600); for LMS/HSS also its state file
+    /// and journal.
     Keygen(KeygenArgs),
     /// Export the public key of a private key file (SubjectPublicKeyInfo).
     Pubkey(PubkeyArgs),
@@ -113,9 +115,14 @@ pub struct SignArgs {
 /// Arguments of `keelsign keygen`.
 #[derive(Debug, Args)]
 pub struct KeygenArgs {
-    /// Signature algorithm of the new key.
+    /// Signature algorithm of the new key. The LMS/HSS keys (LMS_SHA256_M32_H10/H15/H20
+    /// with LMOTS_SHA256_N32_W8) are stateful: see docs/keys.md.
     #[arg(long, value_enum)]
     pub alg: AlgArg,
+    /// HSS levels of an LMS/HSS key: 1 (a single LMS tree, CNSA 2.0) or 2 (2^(2h)
+    /// signatures; outside CNSA 2.0). Default 1.
+    #[arg(long, value_name = "L", value_parser = clap::value_parser!(u8).range(1..=2))]
+    pub hss_levels: Option<u8>,
     /// Private key file to create.
     #[arg(long, value_name = "FILE")]
     pub out: PathBuf,
@@ -177,6 +184,55 @@ pub enum AlgArg {
     /// Ed25519 (RFC 8032), for hybrid images.
     #[value(name = "ed25519")]
     Ed25519,
+    /// LMS/HSS, LMS_SHA256_M32_H10 / LMOTS_SHA256_N32_W8: 1,024 signatures per level
+    /// (stateful).
+    #[value(name = "lms-sha256-m32-h10")]
+    LmsSha256M32H10,
+    /// LMS/HSS, LMS_SHA256_M32_H15 / LMOTS_SHA256_N32_W8: 32,768 signatures per level
+    /// (stateful).
+    #[value(name = "lms-sha256-m32-h15")]
+    LmsSha256M32H15,
+    /// LMS/HSS, LMS_SHA256_M32_H20 / LMOTS_SHA256_N32_W8: 1,048,576 signatures per level
+    /// (stateful; key generation takes minutes).
+    #[value(name = "lms-sha256-m32-h20")]
+    LmsSha256M32H20,
+}
+
+impl AlgArg {
+    /// The LMS parameter set of an LMS/HSS value.
+    pub fn lms_params(self) -> Option<LmsParams> {
+        match self {
+            Self::LmsSha256M32H10 => LmsParams::from_height(10),
+            Self::LmsSha256M32H15 => LmsParams::from_height(15),
+            Self::LmsSha256M32H20 => LmsParams::from_height(20),
+            Self::MlDsa44 | Self::MlDsa65 | Self::Ed25519 => None,
+        }
+    }
+
+    /// The key `keygen --alg self --hss-levels levels` generates.
+    pub fn key_spec(self, levels: Option<u8>) -> Result<KeySpec, Error> {
+        let spec = match self {
+            Self::MlDsa44 => KeySpec::MlDsa44,
+            Self::MlDsa65 => KeySpec::MlDsa65,
+            Self::Ed25519 => KeySpec::Ed25519,
+            Self::LmsSha256M32H10 | Self::LmsSha256M32H15 | Self::LmsSha256M32H20 => {
+                let params = self
+                    .lms_params()
+                    .ok_or_else(|| Error::Internal("no LMS parameter set".into()))?;
+                return Ok(KeySpec::LmsHss {
+                    params,
+                    levels: levels.unwrap_or(1),
+                });
+            }
+        };
+        if levels.is_some() {
+            return Err(Error::Usage(format!(
+                "--hss-levels applies to LMS/HSS keys only, not --alg {}",
+                spec.algorithm()
+            )));
+        }
+        Ok(spec)
+    }
 }
 
 impl From<AlgArg> for KeyAlgorithm {
@@ -185,6 +241,9 @@ impl From<AlgArg> for KeyAlgorithm {
             AlgArg::MlDsa44 => Self::MlDsa44,
             AlgArg::MlDsa65 => Self::MlDsa65,
             AlgArg::Ed25519 => Self::Ed25519,
+            AlgArg::LmsSha256M32H10 | AlgArg::LmsSha256M32H15 | AlgArg::LmsSha256M32H20 => {
+                Self::LmsHss
+            }
         }
     }
 }
@@ -268,9 +327,20 @@ fn sign(args: &SignArgs) -> Result<(), Error> {
 }
 
 fn keygen(args: &KeygenArgs) -> Result<(), Error> {
+    let spec = args.alg.key_spec(args.hss_levels)?;
     keyfile::ensure_absent(&args.out, args.force)?;
     let passphrase = keyfile::read_passphrase(&args.passphrase)?;
-    let key = PrivateKey::generate(args.alg.into())?;
+    if let KeySpec::LmsHss { params, levels } = spec
+        && params.height() >= 20
+    {
+        writeln!(
+            io::stderr().lock(),
+            "note: computing {levels} LMS tree(s) of 2^{} leaves; this takes minutes",
+            params.height()
+        )
+        .map_err(out_error)?;
+    }
+    let (key, _caches) = PrivateKey::generate_with_caches(spec)?;
     let encoded: zeroize::Zeroizing<Vec<u8>> = match (args.format, &passphrase) {
         (FormatArg::Pem, None) => zeroize::Zeroizing::new(key.to_pem()?.as_bytes().to_vec()),
         (FormatArg::Pem, Some(pw)) => {
@@ -283,6 +353,9 @@ fn keygen(args: &KeygenArgs) -> Result<(), Error> {
 
     let mut stdout = io::stdout().lock();
     writeln!(stdout, "algorithm: {}", key.algorithm()).map_err(out_error)?;
+    if let Some(lms) = key.as_lms() {
+        writeln!(stdout, "parameter set: {}", lms.parameter_set()).map_err(out_error)?;
+    }
     writeln!(stdout, "{}", key.identity()).map_err(out_error)?;
     writeln!(
         stdout,

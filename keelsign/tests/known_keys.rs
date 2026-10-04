@@ -76,7 +76,7 @@ fn mldsa_seed_pkcs8(algorithm: KeyAlgorithm, seed: &[u8; 32]) -> Vec<u8> {
     der[17] = match algorithm {
         KeyAlgorithm::MlDsa44 => 0x11,
         KeyAlgorithm::MlDsa65 => 0x12,
-        KeyAlgorithm::Ed25519 => unreachable!(),
+        KeyAlgorithm::Ed25519 | KeyAlgorithm::LmsHss => unreachable!(),
     };
     der.extend_from_slice(&[0x04, 0x22, 0x80, 0x20]);
     der.extend_from_slice(seed);
