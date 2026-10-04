@@ -92,8 +92,8 @@ fn signing_md_documents_inspect_schema_and_stability_policy() {
     assert_eq!(keelsign::inspect::SCHEMA_VERSION, 1);
     assert!(doc.contains(&format!("`format` is `\"{}\"`", keelsign::inspect::FORMAT)));
 
-    // One exit-code row per code 0..=8.
-    for code in 0..=8 {
+    // One exit-code row per code 0..=9.
+    for code in 0..=9 {
         assert!(
             doc.lines().any(|l| l.starts_with(&format!("| {code} |"))),
             "docs/signing.md has no exit-code row for {code}"

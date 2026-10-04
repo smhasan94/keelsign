@@ -2,17 +2,18 @@
 //!
 //! | Exit code | Meaning |
 //! |---|---|
-//! | 0 | success |
-//! | 1 | I/O, random-number generator or internal error |
-//! | 2 | usage error (bad arguments, empty passphrase) |
+//! | 0 | success; for `verify`, the image is verified under the policy |
+//! | 1 | I/O error (a missing or unreadable image, key or `--pub` file), random-number generator or internal error |
+//! | 2 | usage error (bad arguments, empty passphrase; for `verify`: no `--pub`, more than 8 `--pub` keys of a kind, the same key twice, a `--policy` that needs a kind of key no `--pub` gives) |
 //! | 3 | output file exists and `--force` was not given |
 //! | 4 | passphrase problem: wrong, missing, or given for an unencrypted key |
-//! | 5 | corrupt or unsupported key file |
+//! | 5 | corrupt or unsupported key file, private or public (a `--pub` file that is not a supported `SubjectPublicKeyInfo`, or is a private key) |
 //! | 6 | the key file holds a different algorithm than `--alg` asks for (or, for `sign`, `--key` is not ML-DSA / `--hybrid-key` is not Ed25519) |
-//! | 7 | the input image is rejected: not an MCUboot image, breaks an image rule, has bytes after its TLV area, or is too large |
+//! | 7 | the input image is rejected as malformed: not an MCUboot image or too large (`verify`, `inspect`, `sign`); for `sign` also an image rule broken or bytes after its TLV area |
 //! | 8 | the input image already carries keelsign TLVs (or, with `--hybrid-key`, an Ed25519 pair) and `--replace` was not given |
+//! | 9 | `verify`: the image is not verified under the policy (a signature invalid or malformed, a key not trusted, a TLV missing or repeated, the Ed25519 half rejected, an image rule broken, an unsupported parameter set) |
 //!
-//! Codes 7 and 8 are provisional until the `verify` command (SHA-53) fixes its own.
+//! The table is final (docs/verify.md has the full one).
 
 use crate::keys::KeyAlgorithm;
 use std::fmt;
@@ -77,6 +78,15 @@ pub enum Error {
         /// What it already carries, for example `keelsign TLVs`.
         what: &'static str,
     },
+    /// `verify`: the image is well formed but not verified under the policy.
+    NotVerified {
+        /// The image file.
+        path: PathBuf,
+        /// The policy it was checked under.
+        policy: keelsign_verify::Policy,
+        /// Why the verifier refused it.
+        source: keelsign_verify::Error,
+    },
     /// A key of the wrong kind for its option (`sign --key` must be ML-DSA,
     /// `--hybrid-key` Ed25519).
     WrongKeyKind {
@@ -116,6 +126,7 @@ impl Error {
             Self::AlgorithmMismatch { .. } | Self::WrongKeyKind { .. } => 6,
             Self::Image { .. } => 7,
             Self::AlreadySigned { .. } => 8,
+            Self::NotVerified { .. } => 9,
         }
     }
 
@@ -154,6 +165,16 @@ impl fmt::Display for Error {
                 "{option} {} holds an {} key; {option} needs {expected}",
                 path.display(),
                 found.name()
+            ),
+            Self::NotVerified {
+                path,
+                policy,
+                source,
+            } => write!(
+                f,
+                "{}: not verified under policy {}: {source}",
+                path.display(),
+                crate::verify::policy_name(*policy)
             ),
             Self::Usage(msg) => f.write_str(msg),
             Self::Exists(path) => {
@@ -203,6 +224,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io { source, .. } => Some(source),
+            Self::NotVerified { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -276,16 +298,24 @@ mod tests {
                 },
                 8,
             ),
+            (
+                Error::NotVerified {
+                    path: path(),
+                    policy: keelsign_verify::Policy::Hybrid,
+                    source: keelsign_verify::Error::KeyNotTrusted,
+                },
+                9,
+            ),
         ];
         for (error, code) in &cases {
             assert_eq!(error.exit_code(), *code, "{error}");
             assert_ne!(error.exit_code(), 0, "{error}");
         }
-        // Every exit code 1..=8 is used, and the classes do not overlap.
+        // Every exit code 1..=9 is used, and the classes do not overlap.
         let mut codes: Vec<u8> = cases.iter().map(|(e, _)| e.exit_code()).collect();
         codes.sort_unstable();
         codes.dedup();
-        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
         let mismatch = Error::AlgorithmMismatch {
             path: path(),
@@ -302,6 +332,16 @@ mod tests {
             }
             .to_string()
             .contains("--replace")
+        );
+        assert_eq!(
+            Error::NotVerified {
+                path: PathBuf::from("app.bin"),
+                policy: keelsign_verify::Policy::PqOnly,
+                source: keelsign_verify::Error::KeyNotTrusted,
+            }
+            .to_string(),
+            "app.bin: not verified under policy pq: post-quantum key ID is not in the trusted \
+             key set"
         );
         assert!(
             Error::key_file(path(), KeyFileError::WrongPassphrase)

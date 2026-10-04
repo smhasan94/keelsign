@@ -1,9 +1,9 @@
-//! Command-line interface: `keelsign keygen`, `pubkey`, `sign` and `inspect`.
+//! Command-line interface: `keelsign keygen`, `pubkey`, `sign`, `inspect` and `verify`.
 
 use crate::error::Error;
 use crate::keyfile;
 use crate::keys::{KeyAlgorithm, PrivateKey};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
@@ -27,6 +27,50 @@ pub enum Command {
     Sign(SignArgs),
     /// Describe an MCUboot image: header, TLVs, digest, key IDs and signatures.
     Inspect(InspectArgs),
+    /// Verify an MCUboot image against trusted public keys under a policy, as the device
+    /// does.
+    Verify(VerifyArgs),
+}
+
+/// Arguments of `keelsign verify`.
+#[derive(Debug, Args)]
+pub struct VerifyArgs {
+    /// Trusted public key file (SubjectPublicKeyInfo PEM or DER: ML-DSA-44, ML-DSA-65,
+    /// Ed25519 or HSS/LMS). Repeat for several keys: up to 8 post-quantum and 8 Ed25519.
+    #[arg(long = "pub", value_name = "FILE", required = true, action = ArgAction::Append)]
+    pub pubs: Vec<PathBuf>,
+    /// Which signatures to require; without it, inferred from the keys (post-quantum
+    /// keys only: pq; Ed25519 keys only: classical; both: hybrid).
+    #[arg(long, value_enum)]
+    pub policy: Option<PolicyArg>,
+    /// Verify LMS/HSS under the strict CNSA 2.0 parameter policy: single-tree LMS only;
+    /// ML-DSA and multi-level HSS signatures are refused.
+    #[arg(long = "cnsa-2.0")]
+    pub cnsa_2_0: bool,
+    /// The MCUboot image (bytes after its TLV area, such as padding, are ignored).
+    #[arg(value_name = "IMAGE")]
+    pub image: PathBuf,
+}
+
+/// `--policy` values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PolicyArg {
+    /// The Ed25519 half only (MCUboot's KEYHASH + ED25519 pair).
+    Classical,
+    /// The post-quantum half only (keelsign key ID + PQ signature).
+    Pq,
+    /// Both halves.
+    Hybrid,
+}
+
+impl From<PolicyArg> for keelsign_verify::Policy {
+    fn from(policy: PolicyArg) -> Self {
+        match policy {
+            PolicyArg::Classical => Self::ClassicalOnly,
+            PolicyArg::Pq => Self::PqOnly,
+            PolicyArg::Hybrid => Self::Hybrid,
+        }
+    }
 }
 
 /// Arguments of `keelsign inspect`.
@@ -168,7 +212,23 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
         Command::Pubkey(args) => pubkey(args),
         Command::Sign(args) => sign(args),
         Command::Inspect(args) => inspect(args),
+        Command::Verify(args) => verify(args),
     }
+}
+
+fn verify(args: &VerifyArgs) -> Result<(), Error> {
+    let request = crate::verify::VerifyRequest {
+        image: args.image.clone(),
+        pubs: args.pubs.clone(),
+        policy: args.policy,
+        cnsa_2_0: args.cnsa_2_0,
+    };
+    let report = crate::verify::run(&request)?;
+    let mut stdout = io::stdout().lock();
+    for line in report.lines() {
+        writeln!(stdout, "{line}").map_err(out_error)?;
+    }
+    stdout.flush().map_err(out_error)
 }
 
 fn inspect(args: &InspectArgs) -> Result<(), Error> {
