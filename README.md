@@ -92,6 +92,9 @@ A Raspberry Pi Debug Probe drives the Pico 2 W. See [docs/hardware.md](docs/hard
   precedence, the policy matrix and anti-rollback.
 - [docs/keys.md](docs/keys.md): `keelsign keygen` and `pubkey`, the key file formats
   and OIDs, passphrase encryption, key IDs and KEYHASH, and the exit codes.
+- [docs/signing.md](docs/signing.md) and [docs/verify.md](docs/verify.md):
+  `keelsign sign`, `inspect` and `verify`, the policies `verify` checks, public key
+  files and the final exit-code table.
 - [docs/benchmarks.md](docs/benchmarks.md): on-target known-answer tests, stack and flash
   per algorithm, and the toolchains every figure was measured with.
 - [docs/setup.md](docs/setup.md): toolchain, probes, flashing the example boards and

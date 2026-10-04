@@ -77,7 +77,7 @@ fn signing_md_documents_inspect_schema_and_stability_policy() {
         "imgtool dumpinfo",
         "imgtool verify",
         // Pointers.
-        "SHA-53",
+        "verify.md",
         "E7.2",
     ] {
         assert!(doc.contains(needle), "docs/signing.md lacks `{needle}`");

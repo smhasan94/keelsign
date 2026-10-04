@@ -3,8 +3,9 @@
 `keelsign keygen` creates signing keys and `keelsign pubkey` exports their public keys.
 This page fixes the file formats, the algorithm OIDs, passphrase encryption, the key
 identifiers printed, file permissions and the exit codes. The CLI is pre-release: image
-signing (`sign`) and `inspect` are in [signing.md](signing.md); `verify` is not written
-yet (SHA-53). LMS/HSS keys are stateful and come with their own key files later (E7.2).
+signing (`sign`) and `inspect` are in [signing.md](signing.md); `verify`, which reads the
+public key files below (and HSS/LMS ones), is in [verify.md](verify.md). LMS/HSS keys
+are stateful and come with their own key files later (E7.2).
 
 ## Commands
 
@@ -110,6 +111,9 @@ file starts with a fixed header:
 | ML-DSA-44 | `30820532300b06096086480165030403110382052100` | 1,334 bytes |
 | ML-DSA-65 | `308207b2300b0609608648016503040312038207a100` | 1,974 bytes |
 | Ed25519 | `302a300506032b6570032100` | 44 bytes |
+
+`keelsign verify --pub` reads these files, PEM or DER, and HSS/LMS public keys in the
+RFC 8708 form ([verify.md](verify.md#public-key-files)).
 
 ## Passphrase encryption
 

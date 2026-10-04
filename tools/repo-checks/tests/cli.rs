@@ -84,8 +84,8 @@ fn exit_code_rows(text: &str, prefix: &str) -> Vec<u8> {
         .collect()
 }
 
-/// docs/signing.md and docs/keys.md list exactly the exit codes keelsign/src/error.rs
-/// documents and assigns (0 to 9; SHA-53 made the table final).
+/// docs/signing.md, docs/keys.md and docs/verify.md list exactly the exit codes
+/// keelsign/src/error.rs documents and assigns (0 to 9; SHA-53 made the table final).
 #[test]
 fn signing_doc_exit_codes_match_error_rs() {
     let error_rs = read("keelsign/src/error.rs");
@@ -101,7 +101,7 @@ fn signing_doc_exit_codes_match_error_rs() {
             "error.rs assigns exit code {code}"
         );
     }
-    for doc in ["docs/signing.md", "docs/keys.md"] {
+    for doc in ["docs/signing.md", "docs/keys.md", "docs/verify.md"] {
         let text = read(doc);
         let section = text
             .split("\n## Exit codes\n")
