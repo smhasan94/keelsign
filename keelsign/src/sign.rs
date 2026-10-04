@@ -5,13 +5,18 @@
 //! changed: the new TLVs are appended to the unprotected area, after every MCUboot TLV,
 //! in the order of docs/image-format.md (`KEYHASH`, `ED25519`, key ID, PQ signature).
 //! ML-DSA signing is hedged (FIPS 204 randomized, with the operating system's
-//! random-number generator), pure, with the keelsign context. Every image is verified
-//! with `keelsign_verify::verify` before it is written.
+//! random-number generator), pure, with the keelsign context. LMS/HSS signing
+//! ([`crate::lms_sign`]) first reserves a leaf in the key's state file
+//! ([`crate::lms_state::reserve`]): after the image is parsed, the keys are loaded and
+//! `M` is computed, before any signature is computed. Every image is verified with
+//! `keelsign_verify::verify` before it is written.
 
 use crate::error::{Error, KeyFileError};
 use crate::image_file::{self, Precheck, UnprotectedArea};
 use crate::keyfile;
 use crate::keys::{KeyAlgorithm, PrivateKey};
+use crate::lms_state::Reservation;
+use keelsign_verify::image::Image;
 use keelsign_verify::image::{IMAGE_TLV_ED25519, IMAGE_TLV_KEYHASH};
 use keelsign_verify::tlv::{MLDSA_CONTEXT, TLV_KEELSIGN_KEY_ID};
 use keelsign_verify::{
@@ -28,7 +33,7 @@ pub struct SignRequest {
     pub input: PathBuf,
     /// The signed image to write.
     pub output: PathBuf,
-    /// The ML-DSA private key file (`--key`).
+    /// The ML-DSA or LMS/HSS private key file (`--key`).
     pub key: PathBuf,
     /// The Ed25519 private key file (`--hybrid-key`), for a hybrid image.
     pub hybrid_key: Option<PathBuf>,
@@ -53,11 +58,24 @@ pub struct SignReport {
     pub output_len: usize,
     /// Length of the input image.
     pub input_len: usize,
+    /// The leaf an LMS/HSS signature used.
+    pub leaf: Option<LeafReport>,
+}
+
+/// The leaf an LMS/HSS signature used, for `sign`'s report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeafReport {
+    /// The leaf (global over both HSS levels).
+    pub index: u64,
+    /// The number of leaves of the key.
+    pub total: u64,
+    /// The state file, which already names the next leaf.
+    pub state_path: PathBuf,
 }
 
 impl SignReport {
     /// The report lines (`algorithm:`, `key id:`, optional `keyhash:`, `image digest:`,
-    /// `signed:`), without a trailing newline.
+    /// for LMS/HSS `leaf:` and `state:`, then `signed:`), without a trailing newline.
     pub fn lines(&self, output: &Path) -> Vec<String> {
         let mut lines = vec![
             format!("algorithm: {}", self.algorithm),
@@ -67,6 +85,19 @@ impl SignReport {
             lines.push(format!("keyhash: {}", crate::keys::hex(keyhash)));
         }
         lines.push(format!("image digest: {}", crate::keys::hex(&self.digest)));
+        if let Some(leaf) = &self.leaf {
+            lines.push(format!(
+                "leaf: {} of {} ({} left)",
+                leaf.index,
+                leaf.total,
+                leaf.total - leaf.index - 1
+            ));
+            lines.push(format!(
+                "state: {} (next leaf {})",
+                leaf.state_path.display(),
+                leaf.index + 1
+            ));
+        }
         let added = self.output_len as i128 - self.input_len as i128;
         lines.push(format!(
             "signed: {} ({} bytes, {added:+} bytes of TLVs)",
@@ -92,23 +123,20 @@ fn load_key(path: &Path, passphrase: Option<&[u8]>) -> Result<(PrivateKey, bool)
     }
 }
 
-/// The ML-DSA key of `--key` and the Ed25519 key of `--hybrid-key`, with the shared
-/// passphrase applied to whichever is encrypted.
+/// The ML-DSA or LMS/HSS key of `--key` and the Ed25519 key of `--hybrid-key`, with the
+/// shared passphrase applied to whichever is encrypted.
 pub fn load_keys(
     key: &Path,
     hybrid_key: Option<&Path>,
     passphrase: Option<&[u8]>,
 ) -> Result<(PrivateKey, Option<PrivateKey>), Error> {
     let (pq, pq_used) = load_key(key, passphrase)?;
-    if !matches!(
-        pq.algorithm(),
-        KeyAlgorithm::MlDsa44 | KeyAlgorithm::MlDsa65
-    ) {
+    if pq.algorithm() == KeyAlgorithm::Ed25519 {
         return Err(Error::WrongKeyKind {
             path: key.to_path_buf(),
             option: "--key",
             found: pq.algorithm(),
-            expected: "an ML-DSA-44 or ML-DSA-65 key (LMS/HSS signing is not supported yet)",
+            expected: "an ML-DSA-44, ML-DSA-65 or LMS/HSS key",
         });
     }
     let (ed, ed_used) = match hybrid_key {
@@ -132,12 +160,13 @@ pub fn load_keys(
     Ok((pq, ed))
 }
 
-/// The post-quantum algorithm and TLV type of an ML-DSA key.
+/// The post-quantum algorithm (and so the TLV type) of an ML-DSA or LMS/HSS key.
 fn pq_algorithm(key: &PrivateKey) -> Result<Algorithm, Error> {
     match key.algorithm() {
         KeyAlgorithm::MlDsa44 => Ok(Algorithm::MlDsa44),
         KeyAlgorithm::MlDsa65 => Ok(Algorithm::MlDsa65),
-        KeyAlgorithm::Ed25519 => Err(Error::Internal("not an ML-DSA key".into())),
+        KeyAlgorithm::LmsHss => Ok(Algorithm::LmsHss),
+        KeyAlgorithm::Ed25519 => Err(Error::Internal("not a post-quantum key".into())),
     }
 }
 
@@ -158,7 +187,9 @@ fn sign_ml_dsa(key: &PrivateKey, m: &[u8; 32]) -> Result<Vec<u8>, Error> {
             .map_err(rng_error)?
             .encode()
             .to_vec()),
-        PrivateKey::Ed25519(_) => Err(Error::Internal("not an ML-DSA key".into())),
+        PrivateKey::Ed25519(_) | PrivateKey::LmsHss(_) => {
+            Err(Error::Internal("not an ML-DSA key".into()))
+        }
     }
 }
 
@@ -185,15 +216,76 @@ fn trailing_error(input: &Path, trailing: usize) -> Error {
     }
 }
 
-/// Sign the image `bytes` (read from `input`, for messages) with `pq` and, for a hybrid
-/// image, `ed`. Returns the signed image (not yet self-checked) and the report.
-pub fn sign_image(
-    input: &Path,
-    bytes: &[u8],
+/// The post-quantum signature over `m`: hedged ML-DSA, or LMS/HSS with the leaf of
+/// `reservation` (which an LMS/HSS key needs).
+fn sign_pq(
     pq: &PrivateKey,
-    ed: Option<&PrivateKey>,
+    m: &[u8; 32],
+    reservation: Option<&Reservation>,
+) -> Result<Vec<u8>, Error> {
+    match (pq, reservation) {
+        (PrivateKey::LmsHss(key), Some(r)) => {
+            // The leaf is already reserved: say that it is spent, so nobody tries to
+            // "retry" it by editing the state file.
+            let spent = spent_leaf_message(r.leaf, r.leaves, &r.state_path);
+            key.sign(r.leaf, m, &r.caches, None).map_err(|e| match e {
+                crate::lms_sign::LmsError::Cache(reason) => Error::LmsState {
+                    path: r.state_path.clone(),
+                    reason: crate::error::LmsStateError::Corrupt(format!("{reason}; {spent}")),
+                },
+                other => Error::Internal(format!("LMS/HSS signing failed: {other}; {spent}")),
+            })
+        }
+        (PrivateKey::LmsHss(_), None) => Err(Error::Internal(
+            "an LMS/HSS signature needs a reserved leaf".into(),
+        )),
+        (other, _) => sign_ml_dsa(other, m),
+    }
+}
+
+/// What a signing failure after the reservation adds: the reserved leaf is spent, and
+/// what the next `sign` does (the next leaf, or nothing if that was the last one).
+fn spent_leaf_message(leaf: u64, leaves: u64, state_path: &Path) -> String {
+    let next = if leaf.saturating_add(1) >= leaves {
+        format!("it was the last of the key's {leaves} leaves, so the key is now exhausted")
+    } else {
+        format!("the next sign uses leaf {}", leaf + 1)
+    };
+    format!(
+        "leaf {leaf} is reserved in {} and is now spent (it is never reused; {next})",
+        state_path.display()
+    )
+}
+
+/// An image ready to sign: its existing keelsign TLVs (and, for a hybrid image, Ed25519
+/// pairs) stripped, and the digest `M` the signatures will cover.
+#[derive(Debug)]
+pub struct Prepared<'a> {
+    image: Image<'a>,
+    area: UnprotectedArea,
+    /// The image digest `M`.
+    pub m: [u8; 32],
+}
+
+fn too_large(input: &Path, len: usize) -> Error {
+    Error::Image {
+        path: input.to_path_buf(),
+        reason: format!(
+            "the unprotected TLV area would be {len} bytes, over the 65,535 bytes \
+             `it_tlv_tot` can describe"
+        ),
+    }
+}
+
+/// Parse the image `bytes` (read from `input`, for messages), apply `--replace` (and,
+/// with `hybrid`, the Ed25519 rules), and compute `M` over the image as it will be
+/// signed. Nothing is signed yet.
+pub fn prepare_image<'a>(
+    input: &Path,
+    bytes: &'a [u8],
+    hybrid: bool,
     replace: bool,
-) -> Result<(Vec<u8>, SignReport), Error> {
+) -> Result<Prepared<'a>, Error> {
     let rejected = |reason: String| Error::Image {
         path: input.to_path_buf(),
         reason,
@@ -212,7 +304,7 @@ pub fn sign_image(
                 what: "keelsign TLVs",
             });
         }
-        if ed.is_some() && area.ed25519_count() > 0 {
+        if hybrid && area.ed25519_count() > 0 {
             return Err(Error::AlreadySigned {
                 path: input.to_path_buf(),
                 what: "an Ed25519 KEYHASH + ED25519 pair",
@@ -220,17 +312,12 @@ pub fn sign_image(
         }
     }
     area.strip_keelsign();
-    if ed.is_some() {
+    if hybrid {
         area.strip_ed25519_pairs();
     }
 
-    let too_large = |len: usize| {
-        rejected(format!(
-            "the unprotected TLV area would be {len} bytes, over the 65,535 bytes \
-             `it_tlv_tot` can describe"
-        ))
-    };
-    let candidate = image_file::rebuild(bytes, &image, &area.encode().map_err(too_large)?)?;
+    let encoded = area.encode().map_err(|len| too_large(input, len))?;
+    let candidate = image_file::rebuild(bytes, &image, &encoded)?;
     match image_file::precheck(&candidate) {
         Precheck::Ready => {}
         Precheck::Rejected(reason) => return Err(rejected(format!("cannot be signed: {reason}"))),
@@ -242,7 +329,21 @@ pub fn sign_image(
     }
     let candidate_image = image_file::parse(input, &candidate)?;
     let m = image_file::digest(&candidate, &candidate_image)?;
+    Ok(Prepared { image, area, m })
+}
 
+/// Sign a [`Prepared`] image with `pq` (an LMS/HSS key with the leaf of `reservation`)
+/// and, for a hybrid image, `ed`, then append the TLVs. Returns the signed image (not yet
+/// self-checked) and the report.
+pub fn sign_prepared(
+    input: &Path,
+    bytes: &[u8],
+    prepared: Prepared<'_>,
+    pq: &PrivateKey,
+    ed: Option<&PrivateKey>,
+    reservation: Option<&Reservation>,
+) -> Result<(Vec<u8>, SignReport), Error> {
+    let Prepared { image, mut area, m } = prepared;
     let keyhash = match ed {
         Some(ed) => {
             let (keyhash, signature) = sign_ed25519(ed, &m)?;
@@ -255,9 +356,10 @@ pub fn sign_image(
     let algorithm = pq_algorithm(pq)?;
     let key_id = key_id_of(&pq.raw_public_key());
     area.push(TLV_KEELSIGN_KEY_ID, key_id.to_vec());
-    area.push(algorithm.tlv_type(), sign_ml_dsa(pq, &m)?);
+    area.push(algorithm.tlv_type(), sign_pq(pq, &m, reservation)?);
 
-    let signed = image_file::rebuild(bytes, &image, &area.encode().map_err(too_large)?)?;
+    let encoded = area.encode().map_err(|len| too_large(input, len))?;
+    let signed = image_file::rebuild(bytes, &image, &encoded)?;
     let report = SignReport {
         algorithm: pq.algorithm(),
         key_id,
@@ -265,8 +367,28 @@ pub fn sign_image(
         digest: m,
         output_len: signed.len(),
         input_len: bytes.len(),
+        leaf: reservation.map(|r| LeafReport {
+            index: r.leaf,
+            total: r.leaves,
+            state_path: r.state_path.clone(),
+        }),
     };
     Ok((signed, report))
+}
+
+/// Sign the image `bytes` (read from `input`, for messages) with the ML-DSA key `pq` and,
+/// for a hybrid image, `ed` ([`prepare_image`] then [`sign_prepared`]). LMS/HSS keys
+/// sign through [`run`], which reserves their leaf. Returns the signed image (not yet
+/// self-checked) and the report.
+pub fn sign_image(
+    input: &Path,
+    bytes: &[u8],
+    pq: &PrivateKey,
+    ed: Option<&PrivateKey>,
+    replace: bool,
+) -> Result<(Vec<u8>, SignReport), Error> {
+    let prepared = prepare_image(input, bytes, ed.is_some(), replace)?;
+    sign_prepared(input, bytes, prepared, pq, ed, None)
 }
 
 /// Verify `signed` with `keelsign_verify::verify` against the signing keys: under
@@ -358,8 +480,24 @@ pub fn run(
         request.hybrid_key.as_deref(),
         passphrase.map(|p| p.as_slice()),
     )?;
-    let (signed, report) = sign_image(&request.input, &bytes, &pq, ed.as_ref(), request.replace)?;
+    let prepared = prepare_image(&request.input, &bytes, ed.is_some(), request.replace)?;
+    // An LMS/HSS key reserves its leaf now: after the image parses, the keys load and M
+    // is known, before any signature is computed. The reservation holds the key's lock
+    // until the signed image is written.
+    let reservation = match pq.as_lms() {
+        Some(key) => Some(crate::lms_state::reserve(&request.key, key)?),
+        None => None,
+    };
+    let (signed, report) = sign_prepared(
+        &request.input,
+        &bytes,
+        prepared,
+        &pq,
+        ed.as_ref(),
+        reservation.as_ref(),
+    )?;
     check_and_write(&request.output, &signed, &pq, ed.as_ref(), request.force)?;
+    drop(reservation);
     Ok(report)
 }
 
@@ -376,7 +514,13 @@ mod tests {
     }
 
     fn key(alg: KeyAlgorithm) -> PrivateKey {
-        PrivateKey::generate(alg).expect("generate")
+        let spec = match alg {
+            KeyAlgorithm::MlDsa44 => crate::keys::KeySpec::MlDsa44,
+            KeyAlgorithm::MlDsa65 => crate::keys::KeySpec::MlDsa65,
+            KeyAlgorithm::Ed25519 => crate::keys::KeySpec::Ed25519,
+            KeyAlgorithm::LmsHss => panic!("LMS keys need a parameter set"),
+        };
+        PrivateKey::generate(spec).expect("generate")
     }
 
     #[test]
@@ -396,6 +540,18 @@ mod tests {
         assert_eq!(lines[0], "algorithm: ml-dsa-65");
         assert!(lines[3].starts_with("signed: out.bin ("), "{lines:?}");
         assert!(lines[3].contains(" bytes, +"), "{lines:?}");
+    }
+
+    #[test]
+    fn spent_leaf_message_names_the_next_leaf_or_exhaustion() {
+        let state = Path::new("k.pem.state");
+        let middle = spent_leaf_message(5, 1024, state);
+        assert!(middle.contains("leaf 5 is reserved in k.pem.state and is now spent"));
+        assert!(middle.contains("the next sign uses leaf 6"), "{middle}");
+        let last = spent_leaf_message(1023, 1024, state);
+        assert!(last.contains("leaf 1023 is reserved"), "{last}");
+        assert!(last.contains("the key is now exhausted"), "{last}");
+        assert!(!last.contains("leaf 1024"), "{last}");
     }
 
     #[test]

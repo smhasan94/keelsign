@@ -613,3 +613,65 @@ fn parser_rejects_truncated_input() {
         Some(Err(ParseError::TrailingBytes))
     );
 }
+
+/// SHA-67: the on-target `lms_kat` verdict. The default fixture passes and runs the
+/// rotation check; the rotation check is skipped only for an override fixture, and
+/// without the skip a fixture with no rotation cases fails ("no rotation key A").
+#[test]
+fn target_kat_runs_rotation_on_the_default_fixture_and_skips_it_for_an_override() {
+    use lms_kat::{Rotation, TARGET_OVERRIDDEN, check_kat_summary, run_fixture, target_rotation};
+    // The build-time flag, read at run time: host tests run with the default fixture.
+    let overridden = std::hint::black_box(TARGET_OVERRIDDEN);
+    assert!(!overridden, "host tests run with the default fixture");
+    let summary = run_fixture(LMS_TARGET, |_, _| {}).expect("parses");
+    assert_eq!(check_kat_summary(&summary, TARGET_CASES), Ok(()));
+    assert_eq!(
+        check_kat_summary(&summary, TARGET_CASES + 1),
+        Err("fixture does not hold the expected number of cases")
+    );
+    assert_eq!(
+        target_rotation(LMS_TARGET, TARGET_OVERRIDDEN),
+        Ok(Rotation::Checked)
+    );
+    // Overridden with a fixture that has the rotation cases (here the default one):
+    // the rotation check still runs.
+    assert_eq!(target_rotation(LMS_TARGET, true), Ok(Rotation::Checked));
+    // A fixture without the rotation cases (the 14-case header cut to its first case).
+    let first = Fixture::parse(LMS_TARGET)
+        .expect("parses")
+        .cases()
+        .next()
+        .expect("a case")
+        .expect("parses");
+    let mut one = b"KSLM".to_vec();
+    one.extend_from_slice(&2u16.to_le_bytes());
+    one.extend_from_slice(&1u16.to_le_bytes());
+    one.extend_from_slice(&first.id.to_le_bytes());
+    one.extend_from_slice(&[2, 1, 1, 1]);
+    for part in [first.pk, first.sig, first.msg] {
+        one.extend_from_slice(&(part.len() as u16).to_le_bytes());
+    }
+    // Rewrite with the case's real source and expectations.
+    let codes = |e: Expect| match e {
+        Expect::SignatureInvalid => 0u8,
+        Expect::Ok => 1,
+        Expect::UnsupportedParameterSet => 2,
+        Expect::MalformedSignature => 3,
+        Expect::InvalidPublicKey => 4,
+    };
+    one[10] = match first.source {
+        Source::Rfc8554 => 0,
+        Source::Acvp => 1,
+        Source::Hsslms => 2,
+    };
+    one[11] = codes(first.expect_default);
+    one[12] = codes(first.expect_cnsa_2_0);
+    one[13] = codes(first.expect_rfc_all_sets);
+    for part in [first.pk, first.sig, first.msg] {
+        one.extend_from_slice(part);
+    }
+    let summary = run_fixture(&one, |_, _| {}).expect("parses");
+    assert_eq!(check_kat_summary(&summary, 1), Ok(()));
+    assert_eq!(target_rotation(&one, true), Ok(Rotation::Skipped));
+    assert_eq!(target_rotation(&one, false), Err("no rotation key A"));
+}

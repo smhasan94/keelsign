@@ -85,6 +85,14 @@ jobs:
       - name: cargo test (policy-kat, keelsign-verify/ml-dsa)
         run: cargo test -p policy-kat --locked --features keelsign-verify/ml-dsa
 
+      # SHA-55: keelsign-embassy alone (features off; its policy-kat dev-dependency turns
+      # keelsign-verify/ed25519 on for the tests).
+      - name: cargo clippy (keelsign-embassy)
+        run: cargo clippy -p keelsign-embassy --all-targets --locked -- -D warnings
+
+      - name: cargo test (keelsign-embassy)
+        run: cargo test -p keelsign-embassy --locked
+
       # SHA-51: `keelsign sign` output against MCUboot's imgtool (dumpinfo, verify). The
       # tests are ignored locally unless imgtool 2.4.0 is on PATH (keelsign/tests/imgtool.rs).
       - name: imgtool interop (keelsign sign/inspect)
@@ -128,7 +136,8 @@ jobs:
           cargo +nightly-2026-09-29 miri test -p keelsign-ffi --locked --features ed25519,ml-dsa
 
   # keelsign-verify (no_std, no heap) for both Cortex-M targets, with the `ml-dsa` and
-  # `ed25519` features off and on; since SHA-60 also keelsign-ffi's libkeelsign.a.
+  # `ed25519` features off and on; SHA-55: keelsign-embassy too, with the same features
+  # and its board module (`embassy_features`); SHA-60: keelsign-ffi's libkeelsign.a.
   verify-cross:
     name: keelsign-verify ${{ matrix.target }} (features "${{ matrix.features }}")
     runs-on: ubuntu-latest
@@ -138,20 +147,28 @@ jobs:
         include:
           - target: thumbv7em-none-eabihf
             features: ""
+            embassy_features: nrf,embassy-nrf/nrf52840
           - target: thumbv7em-none-eabihf
             features: ml-dsa
+            embassy_features: nrf,embassy-nrf/nrf52840
           - target: thumbv7em-none-eabihf
             features: ed25519
+            embassy_features: nrf,embassy-nrf/nrf52840
           - target: thumbv7em-none-eabihf
             features: ed25519,ml-dsa
+            embassy_features: nrf,embassy-nrf/nrf52840
           - target: thumbv8m.main-none-eabihf
             features: ""
+            embassy_features: rp,embassy-rp/rp235xa
           - target: thumbv8m.main-none-eabihf
             features: ml-dsa
+            embassy_features: rp,embassy-rp/rp235xa
           - target: thumbv8m.main-none-eabihf
             features: ed25519
+            embassy_features: rp,embassy-rp/rp235xa
           - target: thumbv8m.main-none-eabihf
             features: ed25519,ml-dsa
+            embassy_features: rp,embassy-rp/rp235xa
     steps:
       - uses: actions/checkout@v4
 
@@ -169,6 +186,12 @@ jobs:
 
       - name: cargo build
         run: cargo build -p keelsign-verify --release --locked --target ${{ matrix.target }} --features "${{ matrix.features }}"
+
+      - name: cargo clippy (keelsign-embassy)
+        run: cargo clippy -p keelsign-embassy --lib --locked --target ${{ matrix.target }} --features "${{ matrix.features }}" --features "${{ matrix.embassy_features }}" -- -D warnings
+
+      - name: cargo build (keelsign-embassy)
+        run: cargo build -p keelsign-embassy --lib --release --locked --target ${{ matrix.target }} --features "${{ matrix.features }}" --features "${{ matrix.embassy_features }}"
 
       # SHA-60: libkeelsign.a (keelsign-ffi) for the same target and feature state, and
       # its symbol rules: exports exactly keelsign_verify / keelsign_digest, no formatting
@@ -193,6 +216,14 @@ jobs:
             target: thumbv7em-none-eabihf
             bench: false
           - project: examples/rp2350-hello
+            target: thumbv8m.main-none-eabihf
+            bench: false
+          # SHA-55: the embassy-boot applications with keelsign-embassy (docs/embassy.md).
+          # Running them needs the boards and the bootloader.
+          - project: examples/nrf52840-boot-app
+            target: thumbv7em-none-eabihf
+            bench: false
+          - project: examples/rp2350-boot-app
             target: thumbv8m.main-none-eabihf
             bench: false
           # SHA-34 (ML-DSA) and SHA-65 (LMS/HSS) on-target KATs and benchmarks: build the
@@ -233,6 +264,11 @@ jobs:
       - name: cargo build
         if: ${{ !matrix.bench }}
         run: cargo build --release --locked --target ${{ matrix.target }}
+
+      # SHA-55: the boot apps' app-B and soak variants (docs/embassy.md P3, P4).
+      - name: cargo clippy (boot app, features b,soak)
+        if: ${{ contains(matrix.project, 'boot-app') }}
+        run: cargo clippy --locked --target ${{ matrix.target }} --features b,soak -- -D warnings
 
       - name: cargo clippy (all targets)
         if: ${{ matrix.bench }}

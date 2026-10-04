@@ -344,7 +344,11 @@ fn bench_tests_use_embedded_test_harness() {
             "defmt_rtt as _",
             "BENCH board=",
             "stack_paint::paint",
-            "check_rotation",
+            // SHA-67: check_rotation through lms_kat::target_rotation, skipped only for
+            // the KEELSIGN_LMS_TARGET override fixture.
+            "target_rotation(LMS_TARGET, TARGET_OVERRIDDEN)",
+            "rotation: skipped (override fixture has no rotation cases)",
+            "check_kat_summary(&summary, TARGET_CASES)",
             "LMS_TARGET",
             // SHA-240: lms_kat checks the strict CNSA 2.0 expectation too.
             "cnsa_2_0",

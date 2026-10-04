@@ -369,6 +369,14 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 4294967295
+        },
+        "leaf_indices": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
         }
       },
       "required": [],
@@ -478,6 +486,15 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 4294967295
+        },
+        "leaf_indices": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "description": "The leaf index q of each level's signature, top level first (the last one equals q). Added by SHA-67; optional."
         }
       },
       "required": [
@@ -486,7 +503,7 @@
         "lmots_types",
         "q"
       ],
-      "description": "Structure of an HSS signature (RFC 8554 §6.2), read without verifying it: levels L, the LMS and LM-OTS type of each level's signature (top level first), and the leaf index q of the bottom-level signature."
+      "description": "Structure of an HSS signature (RFC 8554 §6.2), read without verifying it: levels L, the LMS and LM-OTS type of each level's signature (top level first), the leaf index q of the bottom-level signature and the leaf index of every level."
     }
   }
 }

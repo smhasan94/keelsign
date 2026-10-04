@@ -3,6 +3,7 @@ members = [
     "keelsign",
     "keelsign-verify",
     "keelsign-ffi",
+    "keelsign-embassy",
     "tools/repo-checks",
     "benches/mldsa-kat",
     "benches/lms-kat",
@@ -11,7 +12,7 @@ members = [
 ]
 # Standalone embedded projects with their own Cargo.lock and target (see docs/setup.md
 # and docs/benchmarks.md).
-exclude = ["examples/nrf52840-hello", "examples/rp2350-hello", "benches/nrf52840-mldsa", "benches/rp2350-mldsa"]
+exclude = ["examples/nrf52840-hello", "examples/rp2350-hello", "examples/nrf52840-boot-app", "examples/rp2350-boot-app", "benches/nrf52840-mldsa", "benches/rp2350-mldsa"]
 resolver = "3"
 
 [workspace.package]
@@ -33,6 +34,10 @@ indexing_slicing = "deny"
 opt-level = 3
 
 [profile.dev.package.salsa20]
+opt-level = 3
+
+# SHA-67: the LMS/HSS signer hashes millions of blocks per tree; keep test builds usable.
+[profile.dev.package.sha2]
 opt-level = 3
 
 # SHA-60: the C static library `libkeelsign.a` (keelsign-ffi). Build it alone:

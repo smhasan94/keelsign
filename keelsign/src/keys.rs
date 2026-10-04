@@ -2,7 +2,10 @@
 //!
 //! - Private keys: PKCS#8 v1 `PrivateKeyInfo` (RFC 5208 / RFC 5958), PEM label
 //!   `PRIVATE KEY` or DER. ML-DSA keys use the RFC 9881 §6 `seed` form; Ed25519 keys the
-//!   RFC 8410 §7 v1 layout (no public key), which imgtool reads.
+//!   RFC 8410 §7 v1 layout (no public key), which imgtool reads. LMS/HSS keys use the
+//!   RFC 8708 algorithm `id-alg-hss-lms-hashsig` (parameters absent) with keelsign's
+//!   private-key blob ([`HssPrivateKey::to_blob`]) as `privateKey`; they are stateful
+//!   and come with a state file and a journal (`crate::lms_state`).
 //! - Encrypted private keys: PKCS#8 `EncryptedPrivateKeyInfo`, PBES2 with scrypt
 //!   (N = 2^14, r = 8, p = 1, 16-byte salt) and AES-256-CBC, PEM label
 //!   `ENCRYPTED PRIVATE KEY` or DER.
@@ -11,6 +14,7 @@
 //!   Ed25519 (RFC 8410) and HSS/LMS (RFC 8708).
 
 use crate::error::{Error, KeyFileError};
+use crate::lms_sign::{HssCaches, HssPrivateKey, LmsError, LmsParams};
 use ml_dsa::{Keypair as _, MlDsa44, MlDsa65};
 use pkcs8::der::asn1::AnyRef;
 use pkcs8::der::asn1::OctetStringRef;
@@ -30,8 +34,8 @@ pub const ID_ML_DSA_44: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.84
 pub const ID_ML_DSA_65: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.18");
 /// `id-Ed25519` (RFC 8410 §3).
 pub const ID_ED25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
-/// `id-alg-hss-lms-hashsig` (RFC 8708 §3): HSS/LMS public keys, read by `verify --pub`
-/// only (keelsign does not generate LMS/HSS keys).
+/// `id-alg-hss-lms-hashsig` (RFC 8708 §3): keelsign's LMS/HSS key files and the HSS/LMS
+/// public keys `verify --pub` reads.
 pub const ID_HSS_LMS_HASHSIG: ObjectIdentifier =
     ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.16.3.17");
 
@@ -51,18 +55,21 @@ pub enum KeyAlgorithm {
     MlDsa65,
     /// Ed25519 (RFC 8032), the classical half of a hybrid image.
     Ed25519,
+    /// LMS/HSS (RFC 8554, SP 800-208): stateful hash-based signatures.
+    LmsHss,
 }
 
 impl KeyAlgorithm {
     /// All algorithms, in CLI order.
-    pub const ALL: [Self; 3] = [Self::MlDsa44, Self::MlDsa65, Self::Ed25519];
+    pub const ALL: [Self; 4] = [Self::MlDsa44, Self::MlDsa65, Self::Ed25519, Self::LmsHss];
 
-    /// The CLI name: `ml-dsa-44`, `ml-dsa-65` or `ed25519`.
+    /// The name: `ml-dsa-44`, `ml-dsa-65`, `ed25519` or `lms-hss`.
     pub fn name(self) -> &'static str {
         match self {
             Self::MlDsa44 => "ml-dsa-44",
             Self::MlDsa65 => "ml-dsa-65",
             Self::Ed25519 => "ed25519",
+            Self::LmsHss => "lms-hss",
         }
     }
 
@@ -72,6 +79,38 @@ impl KeyAlgorithm {
             Self::MlDsa44 => ID_ML_DSA_44,
             Self::MlDsa65 => ID_ML_DSA_65,
             Self::Ed25519 => ID_ED25519,
+            Self::LmsHss => ID_HSS_LMS_HASHSIG,
+        }
+    }
+}
+
+/// What kind of key [`PrivateKey::generate`] makes: an algorithm and, for LMS/HSS, the
+/// tree height and the number of HSS levels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeySpec {
+    /// ML-DSA-44.
+    MlDsa44,
+    /// ML-DSA-65.
+    MlDsa65,
+    /// Ed25519.
+    Ed25519,
+    /// LMS/HSS with `levels` (1 or 2) levels of `params` (LMOTS_SHA256_N32_W8).
+    LmsHss {
+        /// The LMS parameter set of every level (its tree height).
+        params: LmsParams,
+        /// The number of HSS levels, 1 or 2.
+        levels: u8,
+    },
+}
+
+impl KeySpec {
+    /// The algorithm of the key.
+    pub fn algorithm(self) -> KeyAlgorithm {
+        match self {
+            Self::MlDsa44 => KeyAlgorithm::MlDsa44,
+            Self::MlDsa65 => KeyAlgorithm::MlDsa65,
+            Self::Ed25519 => KeyAlgorithm::Ed25519,
+            Self::LmsHss { .. } => KeyAlgorithm::LmsHss,
         }
     }
 }
@@ -120,6 +159,15 @@ pub enum PrivateKey {
     MlDsa65(Box<ml_dsa::SigningKey<MlDsa65>>),
     /// An Ed25519 key.
     Ed25519(Box<ed25519_dalek::SigningKey>),
+    /// An LMS/HSS key (stateful: see `crate::lms_state`).
+    LmsHss(Box<HssPrivateKey>),
+}
+
+fn lms_key_error(e: LmsError) -> KeyFileError {
+    match e {
+        LmsError::Unsupported(reason) => KeyFileError::Unsupported(reason),
+        other => KeyFileError::Corrupt(other.to_string()),
+    }
 }
 
 fn encode_err(e: impl fmt::Display) -> Error {
@@ -127,17 +175,37 @@ fn encode_err(e: impl fmt::Display) -> Error {
 }
 
 impl PrivateKey {
-    /// Generate a new key from 32 bytes of operating-system randomness (the ML-DSA seed
-    /// ξ, or the Ed25519 secret key).
-    pub fn generate(algorithm: KeyAlgorithm) -> Result<Self, Error> {
+    /// Generate a new key from operating-system randomness: 32 bytes for ML-DSA (the
+    /// seed ξ) and Ed25519 (the secret key); `SEED` and `I` per level for LMS/HSS (see
+    /// [`Self::generate_with_caches`], which also returns the LMS tree caches).
+    pub fn generate(spec: KeySpec) -> Result<Self, Error> {
+        Self::generate_with_caches(spec).map(|(key, _)| key)
+    }
+
+    /// [`Self::generate`], also returning an LMS/HSS key's tree caches (the start of its
+    /// state file; `None` for the other algorithms). An LMS/HSS key computes its whole
+    /// top tree (and, with two levels, its first bottom tree): an H20 tree takes minutes.
+    pub fn generate_with_caches(spec: KeySpec) -> Result<(Self, Option<HssCaches>), Error> {
+        let algorithm = match spec {
+            KeySpec::LmsHss { params, levels } => {
+                let (key, caches) =
+                    HssPrivateKey::generate(params, levels, crate::lms_sign::DEFAULT_CACHE_FLOOR)
+                        .map_err(|e| match e {
+                        LmsError::Rng(e) => Error::Rng(e),
+                        other => Error::Usage(other.to_string()),
+                    })?;
+                return Ok((Self::LmsHss(Box::new(key)), Some(caches)));
+            }
+            other => other.algorithm(),
+        };
         let mut seed = Zeroizing::new([0u8; 32]);
         getrandom::fill(seed.as_mut()).map_err(|e| Error::Rng(e.to_string()))?;
-        Ok(Self::from_seed(algorithm, &seed))
+        Self::from_seed(algorithm, &seed).map(|key| (key, None))
     }
 
     /// The key derived from a 32-byte seed (ML-DSA ξ or the Ed25519 secret key).
-    fn from_seed(algorithm: KeyAlgorithm, seed: &[u8; 32]) -> Self {
-        match algorithm {
+    fn from_seed(algorithm: KeyAlgorithm, seed: &[u8; 32]) -> Result<Self, Error> {
+        Ok(match algorithm {
             KeyAlgorithm::MlDsa44 => {
                 Self::MlDsa44(Box::new(ml_dsa::SigningKey::from_seed(&(*seed).into())))
             }
@@ -147,7 +215,12 @@ impl PrivateKey {
             KeyAlgorithm::Ed25519 => {
                 Self::Ed25519(Box::new(ed25519_dalek::SigningKey::from_bytes(seed)))
             }
-        }
+            KeyAlgorithm::LmsHss => {
+                return Err(Error::Internal(
+                    "LMS/HSS keys are not derived from a single seed".into(),
+                ));
+            }
+        })
     }
 
     /// The key's algorithm.
@@ -156,6 +229,26 @@ impl PrivateKey {
             Self::MlDsa44(_) => KeyAlgorithm::MlDsa44,
             Self::MlDsa65(_) => KeyAlgorithm::MlDsa65,
             Self::Ed25519(_) => KeyAlgorithm::Ed25519,
+            Self::LmsHss(_) => KeyAlgorithm::LmsHss,
+        }
+    }
+
+    /// The parameter set, for example `ML-DSA-65`, `Ed25519` or
+    /// `LMS_SHA256_M32_H10/LMOTS_SHA256_N32_W8, L=1`.
+    pub fn parameter_set(&self) -> String {
+        match self {
+            Self::MlDsa44(_) => "ML-DSA-44".into(),
+            Self::MlDsa65(_) => "ML-DSA-65".into(),
+            Self::Ed25519(_) => "Ed25519".into(),
+            Self::LmsHss(k) => k.parameter_set(),
+        }
+    }
+
+    /// The LMS/HSS key, if this is one.
+    pub fn as_lms(&self) -> Option<&HssPrivateKey> {
+        match self {
+            Self::LmsHss(k) => Some(k),
+            _ => None,
         }
     }
 
@@ -177,6 +270,17 @@ impl PrivateKey {
                 let private_key = OctetStringRef::new(&inner).map_err(encode_err)?;
                 let pki = PrivateKeyInfoRef::new(ed25519_dalek::pkcs8::ALGORITHM_ID, private_key);
                 SecretDocument::encode_msg(&pki).map_err(encode_err)
+            }
+            Self::LmsHss(k) => {
+                // RFC 8708 algorithm, parameters absent; keelsign's blob as privateKey.
+                let blob = k.to_blob();
+                let private_key = OctetStringRef::new(&blob).map_err(encode_err)?;
+                let algorithm = AlgorithmIdentifierRef {
+                    oid: ID_HSS_LMS_HASHSIG,
+                    parameters: None,
+                };
+                SecretDocument::encode_msg(&PrivateKeyInfoRef::new(algorithm, private_key))
+                    .map_err(encode_err)
             }
         }
     }
@@ -205,12 +309,28 @@ impl PrivateKey {
             .map_err(encode_err)
     }
 
-    /// The DER `SubjectPublicKeyInfo` of the public key.
+    /// The DER `SubjectPublicKeyInfo` of the public key. For LMS/HSS the
+    /// `subjectPublicKey` BIT STRING holds the DER OCTET STRING of the 60-byte HSS public
+    /// key (RFC 8708 §4), as [`PublicKey::from_bytes`] reads it.
     pub fn public_key_spki_der(&self) -> Result<Document, Error> {
         match self {
             Self::MlDsa44(k) => k.verifying_key().to_public_key_der(),
             Self::MlDsa65(k) => k.verifying_key().to_public_key_der(),
             Self::Ed25519(k) => k.verifying_key().to_public_key_der(),
+            Self::LmsHss(k) => {
+                let wrapped = OctetStringRef::new(k.public_key())
+                    .and_then(|o| o.to_der())
+                    .map_err(encode_err)?;
+                let spki = SubjectPublicKeyInfoRef {
+                    algorithm: AlgorithmIdentifierRef {
+                        oid: ID_HSS_LMS_HASHSIG,
+                        parameters: None,
+                    },
+                    subject_public_key: pkcs8::der::asn1::BitStringRef::from_bytes(&wrapped)
+                        .map_err(encode_err)?,
+                };
+                return Document::encode_msg(&spki).map_err(encode_err);
+            }
         }
         .map_err(encode_err)
     }
@@ -222,13 +342,14 @@ impl PrivateKey {
             .map_err(encode_err)
     }
 
-    /// The raw public key: the FIPS 204 encoding (1,312 / 1,952 bytes) or the 32-byte
-    /// Ed25519 key.
+    /// The raw public key: the FIPS 204 encoding (1,312 / 1,952 bytes), the 32-byte
+    /// Ed25519 key or the 60-byte HSS public key `u32 L || LMS public key`.
     pub fn raw_public_key(&self) -> Vec<u8> {
         match self {
             Self::MlDsa44(k) => k.verifying_key().encode().to_vec(),
             Self::MlDsa65(k) => k.verifying_key().encode().to_vec(),
             Self::Ed25519(k) => k.verifying_key().to_bytes().to_vec(),
+            Self::LmsHss(k) => k.public_key().to_vec(),
         }
     }
 
@@ -244,6 +365,7 @@ impl PrivateKey {
             Self::Ed25519(k) => {
                 KeyIdentity::KeyHash(keelsign_verify::keyhash_of(&k.verifying_key().to_bytes()))
             }
+            Self::LmsHss(k) => KeyIdentity::KeyId(keelsign_verify::key_id_of(k.public_key())),
         }
     }
 
@@ -341,13 +463,14 @@ impl PrivateKey {
             .ok_or_else(|| {
                 KeyFileError::Unsupported(format!(
                     "unsupported key algorithm OID {oid} (keelsign reads ML-DSA-44 \
-                     {ID_ML_DSA_44}, ML-DSA-65 {ID_ML_DSA_65} and Ed25519 {ID_ED25519})"
+                     {ID_ML_DSA_44}, ML-DSA-65 {ID_ML_DSA_65}, Ed25519 {ID_ED25519} and \
+                     HSS/LMS {ID_HSS_LMS_HASHSIG})"
                 ))
             })?;
         if pki.algorithm.parameters.is_some() {
             return Err(KeyFileError::Corrupt(format!(
                 "{algorithm} AlgorithmIdentifier has parameters; they must be absent \
-                 (RFC 9881 §2, RFC 8410 §3)"
+                 (RFC 9881 §2, RFC 8410 §3, RFC 8708 §3)"
             )));
         }
         match algorithm {
@@ -398,6 +521,19 @@ impl PrivateKey {
                         "invalid Ed25519 private key (or its public key does not match): {e}"
                     ))
                 }),
+            KeyAlgorithm::LmsHss => {
+                let key =
+                    HssPrivateKey::from_blob(pki.private_key.as_bytes()).map_err(lms_key_error)?;
+                // A PKCS#8 v2 publicKey, if present, must be the blob's public key.
+                if let Some(public_key) = &pki.public_key
+                    && public_key.as_bytes() != Some(key.public_key().as_slice())
+                {
+                    return Err(KeyFileError::Corrupt(
+                        "the public key in the file does not match the private key".into(),
+                    ));
+                }
+                Ok(Self::LmsHss(Box::new(key)))
+            }
         }
     }
 }
@@ -737,6 +873,165 @@ MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
         spki.to_der().expect("encode SPKI")
     }
 
+    /// One key spec per algorithm (LMS/HSS: H5, one and two levels).
+    fn test_specs() -> [KeySpec; 5] {
+        let h5 = LmsParams::from_height(5).expect("h5");
+        [
+            KeySpec::MlDsa44,
+            KeySpec::MlDsa65,
+            KeySpec::Ed25519,
+            KeySpec::LmsHss {
+                params: h5,
+                levels: 1,
+            },
+            KeySpec::LmsHss {
+                params: h5,
+                levels: 2,
+            },
+        ]
+    }
+
+    /// The DER header of keelsign's LMS/HSS `SubjectPublicKeyInfo` (docs/keys.md):
+    /// SEQUENCE, AlgorithmIdentifier { id-alg-hss-lms-hashsig }, BIT STRING { 0 unused
+    /// bits, OCTET STRING (60) }, then the 60-byte HSS public key.
+    const LMS_SPKI_HEADER: &str = "3050300d060b2a864886f70d0109100311033f00043c";
+
+    #[test]
+    fn lms_key_files_round_trip_and_spki_has_the_rfc_8708_header() {
+        let h5 = LmsParams::from_height(5).expect("h5");
+        for levels in [1u8, 2] {
+            let (key, caches) =
+                PrivateKey::generate_with_caches(KeySpec::LmsHss { params: h5, levels })
+                    .expect("generate");
+            let caches = caches.expect("LMS keys come with caches");
+            assert_eq!(caches.bottom.is_some(), levels == 2);
+            assert_eq!(key.algorithm(), KeyAlgorithm::LmsHss);
+            let lms = key.as_lms().expect("lms");
+            assert_eq!(lms.levels(), usize::from(levels));
+            let raw = key.raw_public_key();
+            assert_eq!(raw.len(), 60);
+            assert_eq!(raw[..4], u32::from(levels).to_be_bytes());
+            assert_eq!(raw[4..12], [0, 0, 0, 5, 0, 0, 0, 4]);
+            // The public key is the root of the top tree.
+            assert_eq!(raw[28..], caches.top.root());
+            assert_eq!(
+                key.identity(),
+                KeyIdentity::KeyId(keelsign_verify::key_id_of(&raw))
+            );
+            assert_eq!(
+                key.parameter_set(),
+                if levels == 1 {
+                    "LMS_SHA256_M32_H5/LMOTS_SHA256_N32_W8, L=1"
+                } else {
+                    "LMS_SHA256_M32_H5+LMS_SHA256_M32_H5/LMOTS_SHA256_N32_W8, L=2"
+                }
+            );
+
+            let spki = key.public_key_spki_der().expect("spki");
+            assert_eq!(spki.as_bytes().len(), 22 + 60);
+            assert_eq!(hex(&spki.as_bytes()[..22]), LMS_SPKI_HEADER);
+            assert_eq!(&spki.as_bytes()[22..], raw.as_slice());
+            let public = PublicKey::from_bytes(spki.as_bytes()).expect("RFC 8708 SPKI");
+            assert_eq!(public, PublicKey::LmsHss(raw.clone()));
+
+            // PKCS#8: id-alg-hss-lms-hashsig, parameters absent, the blob as privateKey.
+            let der = key.to_pkcs8_der().expect("der");
+            let pki = PrivateKeyInfoRef::from_der(der.as_bytes()).expect("pki");
+            assert_eq!(pki.algorithm.oid, ID_HSS_LMS_HASHSIG);
+            assert!(pki.algorithm.parameters.is_none());
+            assert_eq!(pki.private_key.as_bytes()[0], 1, "blob version 1");
+            for (bytes, passphrase) in [
+                (der.as_bytes().to_vec(), None),
+                (key.to_pem().expect("pem").as_bytes().to_vec(), None),
+                (
+                    key.to_encrypted_der(b"pw")
+                        .expect("enc")
+                        .as_bytes()
+                        .to_vec(),
+                    Some(&b"pw"[..]),
+                ),
+            ] {
+                let back = PrivateKey::from_bytes(&bytes, passphrase).expect("load");
+                assert_eq!(back.raw_public_key(), raw);
+                assert_eq!(back.to_pkcs8_der().expect("der").as_bytes(), der.as_bytes());
+            }
+        }
+    }
+
+    #[test]
+    fn lms_key_files_with_bad_blobs_are_refused() {
+        let h5 = LmsParams::from_height(5).expect("h5");
+        let key = PrivateKey::generate(KeySpec::LmsHss {
+            params: h5,
+            levels: 1,
+        })
+        .expect("generate");
+        let der = key.to_pkcs8_der().expect("der");
+        let blob = PrivateKeyInfoRef::from_der(der.as_bytes())
+            .expect("pki")
+            .private_key
+            .as_bytes()
+            .to_vec();
+        let file_with = |blob: &[u8]| {
+            let algorithm = AlgorithmIdentifierRef {
+                oid: ID_HSS_LMS_HASHSIG,
+                parameters: None,
+            };
+            let pki = PrivateKeyInfoRef::new(algorithm, OctetStringRef::new(blob).expect("o"));
+            SecretDocument::encode_msg(&pki).expect("encode")
+        };
+        let load = |blob: &[u8]| PrivateKey::from_bytes(file_with(blob).as_bytes(), None).err();
+        assert!(load(&blob).is_none(), "the unmodified blob loads");
+        let mut version = blob.clone();
+        version[0] = 9;
+        assert!(
+            matches!(load(&version), Some(KeyFileError::Unsupported(r)) if r.contains("version 9"))
+        );
+        assert!(
+            matches!(load(&blob[..blob.len() - 3]), Some(KeyFileError::Corrupt(r)) if r.contains("truncated"))
+        );
+        let mut typecode = blob.clone();
+        typecode[8] = 0x0B; // LMS_SHA256_M24_H10: not signed by keelsign.
+        assert!(matches!(load(&typecode), Some(KeyFileError::Unsupported(r)) if r.contains("0xb")));
+        let mut ots = blob.clone();
+        ots[12] = 0x03; // LMOTS_SHA256_N32_W4.
+        assert!(matches!(load(&ots), Some(KeyFileError::Unsupported(_))));
+        // The stored public key does not match the stored top tree (its typecode or I).
+        let mut pub_type = blob.clone();
+        let at = blob.len() - 60 + 7;
+        pub_type[at] = 0x06;
+        assert!(
+            matches!(load(&pub_type), Some(KeyFileError::Corrupt(r)) if r.contains("do not match"))
+        );
+        let mut pub_id = blob.clone();
+        pub_id[blob.len() - 60 + 12] ^= 0x01;
+        assert!(
+            matches!(load(&pub_id), Some(KeyFileError::Corrupt(r)) if r.contains("do not match"))
+        );
+        // A wrong root T[1] is not recomputed when loading (that is an H20 tree for an
+        // H20 key); the key ID the state file is bound to and the self-check of every
+        // signed image catch it (keelsign/tests/lms_sign.rs).
+        let mut root = blob.clone();
+        let last = root.len() - 1;
+        root[last] ^= 0x01;
+        let loaded = PrivateKey::from_bytes(file_with(&root).as_bytes(), None).expect("loads");
+        assert_ne!(loaded.identity(), key.identity());
+        // Parameters present.
+        let null = AnyRef::from(pkcs8::der::asn1::Null);
+        let pki = PrivateKeyInfoRef::new(
+            AlgorithmIdentifierRef {
+                oid: ID_HSS_LMS_HASHSIG,
+                parameters: Some(null),
+            },
+            OctetStringRef::new(&blob).expect("o"),
+        );
+        let with_params = SecretDocument::encode_msg(&pki).expect("encode");
+        assert!(matches!(
+            PrivateKey::from_bytes(with_params.as_bytes(), None),
+            Err(KeyFileError::Corrupt(r)) if r.contains("parameters")
+        ));
+    }
+
     fn lms_key() -> Vec<u8> {
         // L = 1, LMS_SHA256_M32_H5 (5), LMOTS_SHA256_N32_W8 (4), I (16 bytes), T[1] (32).
         let mut key = vec![0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, 4];
@@ -749,8 +1044,9 @@ MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
     fn public_key_files_round_trip_through_pubkey_and_known_vectors() {
         // Every generated key: the PEM and DER `pubkey` output read back as the same raw
         // key and identity.
-        for algorithm in KeyAlgorithm::ALL {
-            let private = PrivateKey::generate(algorithm).expect("generate");
+        for spec in test_specs() {
+            let algorithm = spec.algorithm();
+            let private = PrivateKey::generate(spec).expect("generate");
             let pem = private.public_key_spki_pem().expect("pem");
             let der = private.public_key_spki_der().expect("der");
             for bytes in [pem.as_bytes(), der.as_bytes()] {
@@ -797,6 +1093,7 @@ MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
         {
             let seed: [u8; 32] = core::array::from_fn(|i| i as u8);
             let spki = PrivateKey::from_seed(algorithm, &seed)
+                .expect("seed")
                 .public_key_spki_der()
                 .expect("spki");
             assert_eq!(

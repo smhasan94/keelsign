@@ -4,8 +4,9 @@
 MCUboot's Ed25519 pair (a hybrid image). `keelsign inspect` describes an image as text or
 JSON. The image format is specified in [image-format.md](image-format.md); the device
 policies in [policy.md](policy.md); key files in [keys.md](keys.md); verifying signed
-images with `keelsign verify` in [verify.md](verify.md). The CLI is pre-release: LMS/HSS
-signing comes with E7.2 (stateful keys).
+images with `keelsign verify` in [verify.md](verify.md). The CLI is pre-release. LMS/HSS
+keys (SHA-67) are stateful: `sign` records each leaf it uses in the key's state file and
+journal before it signs ([LMS/HSS](#lmshss); [keys.md](keys.md#stateful-lms-keys)).
 
 ## Commands
 
@@ -15,8 +16,9 @@ keelsign sign --key FILE [--hybrid-key FILE] [--replace] [--force]
 keelsign inspect [--json] IMAGE
 ```
 
-- `--key`: an ML-DSA-44 or ML-DSA-65 private key file (`keelsign keygen`, PKCS#8 PEM or
-  DER, encrypted or not).
+- `--key`: an ML-DSA-44, ML-DSA-65 or LMS/HSS private key file (`keelsign keygen`,
+  PKCS#8 PEM or DER, encrypted or not). An LMS/HSS key needs its `FILE.state` and
+  `FILE.journal` next to it.
 - `--hybrid-key`: an Ed25519 private key file; also add MCUboot's `KEYHASH` + `ED25519`
   pair.
 - `--replace`: replace the keelsign TLVs an image already carries (and, with
@@ -44,7 +46,13 @@ image digest: 4eaeaf5d62fb41180444e1679b03c6b489360523d805afc4c5e032b37aac1745
 signed: app.keelsign.bin (5648 bytes, +3333 bytes of TLVs)
 ```
 
-and, for a hybrid image, a `keyhash:` line after the key ID.
+and, for a hybrid image, a `keyhash:` line after the key ID; for an LMS/HSS key also the
+leaf it used and the state file:
+
+```text
+leaf: 0 of 1024 (1023 left)
+state: signing.pem.state (next leaf 1)
+```
 
 ## What sign adds
 
@@ -57,6 +65,9 @@ order of [image-format.md](image-format.md#hybrid-layout):
 | 2 | `ED25519` | `0x24` | 64-byte RFC 8032 signature over `M` | `--hybrid-key` |
 | 3 | keelsign key ID | `0x4BA0` | first 16 bytes of SHA-256 of the FIPS 204 public key | always |
 | 4 | ML-DSA-44 / ML-DSA-65 signature | `0x4BA1` / `0x4BA2` | 2,420 / 3,309 bytes | always |
+| 4 | or LMS/HSS signature | `0x4BA3` | HSS signature over `M` (1,456 bytes for H10, one level) | an LMS/HSS `--key` |
+
+The key ID of an LMS/HSS key is over its 60-byte HSS public key.
 
 `it_tlv_tot` of the unprotected area is updated; the area must stay within 65,535 bytes.
 
@@ -114,8 +125,11 @@ writes nothing.
   TLV, and `--replace` was not given (exit 8). With `--replace` every unprotected TLV in
   `0x4BA0..=0x4BAF` is removed, and with `--hybrid-key` every `ED25519` TLV and the
   `KEYHASH` immediately before it; other TLVs stay.
-- `--key` not ML-DSA, or `--hybrid-key` not Ed25519 (exit 6); `OUT` exists without
+- `--key` an Ed25519 key, or `--hybrid-key` not Ed25519 (exit 6); `OUT` exists without
   `--force` (exit 3); `OUT` is `IN` or a key file (exit 2).
+- With an LMS/HSS key, after these checks: its state refused (exit 10) or its leaves used
+  up (exit 11, `LeafIndexExhausted`); see [LMS/HSS](#lmshss). Every refusal above comes
+  before a leaf is reserved, so it spends none.
 
 ## Hybrid images
 
@@ -150,7 +164,9 @@ reports:
   TLV, a decoded value: hash algorithm and digest match, KEYHASH, the algorithm OID of a
   PUBKEY, the security counter, a dependency's image index and minimum version,
   BOOT_RECORD as CBOR (not decoded), the key ID, the ML-DSA parameter set, and an HSS
-  signature's levels `L`, LMS and LM-OTS type names and leaf index `q`;
+  signature's levels `L`, LMS and LM-OTS type names, leaf index `q` of the bottom level
+  and `leaf_indices`, the leaf index of every level, top first (SHA-67; optional in the
+  schema): which leaves of a stateful key the signature used;
 - the key IDs and keyhashes in the image, and every signature TLV with its kind, area,
   length, the 32-byte `KEYHASH` immediately before it (classical signatures; `paired`
   means a 32-byte `KEYHASH` immediately before it, otherwise `keyhash` is `null` and
@@ -187,12 +203,15 @@ Readers should check `schema_version` and ignore fields they do not know.
 | 3 | `OUT` exists and `--force` was not given |
 | 4 | passphrase: wrong, missing for an encrypted key, or given when neither key is encrypted |
 | 5 | corrupt or unsupported key file (as in [keys.md](keys.md#exit-codes)) |
-| 6 | `--key` is not an ML-DSA key or `--hybrid-key` is not an Ed25519 key |
+| 6 | `--key` is an Ed25519 key (it must be ML-DSA or LMS/HSS) or `--hybrid-key` is not an Ed25519 key; for `pubkey --alg`, a different algorithm (or, for an LMS/HSS key, a different height than the `lms-sha256-m32-hNN` value) |
 | 7 | the input image is rejected: not an MCUboot image, an image rule broken, bytes after the TLV area, larger than 64 MiB, TLV area too large (`verify` and `inspect`: not an MCUboot image or larger than 64 MiB) |
 | 8 | the input image already carries keelsign TLVs (or, with `--hybrid-key`, an Ed25519 signature) and `--replace` was not given |
 | 9 | `verify`: the image is not verified under the policy (see [verify.md](verify.md#exit-codes)) |
+| 10 | `sign` with an LMS/HSS key: its state is refused: the state file or journal is missing, the state file belongs to another key, is behind the journal (restored from a copy: retire the key), or is corrupt, or another keelsign process holds the key's lock (see [keys.md](keys.md#stateful-lms-keys)) |
+| 11 | `sign` with an LMS/HSS key: `LeafIndexExhausted`, every leaf of the key is used; generate a new key |
 
-The table is final; see [verify.md](verify.md#exit-codes) for `verify`'s codes. Error
+The table is final for codes 0 to 9; SHA-67 added 10 and 11 for stateful LMS/HSS keys. See
+[verify.md](verify.md#exit-codes) for `verify`'s codes. Error
 messages go to standard error, start with `error:` and name the file.
 
 ## Interoperability checks
@@ -212,6 +231,80 @@ validates with `imgtool verify --key` under the keelsign Ed25519 key.
 
 ## LMS/HSS
 
-`sign` does not sign with LMS/HSS: LMS/HSS keys are stateful and need their own key
-files and state handling (E7.2). `inspect` decodes LMS/HSS signature TLVs (`0x4BA3`)
-already, and `--replace` replaces one with an ML-DSA signature.
+`keelsign keygen --alg lms-sha256-m32-h10|h15|h20 [--hss-levels 1|2]` makes an LMS/HSS
+key with LMOTS_SHA256_N32_W8 ([keys.md](keys.md#lmshss-keys)), and `sign --key` signs
+with it, alone or hybrid with `--hybrid-key`. The signature is the HSS signature of
+RFC 8554 §6.2 over the image digest `M` itself, in the `0x4BA3` TLV
+([image-format.md](image-format.md)), with a deterministic randomizer `C`.
+
+LMS/HSS keys are stateful: a leaf (one-time key) must never sign twice. The key file
+`FILE` comes with `FILE.state` (the next leaf, bound to the key ID, plus cached tree
+nodes) and `FILE.journal` (a header line with the key ID, then one `reserved LEAF TIME`
+line per signature; also the lock).
+After it has parsed the image, loaded the keys and computed `M`, and before it computes
+any signature, `sign` locks the journal, checks the state file, writes it with the next
+leaf advanced and appends the leaf to the journal; it holds the lock until `OUT` is
+written. A crash after that wastes the leaf, never reuses it. `--replace` re-signs with a
+new leaf. Exit code 10 means the state is refused: the state file or journal missing,
+another key's state file, a state file behind its journal (restored from a copy), a
+corrupt one, or another keelsign process signing with the key; exit code 11
+(`LeafIndexExhausted`) means every leaf is used. The rules for handling an LMS/HSS key
+are in [keys.md, Stateful LMS keys](keys.md#stateful-lms-keys).
+
+With one level the image verifies under keelsign-verify's default and CNSA 2.0 policies;
+with two levels under the default policy only. `inspect` shows the leaf of every level
+(`leaf_indices`). The images of an H10 key's first, second and last leaf are checked on
+the host by `keelsign/tests/lms_sign.rs` and on the boards by the
+[on-target check](#on-target-check).
+
+## On-target check
+
+SHA-67's test plan asks for images signed at leaves 0, 1 and 2^H − 1 of an LMS key to
+verify on the device. The host half is the test
+`images_at_leaves_0_1_and_1023_verify_with_keelsign_verify_and_cnsa_2_0`
+(keelsign/tests/lms_sign.rs); the board half is this manual procedure, which the verifier
+marks NEEDS-HARDWARE until a human has run it on the nRF52840-DK and the Pico 2 W:
+
+1. Sign the images on the host, keeping them:
+
+   ```sh
+   cargo test -p keelsign --locked --test lms_sign \
+       images_at_leaves_0_1_and_1023_verify_with_keelsign_verify_and_cnsa_2_0 -- --nocapture
+   ```
+
+   It prints `on-target inputs (docs/signing.md#on-target-check): DIR`. `DIR`
+   (`target/tmp/lms_sign/leaves/`) holds `lms.pub.pem` and `leaf-0.bin`, `leaf-1.bin`,
+   `leaf-1023.bin`: one H10 key's first, second and last leaf, each verified on the host
+   by `keelsign verify` and `keelsign verify --cnsa-2.0`.
+2. Pack them into a KSLM v2 fixture for the on-target LMS runner (benches/lms-kat), from
+   the repository root:
+
+   ```sh
+   repo="$PWD"
+   cd target/tmp/lms_sign/leaves
+   python3 "$repo"/scripts/lms_image_kat.py --pub lms.pub.pem --out /tmp/lms-leaves.bin leaf-0.bin leaf-1.bin leaf-1023.bin
+   cd "$repo"
+   ```
+
+   Each case is the image digest `M`, the `0x4BA3` signature and the public key, checked
+   against the image's key-ID TLV; case IDs 700–702, source byte 2.
+3. With a board connected (docs/benchmarks.md), build and run the LMS test binary with
+   that fixture: lms-kat's `build.rs` embeds the absolute path in `KEELSIGN_LMS_TARGET`
+   instead of `fixtures/lms-target.bin`.
+
+   ```sh
+   cd benches/nrf52840-mldsa   # then again in benches/rp2350-mldsa
+   KEELSIGN_LMS_TARGET=/tmp/lms-leaves.bin cargo test --release --locked --test lms -- lms_kat
+   ```
+
+4. Expect, on both boards, `KAT board=... set=LMS passed=3/3`, then
+   `ROTATION board=... rotation: skipped (override fixture has no rotation cases)`, and
+   `lms_kat` passing: every case verifies under the device default policy and
+   `DefaultBackend::cnsa_2_0()`. The rotation check needs the default fixture's rotation
+   keys, which the override lacks; lms-kat's `build.rs` exports
+   `LMS_KAT_TARGET_OVERRIDDEN`, and `lms_kat::target_rotation` skips it only then
+   (`lms_rotation_key_b_verifies_against_a_b_and_fails_against_a` passes with the same
+   skip line). Paste the two logs into the pull request and the Linear ticket.
+5. Build once more without `KEELSIGN_LMS_TARGET` so the benches embed the 14-case fixture
+   again; `lms_kat` then logs `passed=14/14` and runs the rotation check (`ROTATION
+   board=... {A,B} accepts B and A, {A} rejects B: ok`).
