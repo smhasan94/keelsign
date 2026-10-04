@@ -12,6 +12,7 @@ runs every generator (SHA-39).
 | `scripts/gen_lms_vectors.py` | `benches/lms-kat/fixtures/` (LMS/HSS KATs) | network | [benchmarks.md](benchmarks.md) |
 | `scripts/gen_image_fixtures.py` | `tests/fixtures/images/` (MCUboot images with keelsign TLVs, the policy matrix) | network, imgtool 2.4.0 | [image-format.md](image-format.md#sample-images) |
 | `scripts/gen_fuzz_corpus.py` | `fuzz/corpus/` (the `parse_image` seed corpus and its `MANIFEST.json`) | nothing (offline; reads `tests/fixtures/images/`) | [fuzzing.md](fuzzing.md#corpus) |
+| `scripts/gen_inspect_snapshots.py` | `keelsign/tests/snapshots/inspect/` (`keelsign inspect` text and JSON output of seven sample images) | cargo, or a built binary with `--keelsign PATH` (offline; reads `tests/fixtures/images/`) | [signing.md](signing.md#inspect) |
 
 Each takes `--check`, which regenerates into a temporary directory and diffs the result
 with the committed files without writing anything. The "keelsign TLV encoder" the images
@@ -24,9 +25,11 @@ scripts/make-fixtures.sh --check --imgtool .venv-imgtool/bin/imgtool   # verify,
 scripts/make-fixtures.sh --imgtool .venv-imgtool/bin/imgtool           # rewrite every fixture
 ```
 
-The wrapper runs the four generators in the order of the table (the fuzz corpus is built
-from the images, so it comes last), forwards `--check` and `--imgtool PATH` (to the image
-generator only; without it imgtool is taken from `PATH`), stops at the first failure, and
+The wrapper runs the five generators in the order of the table (the fuzz corpus and the
+inspect snapshots are built from the images, so they come after them), forwards `--check`,
+`--imgtool PATH` (to the image generator only; without it imgtool is taken from `PATH`)
+and `--keelsign PATH` (to the snapshot generator only; without it the binary is run with
+`cargo run -q -p keelsign --locked --`), stops at the first failure, and
 ends with `make-fixtures: every fixture matches a fresh regeneration` (check mode) or
 `make-fixtures: regenerated every fixture` (write mode).
 
@@ -40,7 +43,8 @@ scripts/make-fixtures.sh --imgtool .venv-imgtool/bin/imgtool
 git status --porcelain --untracked-files=all -- tests/fixtures benches/lms-kat/fixtures benches/mldsa-kat/fixtures fuzz/corpus
 ```
 
-The second command prints nothing. The repo-check
+The second command prints nothing; add `keelsign/tests/snapshots` to the paths to cover
+the inspect snapshots too. The repo-check
 `repo_checks::fuzz::make_fixtures_check_regenerates_byte_identically` (ignored: it needs
 the network and imgtool on `PATH`) runs the check mode:
 
