@@ -1,5 +1,6 @@
 //! The `keelsign` host CLI: key generation and key files (see `docs/keys.md`), image
 //! signing and inspection (see `docs/signing.md`) and verification (see `docs/verify.md`).
+//! LMS/HSS keys are signed with the in-house signer [`lms_sign`].
 //!
 //! **Pre-release.** This library API is unstable; it exists for the CLI and its tests.
 #![forbid(unsafe_code)]
@@ -11,5 +12,7 @@ pub mod image_file;
 pub mod inspect;
 pub mod keyfile;
 pub mod keys;
+pub mod lms_sign;
+pub mod lms_state;
 pub mod sign;
 pub mod verify;

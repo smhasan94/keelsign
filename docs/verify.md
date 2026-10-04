@@ -57,9 +57,9 @@ STRING` and carries it in the `subjectPublicKey` BIT STRING. keelsign reads the 
 `PUBLIC-KEY` convention: the BIT STRING holds the DER encoding of that OCTET STRING
 (`04 3c` and the 60-byte key, for an `m = 32` key), not the raw key. Some implementations
 put the raw key straight in the BIT STRING; keelsign refuses that form (exit 5, "not a
-DER OCTET STRING") rather than guess. keelsign does not generate LMS/HSS keys yet (E7.2);
-when it does, its key files will use this form, and accepting the second form can be
-added then.
+DER OCTET STRING") rather than guess. keelsign's own LMS/HSS keys (`keygen --alg
+lms-sha256-m32-h10|h15|h20`, SHA-67) are written in the first form by `pubkey`
+([keys.md](keys.md#lmshss-keys)); accepting the second form is a follow-up.
 
 ## Policies and inference
 
@@ -171,8 +171,9 @@ CNSA 2.0 profile.
 
 ## Exit codes
 
-The table is final; keelsign/src/error.rs assigns these codes, and
-[keys.md](keys.md#exit-codes) and [signing.md](signing.md#exit-codes) repeat them.
+The table is final for codes 0 to 9; SHA-67 added 10 and 11 for stateful LMS/HSS keys.
+keelsign/src/error.rs assigns these codes, and [keys.md](keys.md#exit-codes) and
+[signing.md](signing.md#exit-codes) repeat them.
 
 | Code | Meaning |
 |---|---|
@@ -182,10 +183,12 @@ The table is final; keelsign/src/error.rs assigns these codes, and
 | 3 | the output file exists and `--force` was not given |
 | 4 | passphrase: wrong, missing or unexpected |
 | 5 | corrupt or unsupported key file, private or public (for `--pub`: not a `SubjectPublicKeyInfo`, an unknown OID, parameters present, the wrong length, a private key) |
-| 6 | a key of the wrong kind (`--alg`, `sign --key`, `--hybrid-key`) |
+| 6 | a key of the wrong kind (`--alg`, `sign --key`, `--hybrid-key`) (or, for an LMS/HSS key, a different height than the `lms-sha256-m32-hNN` value) |
 | 7 | the image is rejected as malformed (`verify`, `inspect`, `sign`): not an MCUboot image or larger than 64 MiB; for `sign` also an image rule broken or bytes after the TLV area |
 | 8 | `sign`: the image already carries keelsign TLVs (or, with `--hybrid-key`, an Ed25519 pair) and `--replace` was not given |
 | 9 | `verify`: the image is not verified under the policy: a signature invalid or malformed, a key not trusted, a TLV missing or repeated, the Ed25519 half rejected, an image rule broken (including a digest mismatch), an unsupported parameter set |
+| 10 | `sign` with an LMS/HSS key: its state is refused: the state file or journal is missing, the state file belongs to another key, is behind the journal (restored from a copy: retire the key), or is corrupt, or another keelsign process holds the key's lock (see [keys.md](keys.md#stateful-lms-keys)) |
+| 11 | `sign` with an LMS/HSS key: `LeafIndexExhausted`, every leaf of the key is used; generate a new key |
 
 How the verifier's errors map: `Parse`, `Read` and `TlvAreaTooLarge` (the image does not
 parse) are 7; `ChunkBufferEmpty` (a misuse of the verifier) is 1; every other

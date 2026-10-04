@@ -1245,10 +1245,12 @@ dependencies = [
  "getrandom 0.4.3",
  "jsonschema",
  "keelsign-verify",
+ "lms-kat",
  "ml-dsa",
  "pkcs8",
  "predicates",
  "serde_json",
+ "sha2",
  "zeroize",
 ]
 

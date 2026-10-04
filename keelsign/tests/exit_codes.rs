@@ -1,6 +1,6 @@
 //! SHA-53 TP1: every subcommand and every exit code, through the real binary with
 //! `assert_cmd`. The codes are fixed in keelsign/src/error.rs and documented in
-//! docs/verify.md, docs/keys.md and docs/signing.md.
+//! docs/verify.md, docs/keys.md and docs/signing.md (SHA-67 added 10 and 11).
 
 mod common;
 
@@ -236,8 +236,35 @@ fn every_exit_code_is_produced_by_a_real_invocation() {
         "not verified under policy pq: post-quantum key ID is not in the trusted key set",
     );
 
-    let all: BTreeSet<i32> = (0..=9).collect();
-    assert_eq!(seen.codes, all, "every exit code 0..=9 is produced");
+    // sign with an LMS/HSS key (SHA-67): 0, 10 (state refused), 11 (exhausted).
+    let lms = seen.path("lms.pem");
+    let lms_signed = seen.path("lms-signed.bin");
+    seen.run(
+        &[&"keygen", &"--alg", &"lms-sha256-m32-h10", &"--out", &lms],
+        0,
+        "",
+    );
+    seen.run(&[&"sign", &"--key", &lms, &image, &lms_signed], 0, "")
+        .stdout(predicate::str::contains("leaf: 0 of 1024"));
+    let state = keelsign::lms_state::state_path(&lms);
+    let saved = std::fs::read(&state).expect("read state");
+    std::fs::remove_file(&state).expect("remove state");
+    seen.run(
+        &[&"sign", &"--key", &lms, &image, &seen.path("x.bin")],
+        10,
+        "lms.pem.state is missing",
+    );
+    std::fs::write(&state, saved).expect("restore state");
+    keelsign::lms_state::StateFile::set_next_leaf(&lms, 1024).expect("use every leaf");
+    seen.run(
+        &[&"sign", &"--key", &lms, &image, &seen.path("y.bin")],
+        11,
+        "LeafIndexExhausted",
+    );
+    assert!(!seen.path("x.bin").exists() && !seen.path("y.bin").exists());
+
+    let all: BTreeSet<i32> = (0..=11).collect();
+    assert_eq!(seen.codes, all, "every exit code 0..=11 is produced");
 }
 
 #[test]

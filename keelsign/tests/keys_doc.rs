@@ -2,8 +2,8 @@
 //! AC2).
 
 use keelsign::keys::{
-    ID_ED25519, ID_ML_DSA_44, ID_ML_DSA_65, PEM_ENCRYPTED_PRIVATE_KEY, PEM_PRIVATE_KEY,
-    PEM_PUBLIC_KEY,
+    ID_ED25519, ID_HSS_LMS_HASHSIG, ID_ML_DSA_44, ID_ML_DSA_65, PEM_ENCRYPTED_PRIVATE_KEY,
+    PEM_PRIVATE_KEY, PEM_PUBLIC_KEY,
 };
 use std::path::Path;
 
@@ -17,6 +17,8 @@ fn docs_keys_md_lists_the_oids_and_formats() {
         "## Algorithms and OIDs",
         "## Private key files",
         "## Public key files",
+        "## LMS/HSS keys",
+        "## Stateful LMS keys",
         "## Passphrase encryption",
         "## Key ID and KEYHASH",
         "## File permissions and overwriting",
@@ -34,6 +36,7 @@ fn docs_keys_md_lists_the_oids_and_formats() {
         (ID_ML_DSA_44, "id-ml-dsa-44"),
         (ID_ML_DSA_65, "id-ml-dsa-65"),
         (ID_ED25519, "id-Ed25519"),
+        (ID_HSS_LMS_HASHSIG, "id-alg-hss-lms-hashsig"),
     ] {
         let row = doc
             .lines()
@@ -62,6 +65,25 @@ fn docs_keys_md_lists_the_oids_and_formats() {
         "30820532300b06096086480165030403110382052100",
         "308207b2300b0609608648016503040312038207a100",
         "302a300506032b6570032100",
+        // SHA-67: LMS/HSS keys, their blob, public key header and state.
+        "lms-sha256-m32-h10",
+        "lms-sha256-m32-h15",
+        "lms-sha256-m32-h20",
+        "--hss-levels 1|2",
+        "LMOTS_SHA256_N32_W8",
+        "RFC 8708 §3",
+        "3050300d060b2a864886f70d0109100311033f00043c",
+        "| version | 1 | `01` |",
+        "121 bytes",
+        "keelsign-hss-seed",
+        "keelsign-hss-id",
+        "FILE.state",
+        "FILE.journal",
+        "\"format\": \"keelsign-lms-state\"",
+        "reserved LEAF UNIX-SECONDS",
+        "restored from a copy",
+        "LeafIndexExhausted",
+        "50 s",
         // Passphrase encryption.
         "1.2.840.113549.1.5.13",
         "1.3.6.1.4.1.11591.4.11",

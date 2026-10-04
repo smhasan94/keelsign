@@ -8,12 +8,15 @@
 //! | 3 | output file exists and `--force` was not given |
 //! | 4 | passphrase problem: wrong, missing, or given for an unencrypted key |
 //! | 5 | corrupt or unsupported key file, private or public (a `--pub` file that is not a supported `SubjectPublicKeyInfo`, or is a private key) |
-//! | 6 | the key file holds a different algorithm than `--alg` asks for (or, for `sign`, `--key` is not ML-DSA / `--hybrid-key` is not Ed25519) |
+//! | 6 | the key file holds a different algorithm than `--alg` asks for (or, for an LMS/HSS key, a different height than the `lms-sha256-m32-hNN` value) (or, for `sign`, `--key` is Ed25519 / `--hybrid-key` is not Ed25519) |
 //! | 7 | the input image is rejected as malformed: not an MCUboot image or too large (`verify`, `inspect`, `sign`); for `sign` also an image rule broken or bytes after its TLV area |
 //! | 8 | the input image already carries keelsign TLVs (or, with `--hybrid-key`, an Ed25519 pair) and `--replace` was not given |
 //! | 9 | `verify`: the image is not verified under the policy (a signature invalid or malformed, a key not trusted, a TLV missing or repeated, the Ed25519 half rejected, an image rule broken, an unsupported parameter set) |
+//! | 10 | `sign` with an LMS/HSS key: its state is refused (the state file or journal missing, the state file another key's, behind the journal because it was restored from a copy, or corrupt; or another keelsign process holds the key's lock) |
+//! | 11 | `sign` with an LMS/HSS key: `LeafIndexExhausted`, every leaf is used; generate a new key |
 //!
-//! The table is final (docs/verify.md has the full one).
+//! The table is final for codes 0 to 9; SHA-67 added 10 and 11 for stateful LMS/HSS keys
+//! (docs/verify.md has the full table).
 
 use crate::keys::KeyAlgorithm;
 use std::fmt;
@@ -33,6 +36,32 @@ pub enum KeyFileError {
     Corrupt(String),
     /// The file is well formed but holds something keelsign does not read.
     Unsupported(String),
+}
+
+/// Why the state of an LMS/HSS key refuses a signature. Carries no path;
+/// [`Error::LmsState`] adds the state file or journal it is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LmsStateError {
+    /// The state file or the journal is missing.
+    Missing,
+    /// The state file belongs to another key.
+    ForeignKey {
+        /// The key ID of the key being used.
+        expected: String,
+        /// The key ID the state file is bound to.
+        found: String,
+    },
+    /// The state file is behind the journal: it was restored from a copy.
+    BehindJournal {
+        /// The next leaf the state file names.
+        next: u64,
+        /// The highest leaf the journal records as used.
+        used: u64,
+    },
+    /// The state file or journal is malformed or does not fit the key.
+    Corrupt(String),
+    /// Another keelsign process holds the key's lock.
+    Locked,
 }
 
 /// A `keelsign` CLI error. [`Error::exit_code`] gives the process exit code.
@@ -99,6 +128,30 @@ pub enum Error {
         /// What the option needs, for example `ML-DSA-44 or ML-DSA-65`.
         expected: &'static str,
     },
+    /// The state of an LMS/HSS key refuses a signature (missing, another key's, rolled
+    /// back, corrupt or locked).
+    LmsState {
+        /// The state file or journal.
+        path: PathBuf,
+        /// Why it refuses.
+        reason: LmsStateError,
+    },
+    /// Every leaf of an LMS/HSS key is used.
+    LeafIndexExhausted {
+        /// The key file.
+        key: PathBuf,
+        /// How many signatures the key could make.
+        leaves: u64,
+    },
+    /// The key file holds an LMS/HSS key of another parameter set than `--alg` asks for.
+    ParameterSetMismatch {
+        /// The key file.
+        path: PathBuf,
+        /// The key's parameter set, for example `LMS_SHA256_M32_H15/LMOTS_SHA256_N32_W8, L=1`.
+        found: String,
+        /// The top-level LMS parameter set `--alg` names, for example `LMS_SHA256_M32_H10`.
+        requested: String,
+    },
     /// The key file holds a different algorithm than `--alg` asks for.
     AlgorithmMismatch {
         /// The key file.
@@ -123,10 +176,14 @@ impl Error {
                 | KeyFileError::WrongPassphrase => 4,
                 KeyFileError::Corrupt(_) | KeyFileError::Unsupported(_) => 5,
             },
-            Self::AlgorithmMismatch { .. } | Self::WrongKeyKind { .. } => 6,
+            Self::AlgorithmMismatch { .. }
+            | Self::ParameterSetMismatch { .. }
+            | Self::WrongKeyKind { .. } => 6,
             Self::Image { .. } => 7,
             Self::AlreadySigned { .. } => 8,
             Self::NotVerified { .. } => 9,
+            Self::LmsState { .. } => 10,
+            Self::LeafIndexExhausted { .. } => 11,
         }
     }
 
@@ -205,6 +262,50 @@ impl fmt::Display for Error {
                     }
                 }
             }
+            Self::LmsState { path, reason } => {
+                let path = path.display();
+                match reason {
+                    LmsStateError::Missing => write!(
+                        f,
+                        "{path} is missing: an LMS/HSS key signs only with its state file and \
+                         journal (docs/keys.md#stateful-lms-keys); if this key has signed \
+                         before, retire it rather than recreate them"
+                    ),
+                    LmsStateError::ForeignKey { expected, found } => write!(
+                        f,
+                        "{path} belongs to another key (key id {found}; this key is \
+                         {expected})"
+                    ),
+                    LmsStateError::BehindJournal { next, used } => write!(
+                        f,
+                        "{path} says the next leaf is {next}, but the journal records leaf \
+                         {used} as used: the state file was restored from a copy; do not \
+                         sign, retire this key"
+                    ),
+                    LmsStateError::Corrupt(reason) => {
+                        write!(f, "{path}: corrupt LMS/HSS state: {reason}")
+                    }
+                    LmsStateError::Locked => write!(
+                        f,
+                        "{path} is locked by another keelsign process signing with this key"
+                    ),
+                }
+            }
+            Self::ParameterSetMismatch {
+                path,
+                found,
+                requested,
+            } => write!(
+                f,
+                "{} holds an LMS/HSS key of parameter set {found}, but --alg asks for \
+                 {requested} (top level)",
+                path.display()
+            ),
+            Self::LeafIndexExhausted { key, leaves } => write!(
+                f,
+                "LeafIndexExhausted: all {leaves} leaves of {} are used; generate a new key",
+                key.display()
+            ),
             Self::AlgorithmMismatch {
                 path,
                 found,
@@ -276,6 +377,14 @@ mod tests {
                 6,
             ),
             (
+                Error::ParameterSetMismatch {
+                    path: path(),
+                    found: "LMS_SHA256_M32_H15/LMOTS_SHA256_N32_W8, L=1".into(),
+                    requested: "LMS_SHA256_M32_H10".into(),
+                },
+                6,
+            ),
+            (
                 Error::WrongKeyKind {
                     path: path(),
                     option: "--key",
@@ -306,16 +415,82 @@ mod tests {
                 },
                 9,
             ),
+            (
+                Error::LmsState {
+                    path: path(),
+                    reason: LmsStateError::Missing,
+                },
+                10,
+            ),
+            (
+                Error::LmsState {
+                    path: path(),
+                    reason: LmsStateError::ForeignKey {
+                        expected: "aa".into(),
+                        found: "bb".into(),
+                    },
+                },
+                10,
+            ),
+            (
+                Error::LmsState {
+                    path: path(),
+                    reason: LmsStateError::BehindJournal { next: 3, used: 5 },
+                },
+                10,
+            ),
+            (
+                Error::LmsState {
+                    path: path(),
+                    reason: LmsStateError::Corrupt("x".into()),
+                },
+                10,
+            ),
+            (
+                Error::LmsState {
+                    path: path(),
+                    reason: LmsStateError::Locked,
+                },
+                10,
+            ),
+            (
+                Error::LeafIndexExhausted {
+                    key: path(),
+                    leaves: 1024,
+                },
+                11,
+            ),
         ];
         for (error, code) in &cases {
             assert_eq!(error.exit_code(), *code, "{error}");
             assert_ne!(error.exit_code(), 0, "{error}");
         }
-        // Every exit code 1..=9 is used, and the classes do not overlap.
+        // Every exit code 1..=11 is used, and the classes do not overlap.
         let mut codes: Vec<u8> = cases.iter().map(|(e, _)| e.exit_code()).collect();
         codes.sort_unstable();
         codes.dedup();
-        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+        let exhausted = Error::LeafIndexExhausted {
+            key: path(),
+            leaves: 1024,
+        }
+        .to_string();
+        assert!(exhausted.starts_with("LeafIndexExhausted:"), "{exhausted}");
+        assert!(exhausted.contains("1024") && exhausted.contains("new key"));
+        let behind = Error::LmsState {
+            path: PathBuf::from("k.pem.state"),
+            reason: LmsStateError::BehindJournal { next: 3, used: 5 },
+        }
+        .to_string();
+        assert!(behind.contains("restored from a copy") && behind.contains("retire"));
+        assert!(
+            Error::LmsState {
+                path: PathBuf::from("k.pem.journal"),
+                reason: LmsStateError::Locked,
+            }
+            .to_string()
+            .contains("locked by another keelsign process")
+        );
 
         let mismatch = Error::AlgorithmMismatch {
             path: path(),

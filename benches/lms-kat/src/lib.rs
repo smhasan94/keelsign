@@ -44,11 +44,33 @@ pub const VERSION: u16 = 2;
 
 /// On-target fixture: RFC 8554 Test Cases 1 and 2, one ACVP SHA-256/192 case, hsslms
 /// M32 L2, M24 L1 and L2, rotation keys A and B, W4 and L=3, one tampered and one
-/// trailing-byte case.
-pub const LMS_TARGET: &[u8] = include_bytes!("../fixtures/lms-target.bin");
+/// trailing-byte case (`fixtures/lms-target.bin`). With `KEELSIGN_LMS_TARGET` set to an
+/// absolute path at build time, that KSLM v2 file instead (`build.rs`; docs/signing.md,
+/// "On-target check").
+pub const LMS_TARGET: &[u8] = include_bytes!(env!("LMS_KAT_TARGET_FIXTURE"));
 
-/// Cases in [`LMS_TARGET`].
-pub const TARGET_CASES: u32 = 14;
+/// Cases in [`LMS_TARGET`]: 14 for `fixtures/lms-target.bin`, read from the header of the
+/// embedded fixture by `build.rs`.
+pub const TARGET_CASES: u32 = parse_u32(env!("LMS_KAT_TARGET_CASES"));
+
+/// Whether [`LMS_TARGET`] is the `KEELSIGN_LMS_TARGET` override rather than
+/// `fixtures/lms-target.bin` (`build.rs`). An override fixture (keelsign-signed images,
+/// docs/signing.md "On-target check") has no rotation cases, so [`target_rotation`]
+/// skips the rotation check for it.
+pub const TARGET_OVERRIDDEN: bool = parse_u32(env!("LMS_KAT_TARGET_OVERRIDDEN")) != 0;
+
+/// The decimal number `text` (`build.rs` writes it); 0 for an empty string.
+const fn parse_u32(text: &str) -> u32 {
+    let mut digits = text.as_bytes();
+    let mut value: u32 = 0;
+    while let [digit, rest @ ..] = digits {
+        value = value
+            .saturating_mul(10)
+            .saturating_add(digit.wrapping_sub(b'0') as u32);
+        digits = rest;
+    }
+    value
+}
 
 /// Case IDs assigned by `scripts/gen_lms_vectors.py`.
 pub mod ids {
@@ -536,6 +558,46 @@ impl KeyInfo {
             lmots_typecode: next()?,
         })
     }
+}
+
+/// Whether [`target_rotation`] ran the rotation check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rotation {
+    /// [`check_rotation`] ran with the fixture's rotation keys A and B and passed.
+    Checked,
+    /// The fixture is an override (`overridden`), which has no rotation cases.
+    Skipped,
+}
+
+/// The on-target `lms_kat` verdict on a fixture run: `summary` must have `expected` cases
+/// and every one must match its expectations.
+pub fn check_kat_summary(summary: &Summary, expected: u32) -> Result<(), &'static str> {
+    if summary.total != expected {
+        return Err("fixture does not hold the expected number of cases");
+    }
+    if summary.all_passed() {
+        Ok(())
+    } else {
+        Err("a KAT case did not match its expectation")
+    }
+}
+
+/// The on-target rotation check of the fixture `bytes`: [`check_rotation`] with cases
+/// [`ids::ROTATION_A`] and [`ids::ROTATION_B`], or [`Rotation::Skipped`] when
+/// `overridden` (pass [`TARGET_OVERRIDDEN`] for [`LMS_TARGET`]) and the fixture has
+/// neither rotation case.
+pub fn target_rotation(bytes: &[u8], overridden: bool) -> Result<Rotation, &'static str> {
+    let fixture = Fixture::parse(bytes).map_err(|_| "fixture does not parse")?;
+    let (a, b) = (fixture.case(ids::ROTATION_A), fixture.case(ids::ROTATION_B));
+    // Skipped only for an override fixture that has no rotation cases; an override that
+    // has them (such as a copy of the default fixture) is checked.
+    if overridden && a.is_none() && b.is_none() {
+        return Ok(Rotation::Skipped);
+    }
+    let a = a.ok_or("no rotation key A")?;
+    let b = b.ok_or("no rotation key B")?;
+    check_rotation(&a, &b)?;
+    Ok(Rotation::Checked)
 }
 
 /// The key-rotation check (SHA-171 TP3): with `a` and `b` signed by two different keys

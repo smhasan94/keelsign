@@ -127,6 +127,26 @@ fn sign_and_verify(key: &PrivateKey, spki_pem: &str) -> String {
                 hex(&keelsign_verify::keyhash_of(&vk.to_bytes()))
             )
         }
+        PrivateKey::LmsHss(k) => {
+            // Rebuild the caches keygen started the state file with, sign leaf 0 and
+            // verify against the exported RFC 8708 public key.
+            let (rebuilt, caches) = keelsign::lms_sign::HssPrivateKey::from_levels(
+                k.trees().to_vec(),
+                keelsign::lms_sign::DEFAULT_CACHE_FLOOR,
+                None,
+            )
+            .expect("rebuild");
+            assert_eq!(rebuilt.public_key(), k.public_key());
+            let public = keelsign::keys::PublicKey::from_bytes(spki_pem.as_bytes()).expect("spki");
+            let sig = k.sign(0, &msg, &caches, None).expect("sign");
+            keelsign_verify::lms::verify(public.raw(), &msg, &sig).expect("signature verifies");
+            assert!(keelsign_verify::lms::verify(public.raw(), &bad_msg, &sig).is_err());
+            let mut bad_sig = sig.clone();
+            let last = bad_sig.len() - 1;
+            bad_sig[last] ^= 1;
+            assert!(keelsign_verify::lms::verify(public.raw(), &msg, &bad_sig).is_err());
+            format!("key id: {}", hex(&keelsign_verify::key_id_of(public.raw())))
+        }
     }
 }
 
@@ -897,6 +917,38 @@ fn pubkey_refuses_to_overwrite_its_own_key() {
     }
 }
 
+/// SHA-67: a dangling symbolic link at an LMS/HSS key's FILE.state or FILE.journal is
+/// refused (exit 3, before anything is generated), and nothing is written through it.
+#[cfg(unix)]
+#[test]
+fn dangling_symlink_at_lms_state_or_journal_is_refused() {
+    let dir = scratch("dangling_lms");
+    for suffix in ["state", "journal"] {
+        let key = dir.join(format!("{suffix}.pem"));
+        let link = dir.join(format!("{suffix}.pem.{suffix}"));
+        let target = dir.join(format!("nonexistent-{suffix}"));
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+        let out = keelsign(&[&"keygen", &"--alg", &"lms-sha256-m32-h10", &"--out", &key]);
+        assert_exit(&out, 3);
+        let err = stderr(&out);
+        assert!(
+            err.contains("--force") && err.contains(&format!(".pem.{suffix}")),
+            "{err}"
+        );
+        assert!(
+            !target.exists(),
+            "{suffix}: nothing is written through the link"
+        );
+        assert!(!key.exists(), "{suffix}: no key without its state");
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .expect("link")
+                .file_type()
+                .is_symlink()
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn dangling_symlink_at_out_is_refused() {
@@ -990,4 +1042,165 @@ fn mldsa_v2_key_with_matching_public_key_loads() {
     let out = keelsign(&[&"pubkey", &"--key", &path, &"--alg", &"ml-dsa-44"]);
     assert_exit(&out, 0);
     assert!(stdout(&out).starts_with("-----BEGIN PUBLIC KEY-----\n"));
+}
+
+/// SHA-67: `keygen --alg lms-sha256-m32-h10` (PEM, DER, encrypted, two levels) and
+/// `pubkey` for LMS/HSS keys; the exported RFC 8708 public key verifies a signature of the
+/// key. H15 and H20 take seconds to minutes and are not generated here.
+#[test]
+fn keygen_lms_h10_rows_round_trip_through_pubkey() {
+    let dir = scratch("lms");
+    let pw_file = write_passphrase_file(&dir);
+    let alg = "lms-sha256-m32-h10";
+    for (name, extra, levels) in [
+        ("pem", &[][..], 1u32),
+        ("der", &["--format", "der"][..], 1),
+        ("encrypted", &["--passphrase-file"][..], 1),
+        ("l2", &["--hss-levels", "2"][..], 2),
+    ] {
+        let key_path = dir.join(format!("{name}.key"));
+        let mut args: Vec<&dyn AsRef<std::ffi::OsStr>> =
+            vec![&"keygen", &"--alg", &alg, &"--out", &key_path];
+        for arg in extra {
+            args.push(arg);
+        }
+        if name == "encrypted" {
+            args.push(&pw_file);
+        }
+        let out = keelsign(&args);
+        assert_exit(&out, 0);
+        let printed = stdout(&out);
+        assert!(printed.contains("algorithm: lms-hss\n"), "{printed}");
+        let set = if levels == 1 {
+            "parameter set: LMS_SHA256_M32_H10/LMOTS_SHA256_N32_W8, L=1\n"
+        } else {
+            "parameter set: LMS_SHA256_M32_H10+LMS_SHA256_M32_H10/LMOTS_SHA256_N32_W8, L=2\n"
+        };
+        assert!(printed.contains(set), "{printed}");
+        // keygen writes the key, then its state file and an empty journal.
+        let state = keelsign::lms_state::state_path(&key_path);
+        let journal = keelsign::lms_state::journal_path(&key_path);
+        let signatures = if levels == 1 { 1024 } else { 1024 * 1024 };
+        for line in [
+            format!("signatures: {signatures}\n"),
+            format!("state: {} (next leaf 0)\n", state.display()),
+            format!("journal: {}\n", journal.display()),
+        ] {
+            assert!(printed.contains(&line), "{line} in:\n{printed}");
+        }
+        assert!(stderr(&out).contains("stateful"), "{}", stderr(&out));
+        let state_json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&state).expect("state")).expect("JSON");
+        assert_eq!(state_json["format"], "keelsign-lms-state");
+        assert_eq!(state_json["next_leaf"], 0);
+        assert_eq!(state_json["leaves"], signatures);
+        assert_eq!(
+            state_json["levels"].as_array().map(Vec::len),
+            Some(levels as usize)
+        );
+        // The journal holds only its header line, binding it to the key ID.
+        let key_id = identity_line(&printed)
+            .strip_prefix("key id: ")
+            .expect("key id")
+            .to_owned();
+        assert_eq!(
+            std::fs::read_to_string(&journal).expect("journal"),
+            format!("keelsign-lms-journal 1 {key_id}\n")
+        );
+
+        let mut pub_args: Vec<&dyn AsRef<std::ffi::OsStr>> =
+            vec![&"pubkey", &"--key", &key_path, &"--alg", &alg];
+        if name == "encrypted" {
+            pub_args.push(&"--passphrase-file");
+            pub_args.push(&pw_file);
+        }
+        let out = keelsign(&pub_args);
+        assert_exit(&out, 0);
+        let spki_pem = stdout(&out);
+        assert!(spki_pem.starts_with("-----BEGIN PUBLIC KEY-----\n"));
+        assert!(stderr(&out).contains("algorithm: lms-hss\n"));
+        assert_eq!(identity_line(&stderr(&out)), identity_line(&printed));
+        // `verify --pub` reads it: an RFC 8708 SubjectPublicKeyInfo of an L-level key.
+        let public = keelsign::keys::PublicKey::from_bytes(spki_pem.as_bytes()).expect("spki");
+        assert_eq!(public.algorithm_name(), "lms-hss");
+        assert_eq!(public.raw()[..4], levels.to_be_bytes());
+
+        let key_file = std::fs::read(&key_path).expect("read key");
+        let passphrase = (name == "encrypted").then_some(PASSPHRASE);
+        let key = PrivateKey::from_bytes(&key_file, passphrase).expect("load generated key");
+        assert_eq!(key.algorithm(), KeyAlgorithm::LmsHss);
+        if name == "pem" || name == "l2" {
+            assert_eq!(identity_line(&printed), sign_and_verify(&key, &spki_pem));
+        }
+    }
+
+    // An existing state file or journal is never replaced without --force (exit 3).
+    let lone = dir.join("lone.pem");
+    std::fs::write(keelsign::lms_state::state_path(&lone), b"{}").expect("write");
+    let out = keelsign(&[&"keygen", &"--alg", &alg, &"--out", &lone]);
+    assert_exit(&out, 3);
+    assert!(stderr(&out).contains("lone.pem.state"), "{}", stderr(&out));
+    assert!(!lone.exists(), "no key file without its state");
+    std::fs::remove_file(keelsign::lms_state::state_path(&lone)).expect("rm");
+    std::fs::write(keelsign::lms_state::journal_path(&lone), b"").expect("write");
+    assert_exit(&keelsign(&[&"keygen", &"--alg", &alg, &"--out", &lone]), 3);
+    let out = keelsign(&[&"keygen", &"--alg", &alg, &"--out", &lone, &"--force"]);
+    assert_exit(&out, 0);
+    assert!(lone.exists() && keelsign::lms_state::state_path(&lone).exists());
+
+    // `--hss-levels` is for LMS/HSS only, and 1 or 2.
+    let out = keelsign(&[
+        &"keygen",
+        &"--alg",
+        &"ml-dsa-44",
+        &"--hss-levels",
+        &"1",
+        &"--out",
+        &dir.join("x.pem"),
+    ]);
+    assert_exit(&out, 2);
+    assert!(stderr(&out).contains("--hss-levels"), "{}", stderr(&out));
+    for levels in ["0", "3"] {
+        let out = keelsign(&[
+            &"keygen",
+            &"--alg",
+            &alg,
+            &"--hss-levels",
+            &levels,
+            &"--out",
+            &dir.join("y.pem"),
+        ]);
+        assert_exit(&out, 2);
+    }
+    assert!(!dir.join("x.pem").exists() && !dir.join("y.pem").exists());
+
+    // `pubkey --alg` with another LMS height is a parameter-set mismatch naming both.
+    let out = keelsign(&[
+        &"pubkey",
+        &"--key",
+        &dir.join("pem.key"),
+        &"--alg",
+        &"lms-sha256-m32-h15",
+        &"--out",
+        &dir.join("h15.pub.pem"),
+    ]);
+    assert_exit(&out, 6);
+    let err = stderr(&out);
+    assert!(
+        err.contains("LMS_SHA256_M32_H10/LMOTS_SHA256_N32_W8, L=1")
+            && err.contains("LMS_SHA256_M32_H15"),
+        "{err}"
+    );
+    assert!(!dir.join("h15.pub.pem").exists());
+
+    // `pubkey --alg` with another family is an algorithm mismatch.
+    let out = keelsign(&[
+        &"pubkey",
+        &"--key",
+        &dir.join("pem.key"),
+        &"--alg",
+        &"ml-dsa-44",
+    ]);
+    assert_exit(&out, 6);
+    assert!(stderr(&out).contains("lms-hss"), "{}", stderr(&out));
 }

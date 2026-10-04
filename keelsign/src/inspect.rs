@@ -105,6 +105,9 @@ pub struct HssSummary {
     pub lmots_types: Vec<&'static str>,
     /// The leaf index `q` of the bottom-level signature (the one over the image).
     pub q: u32,
+    /// The leaf index `q` of each level's signature, top level first (the last one is
+    /// [`Self::q`]): which leaves of a stateful key the signature used.
+    pub leaf_indices: Vec<u32>,
 }
 
 struct Cursor<'a>(&'a [u8]);
@@ -136,9 +139,11 @@ pub fn hss_summary(signature: &[u8]) -> Option<HssSummary> {
         lms_types: Vec::new(),
         lmots_types: Vec::new(),
         q: 0,
+        leaf_indices: Vec::new(),
     };
     for level in 0..=nspk {
         summary.q = cur.u32()?;
+        summary.leaf_indices.push(summary.q);
         let ots = lmots_type(cur.u32()?)?;
         cur.take(ots.n.checked_mul(ots.p.checked_add(1)?)?)?;
         let lms = lms_type(cur.u32()?)?;
@@ -204,6 +209,7 @@ fn hss_json(summary: &HssSummary) -> Value {
         "lms_types": summary.lms_types,
         "lmots_types": summary.lmots_types,
         "q": summary.q,
+        "leaf_indices": summary.leaf_indices,
     })
 }
 
@@ -570,6 +576,7 @@ mod tests {
         let summary = hss_summary(&sig).expect("parses");
         assert_eq!(summary.levels, 1);
         assert_eq!(summary.q, 3);
+        assert_eq!(summary.leaf_indices, [3]);
         assert_eq!(summary.lms_types, ["LMS_SHA256_M32_H5"]);
         assert_eq!(summary.lmots_types, ["LMOTS_SHA256_N32_W8"]);
         sig.push(0);

@@ -8,7 +8,8 @@ format so MCUboot and embassy-boot users keep their existing update pipeline.
 contain no functionality. The verifier described below is unreleased and its API is
 unstable. The host CLI has `keygen` and `pubkey` ([docs/keys.md](docs/keys.md)),
 `sign` and `inspect` ([docs/signing.md](docs/signing.md)) and `verify`
-([docs/verify.md](docs/verify.md)). The embassy-boot adapter `keelsign-embassy`
+([docs/verify.md](docs/verify.md)), for ML-DSA-44/65 and stateful LMS/HSS keys
+(optionally hybrid with Ed25519). The embassy-boot adapter `keelsign-embassy`
 verifies the DFU slot before marking it for swap
 ([docs/embassy.md](docs/embassy.md)); the MCUboot C bindings are not written yet.
 
@@ -16,18 +17,26 @@ verifies the DFU slot before marking it for swap
 
 Build it once: `cargo install --path keelsign --locked` (or
 `cargo build --release -p keelsign` and put `target/release` on `PATH`). Then, from the
-repository root, sign an imgtool-signed image with a new ML-DSA-65 key and verify it as
-the device would:
+repository root, sign an imgtool-signed image with a new LMS/HSS key
+(LMS_SHA256_M32_H10: 1,024 signatures) and verify it as the device would.
+
+**LMS/HSS keys are stateful.** Every signature uses up one one-time leaf of the key, and
+signing twice with the same leaf breaks the key. `keygen` writes `signing.pem.state` and
+`signing.pem.journal` next to the key; `sign` records the leaf there before it signs.
+Keep the three files together, sign only with keelsign on one machine, and never copy
+the key elsewhere or restore it from a backup: read
+[docs/keys.md, Stateful LMS keys](docs/keys.md#stateful-lms-keys) before using one for
+real firmware. (`--alg ml-dsa-65` gives a stateless ML-DSA key instead.)
 
 ```sh
 work="$(mktemp -d)"
 cp tests/fixtures/images/mcuboot-ed25519.bin "$work/app.signed.bin"   # any imgtool-signed image
 cd "$work"
-keelsign keygen --alg ml-dsa-65 --out signing.pem
+keelsign keygen --alg lms-sha256-m32-h10 --out signing.pem   # also writes signing.pem.state and signing.pem.journal
 keelsign pubkey --key signing.pem --out signing.pub.pem
-keelsign sign --key signing.pem app.signed.bin app.keelsign.bin
+keelsign sign --key signing.pem app.signed.bin app.keelsign.bin   # reserves leaf 0 in signing.pem.state, then signs
 keelsign verify --pub signing.pub.pem app.keelsign.bin
-keelsign inspect app.keelsign.bin
+keelsign inspect app.keelsign.bin                                 # shows the leaf index used (q: 0)
 ```
 
 `verify` prints `verified:` and exits 0, or names the reason and exits non-zero (the exit

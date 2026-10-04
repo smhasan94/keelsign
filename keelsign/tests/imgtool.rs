@@ -1,5 +1,6 @@
 //! Interoperability of `keelsign sign` and `keelsign verify` with MCUboot's imgtool 2.4.0
-//! (SHA-51 AC1, AC2, TP1; SHA-53 AC2). Ignored by default: they need imgtool on `PATH`.
+//! (SHA-51 AC1, AC2, TP1; SHA-53 AC2; SHA-67 LMS/HSS). Ignored by default: they need imgtool
+//! on `PATH`.
 //! Run with
 //!
 //! ```sh
@@ -402,4 +403,51 @@ fn keelsign_hybrid_output_verifies_with_both_imgtool_and_keelsign_verify() {
         &signed,
     ]);
     assert_exit(&out, 0);
+}
+
+/// SHA-67: an imgtool-built image signed by `keelsign sign` with an LMS/HSS key and an
+/// Ed25519 `--hybrid-key` validates with `imgtool verify` under the Ed25519 key;
+/// `imgtool dumpinfo` lists the key-ID and LMS/HSS TLVs (1,456 bytes for H10) after
+/// imgtool's own, and keelsign-verify accepts it under every policy.
+#[test]
+#[ignore = "needs imgtool 2.4.0 on PATH"]
+fn lms_hybrid_image_passes_imgtool_verify() {
+    let dir = scratch("imgtool", "lms_hybrid");
+    let unsigned = imgtool_sign(&dir, "unsigned.bin", None);
+    let lms_path = keygen_lms(&dir, "lms", 1, None);
+    let ed_path = keygen(&dir, "ed25519", "ed", None);
+    let output = dir.join("hybrid-lms.bin");
+    assert_exit(
+        &keelsign(&[
+            &"sign",
+            &"--key",
+            &lms_path,
+            &"--hybrid-key",
+            &ed_path,
+            &unsigned,
+            &output,
+        ]),
+        0,
+    );
+    assert_imgtool_validates(&ed_path, &output);
+    let bytes = std::fs::read(&output).expect("read");
+    let (protected, tlvs) = dumpinfo(&output);
+    assert_eq!((protected, tlvs.clone()), parsed(&bytes));
+    let rows: Vec<(u64, u64)> = tlvs.iter().map(|(t, l, _)| (*t, *l)).collect();
+    assert_eq!(
+        rows,
+        [
+            (0x10, 32),
+            (0x01, 32),
+            (0x24, 64),
+            (0x4BA0, 16),
+            (0x4BA3, 1456)
+        ]
+    );
+    let lms = load_key(&lms_path);
+    let ed_public = ed25519_public(&load_key(&ed_path));
+    for policy in [Policy::Hybrid, Policy::ClassicalOnly, Policy::PqOnly] {
+        verify(&bytes, Some(&lms), Some(ed_public), policy)
+            .unwrap_or_else(|e| panic!("{policy:?}: {e}"));
+    }
 }
