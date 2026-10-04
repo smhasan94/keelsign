@@ -28,6 +28,7 @@ fn signing_md_documents_inspect_schema_and_stability_policy() {
         "## Exit codes",
         "## Interoperability checks",
         "## LMS/HSS",
+        "## On-target check",
     ] {
         assert!(
             doc.lines().any(|l| l == heading),
@@ -78,7 +79,15 @@ fn signing_md_documents_inspect_schema_and_stability_policy() {
         "imgtool verify",
         // Pointers.
         "verify.md",
-        "E7.2",
+        // SHA-67: LMS/HSS signing with a crash-safe state file.
+        "lms-sha256-m32-h10|h15|h20",
+        "state file",
+        "journal",
+        "keys.md#stateful-lms-keys",
+        "LeafIndexExhausted",
+        "leaf: 0 of 1024 (1023 left)",
+        "`leaf_indices`",
+        "| 4 | or LMS/HSS signature | `0x4BA3` |",
     ] {
         assert!(doc.contains(needle), "docs/signing.md lacks `{needle}`");
     }

@@ -223,6 +223,15 @@ fn readme_quickstart_block_names_every_command() {
         "the block uses the installed binary"
     );
     assert!(block.contains("tests/fixtures/images/mcuboot-ed25519.bin"));
+    // SHA-67: the quickstart signs with a stateful LMS/HSS key, after a warning that links
+    // the rules for such keys.
+    assert!(block.contains("keelsign keygen --alg lms-sha256-m32-h10 "));
+    assert!(block.contains("signing.pem.state"));
+    let before = section.split("```sh\n").next().unwrap_or_default();
+    assert!(
+        before.contains("stateful") && before.contains("docs/keys.md#stateful-lms-keys"),
+        "the quickstart warns that LMS/HSS keys are stateful before the block"
+    );
 }
 
 /// SHA-67 TP3 on target (NEEDS-HARDWARE): docs/signing.md documents the manual procedure

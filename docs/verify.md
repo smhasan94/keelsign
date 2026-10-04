@@ -57,9 +57,9 @@ STRING` and carries it in the `subjectPublicKey` BIT STRING. keelsign reads the 
 `PUBLIC-KEY` convention: the BIT STRING holds the DER encoding of that OCTET STRING
 (`04 3c` and the 60-byte key, for an `m = 32` key), not the raw key. Some implementations
 put the raw key straight in the BIT STRING; keelsign refuses that form (exit 5, "not a
-DER OCTET STRING") rather than guess. keelsign does not generate LMS/HSS keys yet (E7.2);
-when it does, its key files will use this form, and accepting the second form can be
-added then.
+DER OCTET STRING") rather than guess. keelsign's own LMS/HSS keys (`keygen --alg
+lms-sha256-m32-h10|h15|h20`, SHA-67) are written in the first form by `pubkey`
+([keys.md](keys.md#lmshss-keys)); accepting the second form is a follow-up.
 
 ## Policies and inference
 
