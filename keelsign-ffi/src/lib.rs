@@ -29,10 +29,9 @@ extern crate std;
 
 #[allow(unsafe_code)]
 mod abi;
-// Stage 1 of SHA-60: the ABI functions that use the mappings land in the next commit.
-#[allow(dead_code)]
 mod status;
 
+pub use abi::{keelsign_digest, keelsign_verify};
 pub use status::keelsign_status_t;
 
 /// Version of this C ABI. Bumped on any incompatible change to the header.
@@ -50,8 +49,10 @@ pub const KEELSIGN_MAX_ED25519_KEYS: usize = 8;
 /// usual MCUboot TLVs.
 pub const KEELSIGN_TLV_BUF_LEN: usize = 4096;
 
-/// Bytes of the stack buffer the image body is hashed through.
-pub const KEELSIGN_CHUNK_LEN: usize = keelsign_verify::DEFAULT_CHUNK_LEN;
+/// Bytes of the stack buffer the image body is hashed through
+/// (`keelsign_verify::DEFAULT_CHUNK_LEN`).
+pub const KEELSIGN_CHUNK_LEN: usize = 256;
+const _: () = assert!(KEELSIGN_CHUNK_LEN == keelsign_verify::DEFAULT_CHUNK_LEN);
 
 /// `keelsign_result_t.pq_key_index` / `ed25519_key_index` when no key of that kind
 /// verified the image.
