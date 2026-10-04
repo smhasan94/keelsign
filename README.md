@@ -8,8 +8,9 @@ format so MCUboot and embassy-boot users keep their existing update pipeline.
 contain no functionality. The verifier described below is unreleased and its API is
 unstable. The host CLI has `keygen` and `pubkey` ([docs/keys.md](docs/keys.md)),
 `sign` and `inspect` ([docs/signing.md](docs/signing.md)) and `verify`
-([docs/verify.md](docs/verify.md)); the embassy-boot adapter and the MCUboot C bindings
-are not written yet.
+([docs/verify.md](docs/verify.md)). The C static library `libkeelsign.a` and its header
+([docs/ffi.md](docs/ffi.md)) are pre-release and unpublished; the MCUboot glue around them
+and the embassy-boot adapter are not written yet.
 
 ## Quickstart
 
@@ -71,7 +72,7 @@ need the boards.
 | `keelsign` | host CLI (pre-release) | `keygen` / `pubkey` / `sign` / `inspect` / `verify` MCUboot-format images |
 | `keelsign-verify` | `no_std`, no heap | Parses the header and TLV area, hashes the image in chunks, verifies LMS/HSS, Ed25519 and ML-DSA-44/65 under a policy; typed errors |
 | `keelsign-embassy` (planned) | `no_std` | Adapter for embassy-boot |
-| `keelsign-ffi` (planned) | staticlib | C ABI and cbindgen header for MCUboot's `MCUBOOT_USE_CUSTOM_CRYPTO` hook (`libkeelsign`) |
+| `keelsign-ffi` (pre-release, unpublished) | staticlib | C ABI and cbindgen header for MCUboot's `MCUBOOT_USE_CUSTOM_CRYPTO` hook (`libkeelsign`) |
 
 ## Boards
 
@@ -95,6 +96,8 @@ A Raspberry Pi Debug Probe drives the Pico 2 W. See [docs/hardware.md](docs/hard
 - [docs/signing.md](docs/signing.md) and [docs/verify.md](docs/verify.md):
   `keelsign sign`, `inspect` and `verify`, the policies `verify` checks, public key
   files and the final exit-code table.
+- [docs/ffi.md](docs/ffi.md): the C static library `libkeelsign.a`: build, header, the
+  pointer contract, status codes and the C harness.
 - [docs/benchmarks.md](docs/benchmarks.md): on-target known-answer tests, stack and flash
   per algorithm, and the toolchains every figure was measured with.
 - [docs/setup.md](docs/setup.md): toolchain, probes, flashing the example boards and

@@ -294,6 +294,14 @@ fn cbindgen_version_is_pinned_everywhere() {
     let ci = read(".github/workflows/ci.yml");
     assert!(ci.contains(&format!("tool: cbindgen@{CBINDGEN_VERSION}")));
     assert!(ci.contains(&format!("keelsign.h drift (cbindgen {CBINDGEN_VERSION})")));
+    for doc in ["docs/ffi.md", "docs/setup.md"] {
+        assert!(
+            read(doc).contains(&format!(
+                "cargo install cbindgen --version {CBINDGEN_VERSION} --locked"
+            )),
+            "{doc} must install cbindgen {CBINDGEN_VERSION}"
+        );
+    }
     for text in [ci.as_str()] {
         for (at, _) in text.match_indices("cbindgen@") {
             assert!(
@@ -315,6 +323,13 @@ fn ci_verifies_the_header_and_runs_the_ffi_steps() {
         &format!("{CBINDGEN_COMMAND} --verify"),
         &"name: C harness (libkeelsign, ASan+UBSan)".to_owned(),
         &"cargo test -p repo-checks --locked --test ffi\n".to_owned(),
+        &"toolchain: nightly-2026-09-29\n          components: miri, rust-src".to_owned(),
+        &"name: miri (keelsign-ffi)".to_owned(),
+        &"MIRIFLAGS: -Zmiri-symbolic-alignment-check".to_owned(),
+        &"RUSTFLAGS: --cfg sha2_backend=\"soft\"".to_owned(),
+        &"cargo +nightly-2026-09-29 miri test -p keelsign-ffi --locked\n".to_owned(),
+        &"cargo +nightly-2026-09-29 miri test -p keelsign-ffi --locked --features ed25519,ml-dsa"
+            .to_owned(),
     ] {
         assert!(host.contains(needle.as_str()), "ci job must run `{needle}`");
     }

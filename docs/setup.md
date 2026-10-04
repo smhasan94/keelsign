@@ -60,6 +60,27 @@ probe-rs 0.32.0 (git commit: crates.io)
 expected, because cargo supplies the linker path during a build. `which flip-link` is
 enough to check it is on `PATH`.
 
+### C library tools (keelsign-ffi, SHA-60)
+
+Only needed to work on `keelsign-ffi` ([ffi.md](ffi.md)):
+
+```sh
+cargo install cbindgen --version 0.29.4 --locked
+rustup toolchain install nightly-2026-09-29
+rustup component add --toolchain nightly-2026-09-29 miri rust-src
+```
+
+- `cbindgen` 0.29.4 regenerates and checks `keelsign-ffi/include/keelsign.h`
+  (`repo_checks::ffi::keelsign_h_matches_cbindgen_output` is ignored without it).
+- Miri on the pinned nightly runs the pointer-contract unit tests (the command is in
+  [ffi.md](ffi.md#miri)).
+- A C compiler (`cc`; set `CC` to choose another) with UBSan builds the C harness that
+  `cargo test -p repo-checks --test ffi` runs. On macOS the Xcode or Command Line Tools
+  clang works; when the Command Line Tools' SDK does not match the compiler, linking fails
+  until `SDKROOT=$(xcrun --sdk macosx --show-sdk-path)` is set (the repo-check sets it
+  itself when it is unset). AddressSanitizer hangs on macOS, so the repo-check uses UBSan
+  alone there and ASan + UBSan on Linux; `KEELSIGN_FFI_SANITIZE` overrides it.
+
 ## Probe permissions
 
 - **Linux**: install the probe-rs udev rules so a normal user can open the probes, then
@@ -230,11 +251,16 @@ The exact commands, the measurement method and the results are in
 
 ## CI
 
-`.github/workflows/ci.yml` has two jobs:
+`.github/workflows/ci.yml` has three jobs:
 
 - `ci`: host fmt, clippy and tests for the root workspace (including the host ML-DSA
   KATs in `benches/mldsa-kat`), the packaging repo-checks (`--test packaging -- --ignored`)
-  and the publish dry runs.
+  and the publish dry runs. Since SHA-60 also the `keelsign.h` drift check (cbindgen
+  0.29.4), the C harness against `libkeelsign.a` under ASan + UBSan and Miri on
+  `keelsign-ffi` (nightly-2026-09-29).
+- `verify-cross`: `keelsign-verify` and (SHA-60) `keelsign-ffi`'s `libkeelsign.a` for
+  both Cortex-M targets in four feature states, with the `staticlib_sizes.py --check`
+  symbol rules.
 - `cross-build`: for each example (`nrf52840-hello` on `thumbv7em-none-eabihf`,
   `rp2350-hello` on `thumbv8m.main-none-eabihf`) it installs the target and flip-link and
   runs `cargo fmt --check`, `cargo clippy --locked --target <triple> -- -D warnings` and
