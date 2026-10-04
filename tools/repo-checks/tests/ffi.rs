@@ -480,7 +480,23 @@ fn c_compiler() -> Command {
 
 /// Build `libkeelsign.a` with the `ffi` profile for `build` (its own target directory,
 /// so the two feature states do not rebuild each other) and return its path.
+///
+/// Built once per test binary: cargo unlinks and re-creates the uplifted archive on every
+/// invocation, even a no-op one, so a second build running while another test reads the
+/// archive could make it vanish (the SHA-282 hazard; see `repo_checks::bench_target_lock`).
+/// The `OnceLock` also serialises the first build of each state across test threads.
 fn build_library(build: Build) -> PathBuf {
+    static LIBS: [OnceLock<PathBuf>; 2] = [OnceLock::new(), OnceLock::new()];
+    let slot = Build::ALL
+        .iter()
+        .position(|b| *b == build)
+        .expect("build state is in Build::ALL");
+    LIBS[slot]
+        .get_or_init(|| build_library_uncached(build))
+        .clone()
+}
+
+fn build_library_uncached(build: Build) -> PathBuf {
     let root = workspace_root();
     let target_dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join(format!("ffi-{}", build.name().replace(',', "-")));
