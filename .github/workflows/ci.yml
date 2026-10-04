@@ -44,6 +44,15 @@ jobs:
       - name: cargo clippy (keelsign-verify alone, ml-dsa)
         run: cargo clippy -p keelsign-verify --all-targets --locked --features ml-dsa -- -D warnings
 
+      # SHA-60: keelsign-ffi/include/keelsign.h is cbindgen 0.29.4 output, never edited by
+      # hand; fail if the sources or cbindgen.toml changed without regenerating it.
+      - uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cbindgen@0.29.4
+
+      - name: keelsign.h drift (cbindgen 0.29.4)
+        run: cbindgen --config keelsign-ffi/cbindgen.toml --crate keelsign-ffi --output keelsign-ffi/include/keelsign.h keelsign-ffi --verify
+
       - name: cargo test
         run: cargo test --workspace --locked
 
