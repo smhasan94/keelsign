@@ -573,3 +573,144 @@ fn keelsign_embassy_cross_builds() {
         }
     }
 }
+
+/// SHA-55 AC3: the crate README is under a page (at most 80 lines and 6,000 bytes) and
+/// covers keys, policy and partitions, the reject behaviour, the features and the
+/// embassy-boot feature constraint.
+#[test]
+fn adapter_readme_is_under_a_page_and_covers_keys_policy_partitions() {
+    let readme = read("keelsign-embassy/README.md");
+    let lines = readme.lines().count();
+    assert!(
+        lines <= 80,
+        "keelsign-embassy/README.md has {lines} lines (at most 80)"
+    );
+    assert!(
+        readme.len() <= 6_000,
+        "keelsign-embassy/README.md has {} bytes (at most 6,000)",
+        readme.len()
+    );
+    assert!(readme.starts_with("# keelsign-embassy\n"));
+    let headings: Vec<&str> = readme.lines().filter(|l| l.starts_with("## ")).collect();
+    for heading in [
+        "## Keys",
+        "## Policy",
+        "## Partitions",
+        "## On reject",
+        "## Features",
+    ] {
+        assert!(headings.contains(&heading), "README must have `{heading}`");
+    }
+    for needle in [
+        "verify_and_mark_updated",
+        "BlockingUpdater",
+        "Updater",
+        "TrustedKey",
+        "Policy::PqOnly",
+        "0x200",
+        "Error::Rejected",
+        "ed25519-dalek",
+        "ed25519-salty",
+        "docs/embassy.md",
+        "SHA-274",
+    ] {
+        assert!(readme.contains(needle), "README must mention `{needle}`");
+    }
+    let manifest = read("keelsign-embassy/Cargo.toml");
+    assert!(manifest.contains("readme = \"README.md\""));
+}
+
+/// SHA-55 TP1, TP2, TP4 and the on-target half of AC2: docs/embassy.md has the
+/// NEEDS-HARDWARE procedures P1 to P4 with their commands and expected output, both
+/// boards' partition tables and the out-of-tree bootloader, and the README links it.
+#[test]
+fn embassy_doc_has_the_hardware_procedures() {
+    let doc = read("docs/embassy.md");
+    let headings: Vec<&str> = doc.lines().filter(|l| l.starts_with('#')).collect();
+    for heading in [
+        "# embassy-boot with keelsign (SHA-55)",
+        "## Partition layout",
+        "## Bootloader",
+        "## P1 fixture update (NEEDS-HARDWARE)",
+        "## P2 tampered and untrusted images (NEEDS-HARDWARE)",
+        "## P3 full update with app B (NEEDS-HARDWARE, needs SHA-67; ML-DSA-44 DEFERRED to SHA-169)",
+        "## P4 reset during verification (NEEDS-HARDWARE)",
+        "## Limitations",
+    ] {
+        assert!(
+            headings.contains(&heading),
+            "docs/embassy.md needs `{heading}`"
+        );
+    }
+    for app in &BOOT_EXAMPLES {
+        for needle in [app.name, app.chip, app.target] {
+            assert!(
+                doc.contains(needle),
+                "docs/embassy.md must mention `{needle}`"
+            );
+        }
+    }
+    for needle in [
+        // Partitions and the state word.
+        "0x00006000",
+        "0x00047000",
+        "0x10006000",
+        "0x10087000",
+        "probe-rs read --chip nRF52840_xxAA b8 0x6000 4",
+        "probe-rs read --chip RP235x b8 0x10006000 4",
+        "f0 f0 f0 f0",
+        // The bootloader recipe.
+        "embassy-boot-nrf-v0.12.0",
+        "embassy-boot-rp-v0.10.0",
+        "unsafe { bl.load(active_offset + MCUBOOT_HEADER_SIZE) }",
+        "FLASH_BASE as u32 + active_offset + MCUBOOT_HEADER_SIZE",
+        "const MCUBOOT_HEADER_SIZE: u32 = 0x200;",
+        "--binary-format bin --base-address 0x47000",
+        "--binary-format bin --base-address 0x10087000",
+        // The procedures' images and expected log lines.
+        "tests/fixtures/images/keelsign-lms-m32-h5.bin",
+        "tests/fixtures/images/keelsign-hss2-m32-h5h5.bin",
+        "hello from keelsign boot app A",
+        "hello from keelsign boot app B",
+        "verified and marked for swap",
+        "Rejected(Image(DigestMismatch))",
+        "Rejected(SignatureInvalid)",
+        "Rejected(KeyNotTrusted)",
+        "state Revert",
+        "state Swap: app B confirmed (mark_booted)",
+        "--features soak",
+        "mark::reset_at_any_point_during_mark_leaves_boot_or_swap",
+    ] {
+        assert!(
+            doc.contains(needle),
+            "docs/embassy.md must contain `{needle}`"
+        );
+    }
+    // The procedures' expected lines are the applications' log formats.
+    for app in &BOOT_EXAMPLES {
+        let main = read_app(app, "src/main.rs");
+        for line in [
+            "hello from keelsign boot app {}",
+            "state Swap: app {} confirmed (mark_booted)",
+            "verified and marked for swap; resetting",
+            "no update: {}",
+            "soak: verify {} ok (not marked)",
+        ] {
+            assert!(
+                main.contains(line),
+                "{}: src/main.rs must log `{line}`",
+                app.name
+            );
+        }
+    }
+    // No bootloader source in the repository (it needs unsafe; CLAUDE.md).
+    assert!(
+        !workspace_root()
+            .join("examples/nrf52840-bootloader")
+            .exists()
+    );
+    assert!(!workspace_root().join("examples/rp2350-bootloader").exists());
+    let readme = read("README.md");
+    assert!(readme.contains("[docs/embassy.md](docs/embassy.md)"));
+    assert!(!readme.contains("`keelsign-embassy` (planned)"));
+}
