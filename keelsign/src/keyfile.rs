@@ -210,20 +210,7 @@ pub fn read_key_file(path: &Path) -> Result<Zeroizing<Vec<u8>>, Error> {
 /// Fail with a usage error if `out` is the same file as `key` (also through a symlink
 /// or hard link), so `pubkey --out` can never replace the private key.
 pub fn ensure_not_same_file(key: &Path, out: &Path) -> Result<(), Error> {
-    let same = match (fs::metadata(key), fs::metadata(out)) {
-        #[cfg(unix)]
-        (Ok(a), Ok(b)) => {
-            use std::os::unix::fs::MetadataExt as _;
-            (a.dev(), a.ino()) == (b.dev(), b.ino())
-        }
-        #[cfg(not(unix))]
-        (Ok(_), Ok(_)) => match (fs::canonicalize(key), fs::canonicalize(out)) {
-            (Ok(a), Ok(b)) => a == b,
-            _ => false,
-        },
-        _ => false,
-    };
-    if same {
+    if same_file(key, out) {
         return Err(Error::Usage(format!(
             "--out {} is the key file --key {}; refusing to replace the private key",
             out.display(),
@@ -231,4 +218,22 @@ pub fn ensure_not_same_file(key: &Path, out: &Path) -> Result<(), Error> {
         )));
     }
     Ok(())
+}
+
+/// Whether `a` and `b` both exist and are the same file (also through a symlink or hard
+/// link).
+pub fn same_file(a: &Path, b: &Path) -> bool {
+    match (fs::metadata(a), fs::metadata(b)) {
+        #[cfg(unix)]
+        (Ok(a), Ok(b)) => {
+            use std::os::unix::fs::MetadataExt as _;
+            (a.dev(), a.ino()) == (b.dev(), b.ino())
+        }
+        #[cfg(not(unix))]
+        (Ok(_), Ok(_)) => match (fs::canonicalize(a), fs::canonicalize(b)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        },
+        _ => false,
+    }
 }
