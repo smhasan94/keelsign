@@ -1,8 +1,39 @@
-//! `keelsign-embassy` crate rules (SHA-55): `no_std`, no heap, no `unsafe`.
+//! `keelsign-embassy` crate rules (SHA-55): `no_std`, no heap, no `unsafe`, and CI
+//! builds it for both Cortex-M targets with its board modules.
 
-use repo_checks::{LICENSED_CRATES, PUBLISHABLE_CRATES, SHIPPED_CRATES, workspace_root};
+use repo_checks::{
+    EXAMPLES, LICENSED_CRATES, PUBLISHABLE_CRATES, SHIPPED_CRATES, ScratchDir, cargo_in, run_ok,
+    workspace_root,
+};
 use std::fs;
 use std::path::Path;
+
+/// The keelsign-verify feature states CI builds keelsign-embassy with (its own features
+/// of the same names forward to keelsign-verify).
+const FEATURE_STATES: [&str; 4] = ["", "ml-dsa", "ed25519", "ed25519,ml-dsa"];
+
+/// The board features per target: the keelsign-embassy module and the HAL chip.
+const BOARD_FEATURES: [(&str, &str); 2] = [
+    ("thumbv7em-none-eabihf", "nrf,embassy-nrf/nrf52840"),
+    ("thumbv8m.main-none-eabihf", "rp,embassy-rp/rp235xa"),
+];
+
+/// The text of the CI job `name` (two-space indented key), up to the next job.
+fn ci_job(ci: &str, name: &str) -> String {
+    let start = ci
+        .find(&format!("\n  {name}:"))
+        .unwrap_or_else(|| panic!("ci.yml must have a `{name}` job"));
+    ci[start + 1..]
+        .lines()
+        .enumerate()
+        .take_while(|(i, line)| {
+            let next_job = line.starts_with("  ") && !line.starts_with("   ");
+            let top_level = !line.is_empty() && !line.starts_with(' ');
+            *i == 0 || !(next_job || top_level)
+        })
+        .map(|(_, line)| format!("{line}\n"))
+        .collect()
+}
 
 fn read(rel: &str) -> String {
     let path = workspace_root().join(rel);
@@ -92,4 +123,97 @@ fn keelsign_embassy_is_no_std_forbid_unsafe_no_alloc() {
     assert!(SHIPPED_CRATES.contains(&"keelsign-embassy"));
     assert!(LICENSED_CRATES.contains(&"keelsign-embassy"));
     assert!(!PUBLISHABLE_CRATES.contains(&"keelsign-embassy"));
+}
+
+/// SHA-55 AC1: CI lints and tests keelsign-embassy on the host, and builds it for both
+/// targets with every keelsign-verify feature state and its board module.
+#[test]
+fn ci_cross_builds_keelsign_embassy_and_boot_apps() {
+    let ci = read(".github/workflows/ci.yml");
+    let host = ci_job(&ci, "ci");
+    for needle in [
+        "cargo clippy -p keelsign-embassy --all-targets --locked -- -D warnings",
+        "cargo test -p keelsign-embassy --locked\n",
+    ] {
+        assert!(host.contains(needle), "ci job must run `{needle}`");
+    }
+    let cross = ci_job(&ci, "verify-cross");
+    let targets: Vec<&str> = EXAMPLES.iter().map(|e| e.target).collect();
+    assert_eq!(
+        targets,
+        BOARD_FEATURES.iter().map(|(t, _)| *t).collect::<Vec<_>>()
+    );
+    for (target, board) in BOARD_FEATURES {
+        for features in FEATURE_STATES {
+            let quoted = if features.is_empty() {
+                "\"\"".to_owned()
+            } else {
+                features.to_owned()
+            };
+            let entry = format!(
+                "- target: {target}\n            features: {quoted}\n            embassy_features: {board}\n"
+            );
+            assert!(
+                cross.contains(&entry),
+                "verify-cross matrix must include {target} / \"{features}\" with \
+                 embassy_features {board}"
+            );
+        }
+    }
+    for needle in [
+        "cargo clippy -p keelsign-embassy --lib --locked --target ${{ matrix.target }} --features \"${{ matrix.features }}\" --features \"${{ matrix.embassy_features }}\" -- -D warnings",
+        "cargo build -p keelsign-embassy --lib --release --locked --target ${{ matrix.target }} --features \"${{ matrix.features }}\" --features \"${{ matrix.embassy_features }}\"",
+    ] {
+        assert!(
+            cross.contains(needle),
+            "verify-cross job must run `{needle}`"
+        );
+    }
+    // The job names (required checks) do not change: no matrix key in the name is new.
+    assert!(cross.contains(
+        "name: keelsign-verify ${{ matrix.target }} (features \"${{ matrix.features }}\")"
+    ));
+}
+
+#[test]
+#[ignore = "needs the thumbv7em-none-eabihf and thumbv8m.main-none-eabihf targets; CI verify-cross job covers this"]
+fn keelsign_embassy_cross_builds() {
+    let root = workspace_root();
+    let scratch = ScratchDir::new("embassy_cross");
+    for (target, board) in BOARD_FEATURES {
+        for features in FEATURE_STATES {
+            for subcommand in [
+                ["clippy", "-p", "keelsign-embassy", "--lib", "--locked"].as_slice(),
+                [
+                    "build",
+                    "-p",
+                    "keelsign-embassy",
+                    "--lib",
+                    "--release",
+                    "--locked",
+                ]
+                .as_slice(),
+            ] {
+                let mut cmd = cargo_in(&root, scratch.path());
+                cmd.args(subcommand).args([
+                    "--target",
+                    target,
+                    "--features",
+                    features,
+                    "--features",
+                    board,
+                ]);
+                if subcommand[0] == "clippy" {
+                    cmd.args(["--", "-D", "warnings"]);
+                }
+                run_ok(&mut cmd);
+            }
+            let rlib = scratch
+                .path()
+                .join(target)
+                .join("release")
+                .join("libkeelsign_embassy.rlib");
+            assert!(rlib.is_file(), "expected {}", rlib.display());
+        }
+    }
 }

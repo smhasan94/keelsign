@@ -23,7 +23,8 @@
 //!   blocking reads while holding the mutex once.
 //! - [`SyncFlash`]: gives a blocking-only flash (the nRF52840 NVMC) the async traits, for
 //!   [`Updater`].
-//! - `nrf` / `rp` (features): state-buffer lengths and type aliases per board.
+//! - `nrf` / `rp` (features): state-buffer lengths, type aliases and linker-script
+//!   constructors per board family.
 //!
 //! # Features
 //!
@@ -45,6 +46,10 @@ mod blocking;
 mod config;
 mod error;
 mod log;
+#[cfg(feature = "nrf")]
+pub mod nrf;
+#[cfg(feature = "rp")]
+pub mod rp;
 mod sync_flash;
 
 pub use asynch::{Layout, Updater};
