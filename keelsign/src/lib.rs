@@ -7,5 +7,6 @@
 
 pub mod cli;
 pub mod error;
+pub mod image_file;
 pub mod keyfile;
 pub mod keys;

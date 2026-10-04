@@ -8,7 +8,11 @@
 //! | 3 | output file exists and `--force` was not given |
 //! | 4 | passphrase problem: wrong, missing, or given for an unencrypted key |
 //! | 5 | corrupt or unsupported key file |
-//! | 6 | the key file holds a different algorithm than `--alg` asks for |
+//! | 6 | the key file holds a different algorithm than `--alg` asks for (or, for `sign`, `--key` is not ML-DSA / `--hybrid-key` is not Ed25519) |
+//! | 7 | the input image is rejected: not an MCUboot image, breaks an image rule, has bytes after its TLV area, or is too large |
+//! | 8 | the input image already carries keelsign TLVs (or, with `--hybrid-key`, an Ed25519 pair) and `--replace` was not given |
+//!
+//! Codes 7 and 8 are provisional until the `verify` command (SHA-53) fixes its own.
 
 use crate::keys::KeyAlgorithm;
 use std::fmt;
@@ -55,6 +59,36 @@ pub enum Error {
         /// Why it could not be loaded.
         error: KeyFileError,
     },
+    /// An internal error, such as a signed image that does not verify.
+    Internal(String),
+    /// The input image is rejected (not an MCUboot image, an image rule, trailing bytes,
+    /// too large).
+    Image {
+        /// The image file.
+        path: PathBuf,
+        /// Why it is rejected.
+        reason: String,
+    },
+    /// The input image already carries signatures `sign` would add, and `--replace` was
+    /// not given.
+    AlreadySigned {
+        /// The image file.
+        path: PathBuf,
+        /// What it already carries, for example `keelsign TLVs`.
+        what: &'static str,
+    },
+    /// A key of the wrong kind for its option (`sign --key` must be ML-DSA,
+    /// `--hybrid-key` Ed25519).
+    WrongKeyKind {
+        /// The key file.
+        path: PathBuf,
+        /// The option, `--key` or `--hybrid-key`.
+        option: &'static str,
+        /// The algorithm of the key in the file.
+        found: KeyAlgorithm,
+        /// What the option needs, for example `ML-DSA-44 or ML-DSA-65`.
+        expected: &'static str,
+    },
     /// The key file holds a different algorithm than `--alg` asks for.
     AlgorithmMismatch {
         /// The key file.
@@ -70,7 +104,7 @@ impl Error {
     /// The process exit code for this error (see the module documentation).
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::Io { .. } | Self::Rng(_) | Self::Encode(_) => 1,
+            Self::Io { .. } | Self::Rng(_) | Self::Encode(_) | Self::Internal(_) => 1,
             Self::Usage(_) => 2,
             Self::Exists(_) => 3,
             Self::KeyFile { error, .. } => match error {
@@ -79,7 +113,9 @@ impl Error {
                 | KeyFileError::WrongPassphrase => 4,
                 KeyFileError::Corrupt(_) | KeyFileError::Unsupported(_) => 5,
             },
-            Self::AlgorithmMismatch { .. } => 6,
+            Self::AlgorithmMismatch { .. } | Self::WrongKeyKind { .. } => 6,
+            Self::Image { .. } => 7,
+            Self::AlreadySigned { .. } => 8,
         }
     }
 
@@ -101,6 +137,24 @@ impl fmt::Display for Error {
                 "the operating system random-number generator failed: {e}"
             ),
             Self::Encode(e) => write!(f, "internal error: could not encode the key: {e}"),
+            Self::Internal(e) => write!(f, "internal error: {e}"),
+            Self::Image { path, reason } => write!(f, "{}: {reason}", path.display()),
+            Self::AlreadySigned { path, what } => write!(
+                f,
+                "{} already carries {what}; give --replace to replace them",
+                path.display()
+            ),
+            Self::WrongKeyKind {
+                path,
+                option,
+                found,
+                expected,
+            } => write!(
+                f,
+                "{option} {} holds an {} key; {option} needs {expected}",
+                path.display(),
+                found.name()
+            ),
             Self::Usage(msg) => f.write_str(msg),
             Self::Exists(path) => {
                 write!(f, "refusing to overwrite {} (use --force)", path.display())
@@ -171,6 +225,10 @@ mod tests {
             ),
             (Error::Rng("no entropy".into()), 1),
             (Error::Encode("too long".into()), 1),
+            (
+                Error::Internal("the signed image does not verify".into()),
+                1,
+            ),
             (Error::Usage("empty passphrase".into()), 2),
             (Error::Exists(path()), 3),
             (Error::key_file(path(), KeyFileError::PassphraseRequired), 4),
@@ -195,16 +253,39 @@ mod tests {
                 },
                 6,
             ),
+            (
+                Error::WrongKeyKind {
+                    path: path(),
+                    option: "--key",
+                    found: KeyAlgorithm::Ed25519,
+                    expected: "ML-DSA-44 or ML-DSA-65",
+                },
+                6,
+            ),
+            (
+                Error::Image {
+                    path: path(),
+                    reason: "not an MCUboot image".into(),
+                },
+                7,
+            ),
+            (
+                Error::AlreadySigned {
+                    path: path(),
+                    what: "keelsign TLVs",
+                },
+                8,
+            ),
         ];
         for (error, code) in &cases {
             assert_eq!(error.exit_code(), *code, "{error}");
             assert_ne!(error.exit_code(), 0, "{error}");
         }
-        // Every exit code 1..=6 is used, and the classes do not overlap.
+        // Every exit code 1..=8 is used, and the classes do not overlap.
         let mut codes: Vec<u8> = cases.iter().map(|(e, _)| e.exit_code()).collect();
         codes.sort_unstable();
         codes.dedup();
-        assert_eq!(codes, [1, 2, 3, 4, 5, 6]);
+        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7, 8]);
 
         let mismatch = Error::AlgorithmMismatch {
             path: path(),
@@ -214,6 +295,14 @@ mod tests {
         .to_string();
         assert!(mismatch.contains("ml-dsa-44") && mismatch.contains("ed25519"));
         assert!(Error::Exists(path()).to_string().contains("--force"));
+        assert!(
+            Error::AlreadySigned {
+                path: path(),
+                what: "keelsign TLVs",
+            }
+            .to_string()
+            .contains("--replace")
+        );
         assert!(
             Error::key_file(path(), KeyFileError::WrongPassphrase)
                 .to_string()
