@@ -10,8 +10,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 /// Crates published to crates.io, in publish order; keelsign depends on keelsign-verify.
 pub const PUBLISHABLE_CRATES: [&str; 2] = ["keelsign-verify", "keelsign"];
 
-/// Published crates that carry their own copies of the root licence files.
-pub const LICENSED_CRATES: [&str; 2] = ["keelsign", "keelsign-verify"];
+/// Crates that carry their own copies of the root licence files: the published ones and
+/// keelsign-embassy (SHA-55; publishable, not yet published).
+pub const LICENSED_CRATES: [&str; 3] = ["keelsign", "keelsign-verify", "keelsign-embassy"];
 
 /// A standalone embedded example project under `examples/`.
 pub struct Example {
@@ -35,6 +36,24 @@ pub const EXAMPLES: [Example; 2] = [
     },
     Example {
         name: "rp2350-hello",
+        target: "thumbv8m.main-none-eabihf",
+        chip: "RP235x",
+        hal_feature: "rp235xa",
+    },
+];
+
+/// The standalone embassy-boot applications under `examples/` (SHA-55), one per
+/// development board: they verify the DFU slot with keelsign-embassy before marking it
+/// (docs/embassy.md). `chip` is the probe-rs chip name, `hal_feature` the HAL chip feature.
+pub const BOOT_EXAMPLES: [Example; 2] = [
+    Example {
+        name: "nrf52840-boot-app",
+        target: "thumbv7em-none-eabihf",
+        chip: "nRF52840_xxAA",
+        hal_feature: "nrf52840",
+    },
+    Example {
+        name: "rp2350-boot-app",
         target: "thumbv8m.main-none-eabihf",
         chip: "RP235x",
         hal_feature: "rp235xa",

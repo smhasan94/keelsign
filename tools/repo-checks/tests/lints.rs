@@ -10,7 +10,7 @@
 //!
 //! | Class | Crates | Must reject |
 //! |---|---|---|
-//! | `NoStd` | `keelsign-verify`, `lms-kat`, `policy-kat`, `mldsa-kat` | `panic!`, `.unwrap()`, `.expect()`, slice indexing, `unsafe` (forbid level) |
+//! | `NoStd` | `keelsign-verify`, `keelsign-embassy`, `lms-kat`, `policy-kat`, `mldsa-kat` | `panic!`, `.unwrap()`, `.expect()`, slice indexing, `unsafe` (forbid level) |
 //! | `NoStdException` | `stack-paint` | the four clippy probes, `unsafe` (deny level) |
 //! | `Host` | `keelsign`, `repo-checks` | `unsafe` (forbid level) |
 //!
@@ -68,9 +68,9 @@
 //! tests locate the workspace through `env!("CARGO_MANIFEST_DIR")`), and the "broken" run
 //! then silently tests the wrong tree.
 //! 5. Optional: set the root `[workspace.lints.rust] unsafe_code = "deny"` instead; exactly
-//!    the four `*_forbids_unsafe_even_with_allow` cases of the crates that inherit the
-//!    workspace lints fail (`keelsign-verify`, `lms-kat`, `policy-kat`, `mldsa-kat`; the
-//!    host crates set their own `unsafe_code = "forbid"`).
+//!    the five `*_forbids_unsafe_even_with_allow` cases of the crates that inherit the
+//!    workspace lints fail (`keelsign-verify`, `keelsign-embassy`, `lms-kat`, `policy-kat`,
+//!    `mldsa-kat`; the host crates set their own `unsafe_code = "forbid"`).
 
 use repo_checks::{ScratchDir, cargo_in, workspace_root};
 use std::fmt;
@@ -101,6 +101,12 @@ struct Crate {
 const KEELSIGN_VERIFY: Crate = Crate {
     package: "keelsign-verify",
     dir: "keelsign-verify",
+    class: Class::NoStd,
+};
+
+const KEELSIGN_EMBASSY: Crate = Crate {
+    package: "keelsign-embassy",
+    dir: "keelsign-embassy",
     class: Class::NoStd,
 };
 
@@ -141,8 +147,9 @@ const REPO_CHECKS: Crate = Crate {
 };
 
 /// Every workspace member, classified.
-const CRATES: [Crate; 7] = [
+const CRATES: [Crate; 8] = [
     KEELSIGN_VERIFY,
+    KEELSIGN_EMBASSY,
     LMS_KAT,
     POLICY_KAT,
     MLDSA_KAT,
@@ -761,6 +768,16 @@ probe_cases! { KEELSIGN_VERIFY;
     keelsign_verify_rejects_slice_indexing => SliceIndexing,
     keelsign_verify_rejects_unsafe => Unsafe,
     keelsign_verify_forbids_unsafe_even_with_allow => UnsafeUnderAllow,
+}
+
+probe_cases! { KEELSIGN_EMBASSY;
+    keelsign_embassy_probe_control_is_clean => Control,
+    keelsign_embassy_rejects_panic => Panic,
+    keelsign_embassy_rejects_unwrap => Unwrap,
+    keelsign_embassy_rejects_expect => Expect,
+    keelsign_embassy_rejects_slice_indexing => SliceIndexing,
+    keelsign_embassy_rejects_unsafe => Unsafe,
+    keelsign_embassy_forbids_unsafe_even_with_allow => UnsafeUnderAllow,
 }
 
 probe_cases! { LMS_KAT;

@@ -8,8 +8,9 @@ format so MCUboot and embassy-boot users keep their existing update pipeline.
 contain no functionality. The verifier described below is unreleased and its API is
 unstable. The host CLI has `keygen` and `pubkey` ([docs/keys.md](docs/keys.md)),
 `sign` and `inspect` ([docs/signing.md](docs/signing.md)) and `verify`
-([docs/verify.md](docs/verify.md)); the embassy-boot adapter and the MCUboot C bindings
-are not written yet.
+([docs/verify.md](docs/verify.md)). The embassy-boot adapter `keelsign-embassy`
+verifies the DFU slot before marking it for swap
+([docs/embassy.md](docs/embassy.md)); the MCUboot C bindings are not written yet.
 
 ## Quickstart
 
@@ -70,7 +71,7 @@ need the boards.
 |---|---|---|
 | `keelsign` | host CLI (pre-release) | `keygen` / `pubkey` / `sign` / `inspect` / `verify` MCUboot-format images |
 | `keelsign-verify` | `no_std`, no heap | Parses the header and TLV area, hashes the image in chunks, verifies LMS/HSS, Ed25519 and ML-DSA-44/65 under a policy; typed errors |
-| `keelsign-embassy` (planned) | `no_std` | Adapter for embassy-boot |
+| `keelsign-embassy` (pre-release) | `no_std`, no heap | Adapter for embassy-boot: verifies the DFU image, then marks it for swap; blocking and async updaters, nRF and RP board modules |
 | `keelsign-ffi` (planned) | staticlib | C ABI and cbindgen header for MCUboot's `MCUBOOT_USE_CUSTOM_CRYPTO` hook (`libkeelsign`) |
 
 ## Boards
@@ -97,6 +98,9 @@ A Raspberry Pi Debug Probe drives the Pico 2 W. See [docs/hardware.md](docs/hard
   files and the final exit-code table.
 - [docs/benchmarks.md](docs/benchmarks.md): on-target known-answer tests, stack and flash
   per algorithm, and the toolchains every figure was measured with.
+- [docs/embassy.md](docs/embassy.md): `keelsign-embassy` with embassy-boot. Partition
+  layouts, the bootloader, the two example applications and the on-board update
+  procedures.
 - [docs/setup.md](docs/setup.md): toolchain, probes, flashing the example boards and
   on-target tests.
 - [docs/hardware.md](docs/hardware.md) and [docs/release.md](docs/release.md): the bill
