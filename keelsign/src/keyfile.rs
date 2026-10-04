@@ -40,6 +40,12 @@ pub fn write_public(path: &Path, bytes: &[u8], force: bool) -> Result<(), Error>
     write_file(path, bytes, force, false)
 }
 
+/// Write a signed image with the default mode, never replacing an existing file unless
+/// `force` (then through a temporary file renamed over it, as for key files).
+pub fn write_image(path: &Path, bytes: &[u8], force: bool) -> Result<(), Error> {
+    write_file(path, bytes, force, false)
+}
+
 fn open_new(path: &Path, private: bool) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -158,27 +164,33 @@ pub fn read_passphrase(args: &PassphraseArgs) -> Result<Option<Zeroizing<Vec<u8>
 /// Largest key file or passphrase file read (1 MiB); key files are a few KiB.
 pub const MAX_INPUT_LEN: u64 = 1 << 20;
 
-enum ReadError {
+/// Why [`read_capped_with`] failed.
+pub(crate) enum ReadError {
+    /// Opening or reading the file failed.
     Io(io::Error),
+    /// The file is larger than the cap.
     TooLarge,
 }
 
 /// Read at most [`MAX_INPUT_LEN`] bytes of `path` (so `/dev/zero` cannot exhaust memory).
 fn read_capped(path: &Path) -> Result<Zeroizing<Vec<u8>>, ReadError> {
+    read_capped_with(path, MAX_INPUT_LEN)
+}
+
+/// Read at most `cap` bytes of `path` into a zeroizing buffer, failing with
+/// [`ReadError::TooLarge`] if the file is longer.
+pub(crate) fn read_capped_with(path: &Path, cap: u64) -> Result<Zeroizing<Vec<u8>>, ReadError> {
     use std::io::Read as _;
     let file = File::open(path).map_err(ReadError::Io)?;
     // Allocate once (the size plus one byte to detect EOF or an oversized file), so
     // growing the buffer leaves no unwiped copies of the bytes behind.
-    let len = file
-        .metadata()
-        .map(|m| m.len().min(MAX_INPUT_LEN))
-        .unwrap_or(0);
+    let len = file.metadata().map(|m| m.len().min(cap)).unwrap_or(0);
     let capacity = usize::try_from(len).unwrap_or(0).saturating_add(1);
     let mut contents = Zeroizing::new(Vec::with_capacity(capacity));
-    file.take(MAX_INPUT_LEN + 1)
+    file.take(cap.saturating_add(1))
         .read_to_end(&mut contents)
         .map_err(ReadError::Io)?;
-    if contents.len() as u64 > MAX_INPUT_LEN {
+    if contents.len() as u64 > cap {
         return Err(ReadError::TooLarge);
     }
     Ok(contents)
@@ -198,20 +210,7 @@ pub fn read_key_file(path: &Path) -> Result<Zeroizing<Vec<u8>>, Error> {
 /// Fail with a usage error if `out` is the same file as `key` (also through a symlink
 /// or hard link), so `pubkey --out` can never replace the private key.
 pub fn ensure_not_same_file(key: &Path, out: &Path) -> Result<(), Error> {
-    let same = match (fs::metadata(key), fs::metadata(out)) {
-        #[cfg(unix)]
-        (Ok(a), Ok(b)) => {
-            use std::os::unix::fs::MetadataExt as _;
-            (a.dev(), a.ino()) == (b.dev(), b.ino())
-        }
-        #[cfg(not(unix))]
-        (Ok(_), Ok(_)) => match (fs::canonicalize(key), fs::canonicalize(out)) {
-            (Ok(a), Ok(b)) => a == b,
-            _ => false,
-        },
-        _ => false,
-    };
-    if same {
+    if same_file(key, out) {
         return Err(Error::Usage(format!(
             "--out {} is the key file --key {}; refusing to replace the private key",
             out.display(),
@@ -219,4 +218,22 @@ pub fn ensure_not_same_file(key: &Path, out: &Path) -> Result<(), Error> {
         )));
     }
     Ok(())
+}
+
+/// Whether `a` and `b` both exist and are the same file (also through a symlink or hard
+/// link).
+pub fn same_file(a: &Path, b: &Path) -> bool {
+    match (fs::metadata(a), fs::metadata(b)) {
+        #[cfg(unix)]
+        (Ok(a), Ok(b)) => {
+            use std::os::unix::fs::MetadataExt as _;
+            (a.dev(), a.ino()) == (b.dev(), b.ino())
+        }
+        #[cfg(not(unix))]
+        (Ok(_), Ok(_)) => match (fs::canonicalize(a), fs::canonicalize(b)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        },
+        _ => false,
+    }
 }

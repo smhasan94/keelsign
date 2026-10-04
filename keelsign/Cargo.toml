@@ -1,6 +1,6 @@
 [package]
 name = "keelsign"
-description = "Host CLI of the keelsign post-quantum firmware signing kit: key generation and key files (pre-release)"
+description = "Host CLI of the keelsign post-quantum firmware signing kit: key generation, image signing and inspection (pre-release)"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true
@@ -8,13 +8,19 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-keelsign-verify = { path = "../keelsign-verify", version = "=0.0.1" }
-ml-dsa = { version = "=0.1.1", default-features = false, features = ["alloc", "pkcs8", "zeroize"] }
+keelsign-verify = { path = "../keelsign-verify", version = "=0.0.1", features = ["ed25519", "ml-dsa"] }
+ml-dsa = { version = "=0.1.1", default-features = false, features = ["alloc", "pkcs8", "zeroize", "rand_core"] }
 ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["alloc", "pkcs8", "zeroize"] }
 pkcs8 = { version = "=0.11.0", default-features = false, features = ["pem", "encryption", "getrandom", "std"] }
-getrandom = { version = "=0.4.3", default-features = false }
+getrandom = { version = "=0.4.3", default-features = false, features = ["sys_rng"] }
 clap = { version = "=4.6.7", features = ["derive"] }
 zeroize = { version = "=1.9.0", default-features = false, features = ["alloc"] }
+serde_json = { version = "=1.0.151", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+# Validates `inspect --json` output against docs/inspect-schema.json (Draft 2020-12) in
+# tests/inspect.rs. Default features off: no HTTP or file resolving, no TLS.
+jsonschema = { version = "=0.58.5", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

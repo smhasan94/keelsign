@@ -1,6 +1,7 @@
 //! Dependency rules: the ml-dsa pin (CLAUDE.md; bench crates and, since SHA-44,
-//! keelsign-verify's `ml-dsa` feature, heap-free), the ed25519-dalek pin (SHA-46) and the
-//! scoped `unsafe` exception for the measurement-only `benches/stack-paint` crate.
+//! keelsign-verify's `ml-dsa` feature, heap-free), the ed25519-dalek pin (SHA-46), the
+//! keelsign CLI's JSON dependencies (SHA-51) and the scoped `unsafe` exception for the
+//! measurement-only `benches/stack-paint` crate.
 
 use repo_checks::{SHIPPED_CRATES, workspace_root};
 use std::fs;
@@ -290,6 +291,87 @@ fn ed25519_dalek_pinned_exact() {
                 "{lockfile}: {name} must resolve to exactly {pin}"
             );
         }
+    }
+}
+
+/// The section and line of the dependency `name` in a manifest (`name = {` at the start
+/// of a line), or panic.
+fn dependency_line(manifest: &str, name: &str) -> (String, String) {
+    let mut section = String::new();
+    let mut found = Vec::new();
+    for line in manifest.lines() {
+        let l = line.trim();
+        if l.starts_with('[') {
+            section = l.to_owned();
+        } else if l.starts_with(&format!("{name} = {{")) {
+            found.push((section.clone(), l.to_owned()));
+        }
+    }
+    assert_eq!(found.len(), 1, "exactly one `{name}` dependency: {found:?}");
+    found.remove(0)
+}
+
+/// SHA-51: `keelsign inspect --json` writes JSON with serde_json, pinned exactly with
+/// default features off (`std` only: no `preserve_order`, no float tricks); its tests
+/// validate it with jsonschema, a dev-dependency pinned exactly with default features off
+/// (no HTTP or file resolving, no TLS). The lockfile resolves exactly those versions.
+#[test]
+fn cli_json_dependencies_pinned_exact() {
+    const SERDE_JSON_PIN: &str = "1.0.151";
+    const JSONSCHEMA_PIN: &str = "0.58.5";
+    let manifest = read("keelsign/Cargo.toml");
+    let (section, line) = dependency_line(&manifest, "serde_json");
+    assert_eq!(
+        section, "[dependencies]",
+        "serde_json is a normal dependency"
+    );
+    for needle in [
+        format!("version = \"={SERDE_JSON_PIN}\""),
+        "default-features = false".to_owned(),
+        "features = [\"std\"]".to_owned(),
+    ] {
+        assert!(
+            line.contains(&needle),
+            "serde_json must have `{needle}`: `{line}`"
+        );
+    }
+    let (section, line) = dependency_line(&manifest, "jsonschema");
+    assert_eq!(
+        section, "[dev-dependencies]",
+        "jsonschema is a dev-dependency only"
+    );
+    for needle in [
+        format!("version = \"={JSONSCHEMA_PIN}\""),
+        "default-features = false".to_owned(),
+    ] {
+        assert!(
+            line.contains(&needle),
+            "jsonschema must have `{needle}`: `{line}`"
+        );
+    }
+    let lock = read("Cargo.lock");
+    let packages = lock_packages(&lock);
+    for (krate, pin) in [
+        ("serde_json", SERDE_JSON_PIN),
+        ("jsonschema", JSONSCHEMA_PIN),
+    ] {
+        let versions: Vec<&str> = packages
+            .iter()
+            .filter(|(name, _, _)| name == krate)
+            .map(|(_, version, _)| version.as_str())
+            .collect();
+        assert_eq!(
+            versions,
+            [pin],
+            "Cargo.lock: {krate} must resolve to exactly {pin}"
+        );
+    }
+    // No HTTP client or TLS stack reaches the lockfile through jsonschema.
+    for absent in ["reqwest", "rustls", "aws-lc-rs", "ring"] {
+        assert!(
+            !packages.iter().any(|(name, _, _)| name == absent),
+            "Cargo.lock must not contain {absent}"
+        );
     }
 }
 

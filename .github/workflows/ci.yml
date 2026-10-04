@@ -61,9 +61,21 @@ jobs:
       - name: cargo test (keelsign-verify, ed25519 + ml-dsa)
         run: cargo test -p keelsign-verify --locked --features ed25519,ml-dsa
 
+      # SHA-51: keelsign enables keelsign-verify/ml-dsa, so `cargo test --workspace` runs
+      # policy-kat with ML-DSA on; run it alone for the ML-DSA-off cells (KSPM off-set).
+      - name: cargo test (policy-kat, no features)
+        run: cargo test -p policy-kat --locked
+
       # SHA-44: the policy-matrix runner with the ML-DSA cells live (KSPM v2 on-set).
       - name: cargo test (policy-kat, keelsign-verify/ml-dsa)
         run: cargo test -p policy-kat --locked --features keelsign-verify/ml-dsa
+
+      # SHA-51: `keelsign sign` output against MCUboot's imgtool (dumpinfo, verify). The
+      # tests are ignored locally unless imgtool 2.4.0 is on PATH (keelsign/tests/imgtool.rs).
+      - name: imgtool interop (keelsign sign/inspect)
+        run: |
+          python3 -m venv .venv-imgtool && .venv-imgtool/bin/pip install imgtool==2.4.0
+          PATH="$PWD/.venv-imgtool/bin:$PATH" cargo test -p keelsign --locked --test imgtool -- --ignored
 
       # Only the packaging tests: the other ignored repo-checks tests need the thumb
       # targets, probe-rs and flip-link; the cross-build job covers the example builds.

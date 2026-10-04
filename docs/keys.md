@@ -3,8 +3,8 @@
 `keelsign keygen` creates signing keys and `keelsign pubkey` exports their public keys.
 This page fixes the file formats, the algorithm OIDs, passphrase encryption, the key
 identifiers printed, file permissions and the exit codes. The CLI is pre-release: image
-signing (`sign`), `verify` and `inspect` are not written yet. LMS/HSS keys are stateful
-and come with their own key files later (E7.2).
+signing (`sign`) and `inspect` are in [signing.md](signing.md); `verify` is not written
+yet (SHA-53). LMS/HSS keys are stateful and come with their own key files later (E7.2).
 
 ## Commands
 
@@ -81,7 +81,7 @@ version 2 encoding with the public key appended (they report extra data), and th
 file must sign keelsign images and plain MCUboot images. This is byte-for-byte the
 layout of imgtool's own keys (`tests/fixtures/images/keys/ed25519-test-key.pem`).
 
-What `pubkey` (and later `sign`) reads:
+What `pubkey` and `sign` read:
 
 - PEM (`PRIVATE KEY` or `ENCRYPTED PRIVATE KEY`; text before the header is ignored, as
   RFC 7468 §2 allows) or DER.
@@ -216,7 +216,9 @@ Worked examples with published test vectors:
 | 3 | the output file exists and `--force` was not given |
 | 4 | passphrase: wrong, missing for an encrypted key, or given for an unencrypted key |
 | 5 | corrupt or unsupported key file (not PEM/DER PKCS#8, over 1 MiB, a public key, an unsupported algorithm, ML-DSA `expandedKey`/`both`, parameters present, a v2 public key that does not match, an unsupported encryption scheme or out-of-range KDF parameters) |
-| 6 | the key file holds a different algorithm than `--alg` |
+| 6 | the key file holds a different algorithm than `--alg` (for `sign`: `--key` is not ML-DSA or `--hybrid-key` is not Ed25519) |
+| 7 | `sign` / `inspect`: the input image is rejected (see [signing.md](signing.md#exit-codes)) |
+| 8 | `sign`: the input image already carries keelsign TLVs and `--replace` was not given (see [signing.md](signing.md#exit-codes)) |
 
 Error messages go to standard error, start with `error:` and name the file.
 

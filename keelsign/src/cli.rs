@@ -1,4 +1,4 @@
-//! Command-line interface: `keelsign keygen` and `keelsign pubkey`.
+//! Command-line interface: `keelsign keygen`, `pubkey`, `sign` and `inspect`.
 
 use crate::error::Error;
 use crate::keyfile;
@@ -7,7 +7,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-/// keelsign: post-quantum firmware signing kit (pre-release: key generation only).
+/// keelsign: post-quantum firmware signing kit (pre-release).
 #[derive(Debug, Parser)]
 #[command(name = "keelsign", version, about, long_about = None)]
 pub struct Cli {
@@ -23,6 +23,47 @@ pub enum Command {
     Keygen(KeygenArgs),
     /// Export the public key of a private key file (SubjectPublicKeyInfo).
     Pubkey(PubkeyArgs),
+    /// Add an ML-DSA signature (optionally with an Ed25519 pair) to an MCUboot image.
+    Sign(SignArgs),
+    /// Describe an MCUboot image: header, TLVs, digest, key IDs and signatures.
+    Inspect(InspectArgs),
+}
+
+/// Arguments of `keelsign inspect`.
+#[derive(Debug, Args)]
+pub struct InspectArgs {
+    /// Write JSON (docs/inspect-schema.json) instead of text.
+    #[arg(long)]
+    pub json: bool,
+    /// The MCUboot image (bytes after its TLV area are reported, not parsed).
+    #[arg(value_name = "IMAGE")]
+    pub image: PathBuf,
+}
+
+/// Arguments of `keelsign sign`.
+#[derive(Debug, Args)]
+pub struct SignArgs {
+    /// ML-DSA-44 or ML-DSA-65 private key file (PKCS#8 PEM or DER, encrypted or not).
+    #[arg(long, value_name = "FILE")]
+    pub key: PathBuf,
+    /// Ed25519 private key file: also add MCUboot's KEYHASH + ED25519 pair (hybrid image).
+    #[arg(long, value_name = "FILE")]
+    pub hybrid_key: Option<PathBuf>,
+    /// Replace existing keelsign TLVs (and, with --hybrid-key, an existing Ed25519 pair).
+    #[arg(long)]
+    pub replace: bool,
+    /// Replace OUT if it exists.
+    #[arg(long)]
+    pub force: bool,
+    /// Passphrase of whichever of --key / --hybrid-key is encrypted.
+    #[command(flatten)]
+    pub passphrase: PassphraseArgs,
+    /// The MCUboot image to sign (not padded; no bytes after its TLV area).
+    #[arg(value_name = "IN")]
+    pub input: PathBuf,
+    /// The signed image to create.
+    #[arg(value_name = "OUT")]
+    pub output: PathBuf,
 }
 
 /// Arguments of `keelsign keygen`.
@@ -125,7 +166,45 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
     match &cli.command {
         Command::Keygen(args) => keygen(args),
         Command::Pubkey(args) => pubkey(args),
+        Command::Sign(args) => sign(args),
+        Command::Inspect(args) => inspect(args),
     }
+}
+
+fn inspect(args: &InspectArgs) -> Result<(), Error> {
+    let bytes = crate::image_file::read_image(&args.image)?;
+    let image = crate::image_file::parse(&args.image, &bytes)?;
+    let digest = crate::image_file::digest(&bytes, &image)?;
+    let report = crate::inspect::to_json(&bytes, &image, &digest);
+    let text = if args.json {
+        let mut text = serde_json::to_string_pretty(&report)
+            .map_err(|e| Error::Internal(format!("could not write JSON: {e}")))?;
+        text.push('\n');
+        text
+    } else {
+        crate::inspect::to_human(&report)
+    };
+    let mut stdout = io::stdout().lock();
+    stdout.write_all(text.as_bytes()).map_err(out_error)?;
+    stdout.flush().map_err(out_error)
+}
+
+fn sign(args: &SignArgs) -> Result<(), Error> {
+    let request = crate::sign::SignRequest {
+        input: args.input.clone(),
+        output: args.output.clone(),
+        key: args.key.clone(),
+        hybrid_key: args.hybrid_key.clone(),
+        replace: args.replace,
+        force: args.force,
+    };
+    let passphrase = keyfile::read_passphrase(&args.passphrase)?;
+    let report = crate::sign::run(&request, passphrase.as_ref())?;
+    let mut stdout = io::stdout().lock();
+    for line in report.lines(&args.output) {
+        writeln!(stdout, "{line}").map_err(out_error)?;
+    }
+    Ok(())
 }
 
 fn keygen(args: &KeygenArgs) -> Result<(), Error> {
