@@ -737,6 +737,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "keelsign-ffi"
+version = "0.0.1"
+dependencies = [
+ "keelsign-verify",
+ "policy-kat",
+]
+
+[[package]]
 name = "keelsign-verify"
 version = "0.0.1"
 dependencies = [
