@@ -475,3 +475,93 @@ fn inspect_rejects_non_images_with_exit_7() {
     // A missing file is an I/O error.
     assert_exit(&keelsign(&[&"inspect", &dir.join("missing.bin")]), 1);
 }
+
+/// A TLV as (type, value).
+type Tlv = (u16, Vec<u8>);
+
+/// `golden`'s hashed prefix (header, body, protected area) followed by a new unprotected
+/// TLV area holding `tlvs`, built here rather than committed as fixtures.
+fn with_unprotected(golden: &[u8], tlvs: &[Tlv]) -> Vec<u8> {
+    let image = keelsign_verify::image::Image::parse(golden).expect("parse");
+    let mut out = golden[..image.hashed_range().end as usize].to_vec();
+    let tot: usize = 4 + tlvs.iter().map(|(_, v)| 4 + v.len()).sum::<usize>();
+    out.extend_from_slice(&0x6907u16.to_le_bytes());
+    out.extend_from_slice(&u16::try_from(tot).expect("fits").to_le_bytes());
+    for (t, v) in tlvs {
+        out.extend_from_slice(&t.to_le_bytes());
+        out.extend_from_slice(&u16::try_from(v.len()).expect("fits").to_le_bytes());
+        out.extend_from_slice(v);
+    }
+    out
+}
+
+/// Malformed but parseable images (a short or empty KEYHASH before ED25519, an empty
+/// ED25519, a key-ID TLV of the wrong length) still give schema-valid JSON: the
+/// signature's `keyhash` / `key_id` is null and `paired` is false, never a value of the
+/// wrong shape.
+#[test]
+fn inspect_json_stays_schema_valid_for_malformed_keyhash_and_key_id() {
+    let validator = jsonschema::draft202012::new(&schema()).expect("compile schema");
+    let dir = scratch("inspect", "malformed");
+    let golden = fixture("mcuboot-ed25519.bin");
+    let sha256 = digest(&golden).to_vec();
+    let cases: [(&str, Vec<Tlv>); 4] = [
+        (
+            "short-keyhash-short-key-id",
+            vec![
+                (0x10, sha256.clone()),
+                (0x01, vec![0xAA; 5]),
+                (0x24, vec![0xBB; 64]),
+                (0x4BA0, vec![0xCC; 5]),
+                (0x4BA1, vec![0xDD; 10]),
+            ],
+        ),
+        (
+            "empty-keyhash-empty-ed25519",
+            vec![(0x10, sha256.clone()), (0x01, vec![]), (0x24, vec![])],
+        ),
+        (
+            "long-keyhash-long-key-id",
+            vec![
+                (0x10, sha256.clone()),
+                (0x01, vec![0xAA; 33]),
+                (0x24, vec![]),
+                (0x4BA0, vec![0xCC; 17]),
+                (0x4BA2, vec![0xDD; 10]),
+            ],
+        ),
+        (
+            "empty-key-id",
+            vec![(0x10, sha256), (0x4BA0, vec![]), (0x4BA3, vec![0xEE; 8])],
+        ),
+    ];
+    for (name, tlvs) in cases {
+        let path = dir.join(format!("{name}.bin"));
+        std::fs::write(&path, with_unprotected(&golden, &tlvs)).expect("write");
+        let report = inspect_json(&path);
+        if let Err(e) = validator.validate(&report) {
+            panic!("{name}: {e}\n{report:#}");
+        }
+        let signatures = report["signatures"].as_array().expect("signatures");
+        assert!(!signatures.is_empty(), "{name}");
+        for sig in signatures {
+            if sig["kind"] == "ed25519" {
+                assert_eq!(sig["keyhash"], Value::Null, "{name}: {sig}");
+                assert_eq!(sig["paired"], false, "{name}: {sig}");
+            } else {
+                assert_eq!(sig["key_id"], Value::Null, "{name}: {sig}");
+                assert_eq!(sig["paired"], Value::Null, "{name}: {sig}");
+            }
+        }
+        assert_eq!(report["keyhashes"], serde_json::json!([]), "{name}");
+        assert_eq!(report["key_ids"], serde_json::json!([]), "{name}");
+        // The text output says the same.
+        let out = keelsign(&[&"inspect", &path]);
+        assert_exit(&out, 0);
+        let text = stdout(&out);
+        assert!(!text.contains("paired: yes"), "{name}: {text}");
+        if signatures.iter().any(|s| s["kind"] == "ed25519") {
+            assert!(text.contains("    paired: no\n"), "{name}: {text}");
+        }
+    }
+}

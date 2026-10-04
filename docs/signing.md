@@ -151,9 +151,10 @@ reports:
   BOOT_RECORD as CBOR (not decoded), the key ID, the ML-DSA parameter set, and an HSS
   signature's levels `L`, LMS and LM-OTS type names and leaf index `q`;
 - the key IDs and keyhashes in the image, and every signature TLV with its kind, area,
-  length, the `KEYHASH` immediately before it (classical signatures, `paired`) or the
-  image's key ID (post-quantum signatures; `null` if there are none or several), and the
-  HSS structure.
+  length, the 32-byte `KEYHASH` immediately before it (classical signatures; `paired`
+  means a 32-byte `KEYHASH` immediately before it, otherwise `keyhash` is `null` and
+  `paired` is `false`) or the image's 16-byte key ID (post-quantum signatures; `null` if
+  there are none, several, or one of another length), and the HSS structure.
 
 The output depends only on the image bytes: it never contains the file's path, the time
 or the terminal size. A file that is not an MCUboot image exits with code 7. The

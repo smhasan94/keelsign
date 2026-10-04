@@ -310,7 +310,8 @@ pub fn to_json(bytes: &[u8], image: &Image<'_>, digest: &[u8; 32]) -> Value {
         .filter(|t| t.tlv_type == IMAGE_TLV_KEYHASH && t.value.len() == 32)
         .map(|t| hex(t.value))
         .collect();
-    // The image's key ID for its PQ signatures: the single unprotected key-ID TLV.
+    // The image's key ID for its PQ signatures: the single unprotected key-ID TLV, when it
+    // is KEY_ID_LEN bytes (otherwise null, as for `key_ids`).
     let unprotected_key_ids: Vec<&[u8]> = image
         .unprotected()
         .iter()
@@ -318,7 +319,7 @@ pub fn to_json(bytes: &[u8], image: &Image<'_>, digest: &[u8; 32]) -> Value {
         .map(|t| t.value)
         .collect();
     let pq_key_id = match unprotected_key_ids.as_slice() {
-        [only] => json!(hex(only)),
+        [only] if only.len() == KEY_ID_LEN => json!(hex(only)),
         _ => Value::Null,
     };
 
@@ -332,8 +333,10 @@ pub fn to_json(bytes: &[u8], image: &Image<'_>, digest: &[u8; 32]) -> Value {
                     kind,
                     TlvKind::MlDsa44Sig | TlvKind::MlDsa65Sig | TlvKind::LmsHssSig
                 );
+                // Paired only with a 32-byte KEYHASH immediately before it, as
+                // keelsign-verify's select_ed25519_signature requires.
                 let keyhash = match previous {
-                    Some((IMAGE_TLV_KEYHASH, v)) if !pq => json!(hex(v)),
+                    Some((IMAGE_TLV_KEYHASH, v)) if !pq && v.len() == 32 => json!(hex(v)),
                     _ => Value::Null,
                 };
                 let lms = match kind {
