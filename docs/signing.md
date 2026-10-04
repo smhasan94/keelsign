@@ -220,3 +220,49 @@ validates with `imgtool verify --key` under the keelsign Ed25519 key.
 `sign` does not sign with LMS/HSS: LMS/HSS keys are stateful and need their own key
 files and state handling (E7.2). `inspect` decodes LMS/HSS signature TLVs (`0x4BA3`)
 already, and `--replace` replaces one with an ML-DSA signature.
+
+## On-target check
+
+SHA-67's test plan asks for images signed at leaves 0, 1 and 2^H − 1 of an LMS key to
+verify on the device. The host half is the test
+`images_at_leaves_0_1_and_1023_verify_with_keelsign_verify_and_cnsa_2_0`
+(keelsign/tests/lms_sign.rs); the board half is this manual procedure, which the verifier
+marks NEEDS-HARDWARE until a human has run it on the nRF52840-DK and the Pico 2 W:
+
+1. Sign the images on the host, keeping them:
+
+   ```sh
+   cargo test -p keelsign --locked --test lms_sign \
+       images_at_leaves_0_1_and_1023_verify_with_keelsign_verify_and_cnsa_2_0 -- --nocapture
+   ```
+
+   It prints `on-target inputs (docs/signing.md#on-target-check): DIR`. `DIR`
+   (`target/tmp/lms_sign/leaves/`) holds `lms.pub.pem` and `leaf-0.bin`, `leaf-1.bin`,
+   `leaf-1023.bin`: one H10 key's first, second and last leaf, each verified on the host
+   by `keelsign verify` and `keelsign verify --cnsa-2.0`.
+2. Pack them into a KSLM v2 fixture for the on-target LMS runner (benches/lms-kat), from
+   the repository root:
+
+   ```sh
+   repo="$PWD"
+   cd target/tmp/lms_sign/leaves
+   python3 "$repo"/scripts/lms_image_kat.py --pub lms.pub.pem --out /tmp/lms-leaves.bin leaf-0.bin leaf-1.bin leaf-1023.bin
+   cd "$repo"
+   ```
+
+   Each case is the image digest `M`, the `0x4BA3` signature and the public key, checked
+   against the image's key-ID TLV; case IDs 700–702, source byte 2.
+3. With a board connected (docs/benchmarks.md), build and run the LMS test binary with
+   that fixture: lms-kat's `build.rs` embeds the absolute path in `KEELSIGN_LMS_TARGET`
+   instead of `fixtures/lms-target.bin`.
+
+   ```sh
+   cd benches/nrf52840-mldsa   # then again in benches/rp2350-mldsa
+   KEELSIGN_LMS_TARGET=/tmp/lms-leaves.bin cargo test --release --locked --test lms -- lms_kat
+   ```
+
+4. Expect `KAT board=... set=LMS passed=3/3` and `lms_kat` passing on both boards: every
+   case verifies under the device default policy and `DefaultBackend::cnsa_2_0()`. Paste
+   the two logs into the pull request and the Linear ticket.
+5. Build once more without `KEELSIGN_LMS_TARGET` so the benches embed the 14-case fixture
+   again.

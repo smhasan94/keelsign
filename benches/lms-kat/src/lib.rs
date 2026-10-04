@@ -44,11 +44,27 @@ pub const VERSION: u16 = 2;
 
 /// On-target fixture: RFC 8554 Test Cases 1 and 2, one ACVP SHA-256/192 case, hsslms
 /// M32 L2, M24 L1 and L2, rotation keys A and B, W4 and L=3, one tampered and one
-/// trailing-byte case.
-pub const LMS_TARGET: &[u8] = include_bytes!("../fixtures/lms-target.bin");
+/// trailing-byte case (`fixtures/lms-target.bin`). With `KEELSIGN_LMS_TARGET` set to an
+/// absolute path at build time, that KSLM v2 file instead (`build.rs`; docs/signing.md,
+/// "On-target check").
+pub const LMS_TARGET: &[u8] = include_bytes!(env!("LMS_KAT_TARGET_FIXTURE"));
 
-/// Cases in [`LMS_TARGET`].
-pub const TARGET_CASES: u32 = 14;
+/// Cases in [`LMS_TARGET`]: 14 for `fixtures/lms-target.bin`, read from the header of the
+/// embedded fixture by `build.rs`.
+pub const TARGET_CASES: u32 = parse_u32(env!("LMS_KAT_TARGET_CASES"));
+
+/// The decimal number `text` (`build.rs` writes it); 0 for an empty string.
+const fn parse_u32(text: &str) -> u32 {
+    let mut digits = text.as_bytes();
+    let mut value: u32 = 0;
+    while let [digit, rest @ ..] = digits {
+        value = value
+            .saturating_mul(10)
+            .saturating_add(digit.wrapping_sub(b'0') as u32);
+        digits = rest;
+    }
+    value
+}
 
 /// Case IDs assigned by `scripts/gen_lms_vectors.py`.
 pub mod ids {

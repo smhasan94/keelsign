@@ -224,3 +224,75 @@ fn readme_quickstart_block_names_every_command() {
     );
     assert!(block.contains("tests/fixtures/images/mcuboot-ed25519.bin"));
 }
+
+/// SHA-67 TP3 on target (NEEDS-HARDWARE): docs/signing.md documents the manual procedure
+/// that verifies keelsign-signed LMS images on the boards, and the pieces it uses exist:
+/// the host test that keeps the images, scripts/lms_image_kat.py (standard library only)
+/// and lms-kat's `KEELSIGN_LMS_TARGET` override.
+#[test]
+fn lms_on_target_procedure_is_documented() {
+    let signing = read("docs/signing.md");
+    let section = signing
+        .split("\n## On-target check\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n## ").next())
+        .expect("docs/signing.md has an `## On-target check` section");
+    const HOST_TEST: &str =
+        "images_at_leaves_0_1_and_1023_verify_with_keelsign_verify_and_cnsa_2_0";
+    for needle in [
+        "NEEDS-HARDWARE",
+        HOST_TEST,
+        "--nocapture",
+        "scripts/lms_image_kat.py --pub lms.pub.pem --out /tmp/lms-leaves.bin leaf-0.bin leaf-1.bin leaf-1023.bin",
+        "KEELSIGN_LMS_TARGET=/tmp/lms-leaves.bin cargo test --release --locked --test lms -- lms_kat",
+        "passed=3/3",
+        "benches/nrf52840-mldsa",
+        "benches/rp2350-mldsa",
+    ] {
+        assert!(
+            section.contains(needle),
+            "docs/signing.md `## On-target check` lacks `{needle}`"
+        );
+    }
+    let test = read("keelsign/tests/lms_sign.rs");
+    assert!(test.contains(&format!("fn {HOST_TEST}()")));
+    assert!(test.contains("scripts/lms_image_kat.py") && test.contains("lms_kat::run_fixture"));
+
+    let script = read("scripts/lms_image_kat.py");
+    for line in script
+        .lines()
+        .filter(|l| l.starts_with("import ") || l.starts_with("from "))
+    {
+        let module = line.split_whitespace().nth(1).unwrap_or_default();
+        assert!(
+            ["argparse", "base64", "hashlib", "struct", "sys", "pathlib"].contains(&module),
+            "scripts/lms_image_kat.py imports `{module}`: standard library only"
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = fs::metadata(workspace_root().join("scripts/lms_image_kat.py"))
+            .expect("stat")
+            .permissions()
+            .mode();
+        assert_ne!(mode & 0o111, 0, "scripts/lms_image_kat.py is executable");
+    }
+
+    let build = read("benches/lms-kat/build.rs");
+    for needle in [
+        "KEELSIGN_LMS_TARGET",
+        "cargo:rerun-if-env-changed=KEELSIGN_LMS_TARGET",
+        "is_absolute",
+        "LMS_KAT_TARGET_FIXTURE",
+        "LMS_KAT_TARGET_CASES",
+    ] {
+        assert!(
+            build.contains(needle),
+            "benches/lms-kat/build.rs lacks `{needle}`"
+        );
+    }
+    let lib = read("benches/lms-kat/src/lib.rs");
+    assert!(lib.contains("include_bytes!(env!(\"LMS_KAT_TARGET_FIXTURE\"))"));
+    assert!(lib.contains("env!(\"LMS_KAT_TARGET_CASES\")"));
+}

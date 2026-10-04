@@ -400,6 +400,30 @@ fn images_at_leaves_0_1_and_1023_verify_with_keelsign_verify_and_cnsa_2_0() {
         verify(&bytes, Some(&lms), None, Policy::PqOnly).expect("verifies");
         images.push(output);
     }
+    // The on-target harness: scripts/lms_image_kat.py packs the three images into a KSLM
+    // v2 fixture, which the lms-kat runner (the code the boards run) passes on the host.
+    let fixture = dir.join("lms-leaves.bin");
+    let out = Command::new("python3")
+        .arg(repo().join("scripts/lms_image_kat.py"))
+        .arg("--pub")
+        .arg(&public)
+        .arg("--out")
+        .arg(&fixture)
+        .args(&images)
+        .output()
+        .expect("run python3 scripts/lms_image_kat.py");
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains("wrote 3 cases"), "{}", stdout(&out));
+    let bytes = std::fs::read(&fixture).expect("read fixture");
+    let mut ids = Vec::new();
+    let summary = lms_kat::run_fixture(&bytes, |case, outcome| {
+        ids.push(case.id);
+        assert!(outcome.passed(), "case {}: {outcome:?}", case.id);
+        assert_eq!(case.pk, lms.raw_public_key().as_slice());
+    })
+    .expect("fixture parses");
+    assert_eq!((summary.total, summary.passed), (3, 3));
+    assert_eq!(ids, [700, 701, 702]);
     println!(
         "on-target inputs (docs/signing.md#on-target-check): {}",
         dir.display()
