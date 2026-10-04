@@ -3,8 +3,9 @@
 `keelsign sign` adds a post-quantum signature to an MCUboot image, optionally with
 MCUboot's Ed25519 pair (a hybrid image). `keelsign inspect` describes an image as text or
 JSON. The image format is specified in [image-format.md](image-format.md); the device
-policies in [policy.md](policy.md); key files in [keys.md](keys.md). The CLI is
-pre-release: `verify` comes with SHA-53, and LMS/HSS signing with E7.2 (stateful keys).
+policies in [policy.md](policy.md); key files in [keys.md](keys.md); verifying signed
+images with `keelsign verify` in [verify.md](verify.md). The CLI is pre-release: LMS/HSS
+signing comes with E7.2 (stateful keys).
 
 ## Commands
 
@@ -187,10 +188,11 @@ Readers should check `schema_version` and ignore fields they do not know.
 | 4 | passphrase: wrong, missing for an encrypted key, or given when neither key is encrypted |
 | 5 | corrupt or unsupported key file (as in [keys.md](keys.md#exit-codes)) |
 | 6 | `--key` is not an ML-DSA key or `--hybrid-key` is not an Ed25519 key |
-| 7 | the input image is rejected: not an MCUboot image, an image rule broken, bytes after the TLV area, larger than 64 MiB, TLV area too large |
+| 7 | the input image is rejected: not an MCUboot image, an image rule broken, bytes after the TLV area, larger than 64 MiB, TLV area too large (`verify` and `inspect`: not an MCUboot image or larger than 64 MiB) |
 | 8 | the input image already carries keelsign TLVs (or, with `--hybrid-key`, an Ed25519 signature) and `--replace` was not given |
+| 9 | `verify`: the image is not verified under the policy (see [verify.md](verify.md#exit-codes)) |
 
-Codes 7 and 8 are provisional until the `verify` command (SHA-53) fixes its own. Error
+The table is final; see [verify.md](verify.md#exit-codes) for `verify`'s codes. Error
 messages go to standard error, start with `error:` and name the file.
 
 ## Interoperability checks

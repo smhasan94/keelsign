@@ -419,9 +419,10 @@ Each row was checked against the cited source at the stated commit.
   LMS/HSS parameter set is the trusted public key's.
 - ML-DSA-87 and SLH-DSA.
 - MCUboot PR #2707's `IMAGE_TLV_LMS` (`0x26`) compatibility mode (follow-up).
-- The image parser (SHA-35), digest computation (SHA-42), the CLI's `verify` command (SHA-53), per-board partition numbers (SHA-58) and the MCUboot
-  allow-list glue (SHA-62); the verify policies (SHA-46) are in
-  [docs/policy.md](policy.md).
+- The image parser (SHA-35), digest computation (SHA-42), per-board partition numbers
+  (SHA-58) and the MCUboot allow-list glue (SHA-62); the verify policies (SHA-46) are in
+  [docs/policy.md](policy.md) and the CLI's `verify` command in
+  [docs/verify.md](verify.md).
 
 ## Sample images
 

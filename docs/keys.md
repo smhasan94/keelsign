@@ -3,8 +3,9 @@
 `keelsign keygen` creates signing keys and `keelsign pubkey` exports their public keys.
 This page fixes the file formats, the algorithm OIDs, passphrase encryption, the key
 identifiers printed, file permissions and the exit codes. The CLI is pre-release: image
-signing (`sign`) and `inspect` are in [signing.md](signing.md); `verify` is not written
-yet (SHA-53). LMS/HSS keys are stateful and come with their own key files later (E7.2).
+signing (`sign`) and `inspect` are in [signing.md](signing.md); `verify`, which reads the
+public key files below (and HSS/LMS ones), is in [verify.md](verify.md). LMS/HSS keys
+are stateful and come with their own key files later (E7.2).
 
 ## Commands
 
@@ -111,6 +112,9 @@ file starts with a fixed header:
 | ML-DSA-65 | `308207b2300b0609608648016503040312038207a100` | 1,974 bytes |
 | Ed25519 | `302a300506032b6570032100` | 44 bytes |
 
+`keelsign verify --pub` reads these files, PEM or DER, and HSS/LMS public keys in the
+RFC 8708 form ([verify.md](verify.md#public-key-files)).
+
 ## Passphrase encryption
 
 With `--passphrase-file` or `--passphrase-env`, `keygen` writes a PKCS#8
@@ -211,14 +215,15 @@ Worked examples with published test vectors:
 | Code | Meaning |
 |---|---|
 | 0 | success |
-| 1 | I/O error (unreadable key or passphrase file, write failure), random-number generator failure, internal error |
+| 1 | I/O error (unreadable key, passphrase, image or `--pub` file, write failure), random-number generator failure, internal error |
 | 2 | usage error: unknown command, option or `--alg` value, conflicting options, empty passphrase, passphrase file over 1 MiB, `--format der` without `--out`, `pubkey --out` naming the `--key` file |
 | 3 | the output file exists and `--force` was not given |
 | 4 | passphrase: wrong, missing for an encrypted key, or given for an unencrypted key |
-| 5 | corrupt or unsupported key file (not PEM/DER PKCS#8, over 1 MiB, a public key, an unsupported algorithm, ML-DSA `expandedKey`/`both`, parameters present, a v2 public key that does not match, an unsupported encryption scheme or out-of-range KDF parameters) |
+| 5 | corrupt or unsupported key file (not PEM/DER PKCS#8, over 1 MiB, a public key, an unsupported algorithm, ML-DSA `expandedKey`/`both`, parameters present, a v2 public key that does not match, an unsupported encryption scheme or out-of-range KDF parameters; for `verify --pub`: not a PEM/DER `SubjectPublicKeyInfo`, an unknown OID, parameters present, the wrong length, or a private key) |
 | 6 | the key file holds a different algorithm than `--alg` (for `sign`: `--key` is not ML-DSA or `--hybrid-key` is not Ed25519) |
-| 7 | `sign` / `inspect`: the input image is rejected (see [signing.md](signing.md#exit-codes)) |
+| 7 | `sign` / `inspect` / `verify`: the input image is rejected as malformed (see [signing.md](signing.md#exit-codes)) |
 | 8 | `sign`: the input image already carries keelsign TLVs and `--replace` was not given (see [signing.md](signing.md#exit-codes)) |
+| 9 | `verify`: the image is not verified under the policy (see [verify.md](verify.md#exit-codes)) |
 
 Error messages go to standard error, start with `error:` and name the file.
 

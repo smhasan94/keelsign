@@ -1,6 +1,6 @@
 [package]
 name = "keelsign"
-description = "Host CLI of the keelsign post-quantum firmware signing kit: key generation, image signing and inspection (pre-release)"
+description = "Host CLI of the keelsign post-quantum firmware signing kit: key generation, image signing, inspection and verification (pre-release)"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true
@@ -21,6 +21,9 @@ serde_json = { version = "=1.0.151", default-features = false, features = ["std"
 # Validates `inspect --json` output against docs/inspect-schema.json (Draft 2020-12) in
 # tests/inspect.rs. Default features off: no HTTP or file resolving, no TLS.
 jsonschema = { version = "=0.58.5", default-features = false }
+# SHA-53: integration tests of every subcommand and exit code (the ticket names assert_cmd).
+assert_cmd = { version = "=2.2.2", default-features = false }
+predicates = { version = "=3.1.4", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

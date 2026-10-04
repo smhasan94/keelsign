@@ -77,6 +77,13 @@ jobs:
           python3 -m venv .venv-imgtool && .venv-imgtool/bin/pip install imgtool==2.4.0
           PATH="$PWD/.venv-imgtool/bin:$PATH" cargo test -p keelsign --locked --test imgtool -- --ignored
 
+      # SHA-53: the README quickstart, run verbatim against the release binary within its
+      # five-minute budget (scripts/check-quickstart.sh).
+      - name: readme quickstart (shell test)
+        run: |
+          cargo build --release -p keelsign --locked
+          scripts/check-quickstart.sh --keelsign target/release
+
       # Only the packaging tests: the other ignored repo-checks tests need the thumb
       # targets, probe-rs and flip-link; the cross-build job covers the example builds.
       - name: repo checks (network)

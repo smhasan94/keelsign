@@ -7,6 +7,8 @@
 //!   (N = 2^14, r = 8, p = 1, 16-byte salt) and AES-256-CBC, PEM label
 //!   `ENCRYPTED PRIVATE KEY` or DER.
 //! - Public keys: `SubjectPublicKeyInfo` (RFC 5280), PEM label `PUBLIC KEY` or DER.
+//!   [`PublicKey::from_bytes`] reads them for `verify --pub`: ML-DSA-44/65 (RFC 9881),
+//!   Ed25519 (RFC 8410) and HSS/LMS (RFC 8708).
 
 use crate::error::{Error, KeyFileError};
 use ml_dsa::{Keypair as _, MlDsa44, MlDsa65};
@@ -28,6 +30,10 @@ pub const ID_ML_DSA_44: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.84
 pub const ID_ML_DSA_65: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.18");
 /// `id-Ed25519` (RFC 8410 §3).
 pub const ID_ED25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
+/// `id-alg-hss-lms-hashsig` (RFC 8708 §3): HSS/LMS public keys, read by `verify --pub`
+/// only (keelsign does not generate LMS/HSS keys).
+pub const ID_HSS_LMS_HASHSIG: ObjectIdentifier =
+    ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.16.3.17");
 
 /// PEM label of a PKCS#8 private key.
 pub const PEM_PRIVATE_KEY: &str = "PRIVATE KEY";
@@ -396,6 +402,190 @@ impl PrivateKey {
     }
 }
 
+/// A public key read from a `SubjectPublicKeyInfo` file (`verify --pub`): the raw key the
+/// device trusts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PublicKey {
+    /// An ML-DSA-44 public key (FIPS 204 encoding, 1,312 bytes).
+    MlDsa44(Vec<u8>),
+    /// An ML-DSA-65 public key (FIPS 204 encoding, 1,952 bytes).
+    MlDsa65(Vec<u8>),
+    /// An Ed25519 public key (32 bytes).
+    Ed25519([u8; 32]),
+    /// An HSS/LMS public key, `u32 L || LMS public key` (RFC 8554 §6.1; 52 or 60 bytes).
+    LmsHss(Vec<u8>),
+}
+
+impl PublicKey {
+    /// Load a public key file's contents: a `SubjectPublicKeyInfo` as PEM (label
+    /// `PUBLIC KEY`; text before the header is ignored) or DER.
+    ///
+    /// The `AlgorithmIdentifier` must be `id-ml-dsa-44`, `id-ml-dsa-65`, `id-Ed25519` or
+    /// `id-alg-hss-lms-hashsig` with parameters absent. For HSS/LMS the `subjectPublicKey`
+    /// BIT STRING holds the DER OCTET STRING of the HSS public key (RFC 8708 §4, following
+    /// RFC 5912's `PUBLIC-KEY` convention); for the others it holds the raw key. A private
+    /// key file is refused as corrupt ("holds a private key").
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, KeyFileError> {
+        let pem_start = std::str::from_utf8(bytes)
+            .ok()
+            .and_then(|text| text.find("-----BEGIN ").map(|at| (text, at)));
+        match pem_start {
+            Some((text, at)) => Self::from_pem(text.get(at..).unwrap_or_default()),
+            None if bytes.is_empty() => Err(KeyFileError::Corrupt("the file is empty".into())),
+            None => Self::from_der(bytes),
+        }
+    }
+
+    fn from_pem(pem: &str) -> Result<Self, KeyFileError> {
+        // Look at the label before decoding, so a private key is never decoded here.
+        let label = pkcs8::der::pem::decode_label(pem.as_bytes())
+            .map_err(|e| KeyFileError::Corrupt(format!("invalid PEM: {e}")))?;
+        match label {
+            PEM_PUBLIC_KEY => {}
+            PEM_PRIVATE_KEY | PEM_ENCRYPTED_PRIVATE_KEY => return Err(private_key_given()),
+            other => {
+                return Err(KeyFileError::Unsupported(format!(
+                    "unsupported PEM label `{other}` (expected `{PEM_PUBLIC_KEY}`)"
+                )));
+            }
+        }
+        let (_, doc) = Document::from_pem(pem)
+            .map_err(|e| KeyFileError::Corrupt(format!("invalid PEM: {e}")))?;
+        let spki = SubjectPublicKeyInfoRef::from_der(doc.as_bytes()).map_err(|e| {
+            KeyFileError::Corrupt(format!("not a SubjectPublicKeyInfo public key: {e}"))
+        })?;
+        Self::from_spki(&spki)
+    }
+
+    fn from_der(der: &[u8]) -> Result<Self, KeyFileError> {
+        match SubjectPublicKeyInfoRef::from_der(der) {
+            Ok(spki) => Self::from_spki(&spki),
+            Err(e) => {
+                if PrivateKeyInfoRef::from_der(der).is_ok() || encryption_algorithm(der).is_ok() {
+                    Err(private_key_given())
+                } else {
+                    Err(KeyFileError::Corrupt(format!(
+                        "neither a PEM file nor a DER SubjectPublicKeyInfo: {e}"
+                    )))
+                }
+            }
+        }
+    }
+
+    fn from_spki(spki: &SubjectPublicKeyInfoRef<'_>) -> Result<Self, KeyFileError> {
+        let oid = spki.algorithm.oid;
+        let name = match oid {
+            ID_ML_DSA_44 => "ML-DSA-44",
+            ID_ML_DSA_65 => "ML-DSA-65",
+            ID_ED25519 => "Ed25519",
+            ID_HSS_LMS_HASHSIG => "HSS/LMS",
+            _ => {
+                return Err(KeyFileError::Unsupported(format!(
+                    "unsupported public key algorithm OID {oid} (keelsign reads ML-DSA-44 \
+                     {ID_ML_DSA_44}, ML-DSA-65 {ID_ML_DSA_65}, Ed25519 {ID_ED25519} and \
+                     HSS/LMS {ID_HSS_LMS_HASHSIG})"
+                )));
+            }
+        };
+        if spki.algorithm.parameters.is_some() {
+            return Err(KeyFileError::Corrupt(format!(
+                "{name} AlgorithmIdentifier has parameters; they must be absent (RFC 9881 \
+                 §2, RFC 8410 §3, RFC 8708 §3)"
+            )));
+        }
+        let bits = spki.subject_public_key.as_bytes().ok_or_else(|| {
+            KeyFileError::Corrupt(format!(
+                "{name} subjectPublicKey is not a whole number of bytes"
+            ))
+        })?;
+        let wrong_length = |expected: &str| {
+            KeyFileError::Corrupt(format!(
+                "{name} public key is {} bytes; it must be {expected}",
+                bits.len()
+            ))
+        };
+        match oid {
+            ID_ML_DSA_44 if bits.len() == 1312 => Ok(Self::MlDsa44(bits.to_vec())),
+            ID_ML_DSA_44 => Err(wrong_length("1,312")),
+            ID_ML_DSA_65 if bits.len() == 1952 => Ok(Self::MlDsa65(bits.to_vec())),
+            ID_ML_DSA_65 => Err(wrong_length("1,952")),
+            ID_ED25519 => bits
+                .try_into()
+                .map(Self::Ed25519)
+                .map_err(|_| wrong_length("32")),
+            _ => {
+                // RFC 8708 §4: the BIT STRING holds the DER encoding of
+                // `HSS-LMS-HashSig-PublicKey ::= OCTET STRING`.
+                let key = <&OctetStringRef>::from_der(bits).map_err(|e| {
+                    KeyFileError::Corrupt(format!(
+                        "HSS/LMS subjectPublicKey is not a DER OCTET STRING (RFC 8708 §4): {e}"
+                    ))
+                })?;
+                let key = key.as_bytes();
+                if !keelsign_verify::lms::PUBLIC_KEY_LENS.contains(&key.len()) {
+                    return Err(KeyFileError::Corrupt(format!(
+                        "HSS/LMS public key is {} bytes; it must be 52 or 60",
+                        key.len()
+                    )));
+                }
+                keelsign_verify::lms::check_public_key(key).map_err(|e| {
+                    KeyFileError::Corrupt(format!("invalid HSS/LMS public key: {e}"))
+                })?;
+                Ok(Self::LmsHss(key.to_vec()))
+            }
+        }
+    }
+
+    /// The algorithm name: `ml-dsa-44`, `ml-dsa-65`, `ed25519` or `lms-hss`.
+    pub fn algorithm_name(&self) -> &'static str {
+        match self {
+            Self::MlDsa44(_) => "ml-dsa-44",
+            Self::MlDsa65(_) => "ml-dsa-65",
+            Self::Ed25519(_) => "ed25519",
+            Self::LmsHss(_) => "lms-hss",
+        }
+    }
+
+    /// The raw public key.
+    pub fn raw(&self) -> &[u8] {
+        match self {
+            Self::MlDsa44(k) | Self::MlDsa65(k) | Self::LmsHss(k) => k,
+            Self::Ed25519(k) => k,
+        }
+    }
+
+    /// The key ID (post-quantum keys) or KEYHASH (Ed25519) that identifies this key in an
+    /// image.
+    pub fn identity(&self) -> KeyIdentity {
+        match self {
+            Self::Ed25519(k) => KeyIdentity::KeyHash(keelsign_verify::keyhash_of(k)),
+            other => KeyIdentity::KeyId(keelsign_verify::key_id_of(other.raw())),
+        }
+    }
+
+    /// The trusted post-quantum key, or `None` for an Ed25519 key.
+    pub fn trusted_key(&self) -> Option<keelsign_verify::TrustedKey<'_>> {
+        let algorithm = match self {
+            Self::MlDsa44(_) => keelsign_verify::Algorithm::MlDsa44,
+            Self::MlDsa65(_) => keelsign_verify::Algorithm::MlDsa65,
+            Self::LmsHss(_) => keelsign_verify::Algorithm::LmsHss,
+            Self::Ed25519(_) => return None,
+        };
+        Some(keelsign_verify::TrustedKey {
+            algorithm,
+            public_key: self.raw(),
+        })
+    }
+
+    /// The trusted Ed25519 key, or `None` for a post-quantum key.
+    pub fn ed25519_key(&self) -> Option<keelsign_verify::Ed25519Key<'_>> {
+        match self {
+            Self::Ed25519(public_key) => Some(keelsign_verify::Ed25519Key { public_key }),
+            _ => None,
+        }
+    }
+}
+
 /// The message for an encryption scheme keelsign does not read.
 const UNSUPPORTED_SCHEME: &str =
     "unsupported encryption scheme; keelsign reads PBES2 (scrypt or PBKDF2 with AES-CBC)";
@@ -511,9 +701,170 @@ fn public_key_given() -> KeyFileError {
     KeyFileError::Corrupt("it holds a public key, not a private key".into())
 }
 
+fn private_key_given() -> KeyFileError {
+    KeyFileError::Corrupt("it holds a private key, not a public key".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pkcs8::der::asn1::BitStringRef;
+
+    /// RFC 8410 §10.1: an Ed25519 public key and its KEYHASH.
+    const RFC8410_PUBLIC_PEM: &str = "-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
+-----END PUBLIC KEY-----
+";
+    const RFC8410_KEYHASH: &str =
+        "a1e9156054e04fac899ae9f275132cdc07a5dbc4ea2c2ad3a1ffc6e0d253681f";
+
+    /// RFC 9881 Appendix C.1: the seed 00 01 .. 1f; Appendix C.2: SHA-256 of the DER SPKI
+    /// of the ML-DSA-44 and ML-DSA-65 public keys for it, and their keelsign key IDs.
+    const RFC9881_SPKI_SHA256: [&str; 2] = [
+        "837832708c5236d951581f1fddf2b79991b3424a0486d16da1ddad0fd69701be",
+        "b8b62131bfbe84433efb2273d7f5b87f7a22854a2cfd366fc2aead86d837c52d",
+    ];
+    const RFC9881_KEY_IDS: [&str; 2] = [
+        "9f107644c1084526af3bc8098680b054",
+        "d666806e11cee19a7c989f7445f90dd4",
+    ];
+
+    fn spki_der(oid: ObjectIdentifier, parameters: Option<AnyRef<'_>>, key: &[u8]) -> Vec<u8> {
+        let spki = SubjectPublicKeyInfoRef {
+            algorithm: AlgorithmIdentifierRef { oid, parameters },
+            subject_public_key: BitStringRef::from_bytes(key).expect("bit string"),
+        };
+        spki.to_der().expect("encode SPKI")
+    }
+
+    fn lms_key() -> Vec<u8> {
+        // L = 1, LMS_SHA256_M32_H5 (5), LMOTS_SHA256_N32_W8 (4), I (16 bytes), T[1] (32).
+        let mut key = vec![0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, 4];
+        key.extend_from_slice(&[0x11; 16]);
+        key.extend_from_slice(&[0x22; 32]);
+        key
+    }
+
+    #[test]
+    fn public_key_files_round_trip_through_pubkey_and_known_vectors() {
+        // Every generated key: the PEM and DER `pubkey` output read back as the same raw
+        // key and identity.
+        for algorithm in KeyAlgorithm::ALL {
+            let private = PrivateKey::generate(algorithm).expect("generate");
+            let pem = private.public_key_spki_pem().expect("pem");
+            let der = private.public_key_spki_der().expect("der");
+            for bytes in [pem.as_bytes(), der.as_bytes()] {
+                let public = PublicKey::from_bytes(bytes).expect("read SPKI");
+                assert_eq!(public.algorithm_name(), algorithm.name());
+                assert_eq!(public.raw(), private.raw_public_key());
+                assert_eq!(public.identity(), private.identity());
+                assert_eq!(
+                    public.trusted_key().is_some(),
+                    algorithm != KeyAlgorithm::Ed25519
+                );
+                assert_eq!(
+                    public.ed25519_key().is_some(),
+                    algorithm == KeyAlgorithm::Ed25519
+                );
+            }
+            // A private key given as a public key is refused (PEM and DER).
+            let refused = KeyFileError::Corrupt("it holds a private key, not a public key".into());
+            let private_pem = private.to_pem().expect("pem");
+            assert_eq!(
+                PublicKey::from_bytes(private_pem.as_bytes()),
+                Err(refused.clone())
+            );
+            let private_der = private.to_pkcs8_der().expect("der");
+            assert_eq!(
+                PublicKey::from_bytes(private_der.as_bytes()),
+                Err(refused.clone())
+            );
+            let encrypted = private.to_encrypted_der(b"pw").expect("encrypt");
+            assert_eq!(PublicKey::from_bytes(encrypted.as_bytes()), Err(refused));
+        }
+
+        // RFC 8410 §10.1.
+        let public = PublicKey::from_bytes(RFC8410_PUBLIC_PEM.as_bytes()).expect("RFC 8410");
+        assert_eq!(
+            public.identity().to_string(),
+            format!("keyhash: {RFC8410_KEYHASH}")
+        );
+
+        // RFC 9881 C.2, from the C.1 seed.
+        for (i, algorithm) in [KeyAlgorithm::MlDsa44, KeyAlgorithm::MlDsa65]
+            .into_iter()
+            .enumerate()
+        {
+            let seed: [u8; 32] = core::array::from_fn(|i| i as u8);
+            let spki = PrivateKey::from_seed(algorithm, &seed)
+                .public_key_spki_der()
+                .expect("spki");
+            assert_eq!(
+                hex(&keelsign_verify::key_id_of(spki.as_bytes())),
+                RFC9881_SPKI_SHA256[i][..32]
+            );
+            let public = PublicKey::from_bytes(spki.as_bytes()).expect("RFC 9881");
+            assert_eq!(
+                public.identity().to_string(),
+                format!("key id: {}", RFC9881_KEY_IDS[i])
+            );
+        }
+
+        // RFC 8708: the BIT STRING holds the DER OCTET STRING of the HSS key.
+        let key = lms_key();
+        let wrapped = OctetStringRef::new(&key)
+            .and_then(|o| o.to_der())
+            .expect("octets");
+        let der = spki_der(ID_HSS_LMS_HASHSIG, None, &wrapped);
+        let public = PublicKey::from_bytes(&der).expect("RFC 8708");
+        assert_eq!(public, PublicKey::LmsHss(key.clone()));
+        assert_eq!(public.algorithm_name(), "lms-hss");
+        assert_eq!(
+            public.identity(),
+            KeyIdentity::KeyId(keelsign_verify::key_id_of(&key))
+        );
+        let pem = Document::try_from(der.as_slice())
+            .expect("doc")
+            .to_pem(PEM_PUBLIC_KEY, LineEnding::LF)
+            .expect("pem");
+        assert_eq!(PublicKey::from_bytes(pem.as_bytes()), Ok(public));
+
+        // Refusals: the raw key not wrapped, a bad typecode, parameters present, unknown
+        // OID, wrong lengths, garbage.
+        let corrupt = |bytes: &[u8]| match PublicKey::from_bytes(bytes) {
+            Err(KeyFileError::Corrupt(reason)) => reason,
+            other => panic!("expected Corrupt, got {other:?}"),
+        };
+        assert!(corrupt(&spki_der(ID_HSS_LMS_HASHSIG, None, &key)).contains("OCTET STRING"));
+        let mut bad_type = key.clone();
+        bad_type[7] = 0x7f;
+        let bad_type = OctetStringRef::new(&bad_type)
+            .and_then(|o| o.to_der())
+            .expect("o");
+        assert!(corrupt(&spki_der(ID_HSS_LMS_HASHSIG, None, &bad_type)).contains("HSS/LMS"));
+        let null = AnyRef::from(pkcs8::der::asn1::Null);
+        assert!(corrupt(&spki_der(ID_ED25519, Some(null), &[0; 32])).contains("parameters"));
+        assert!(corrupt(&spki_der(ID_ED25519, None, &[0; 31])).contains("31 bytes"));
+        assert!(corrupt(&spki_der(ID_ML_DSA_44, None, &[0; 1952])).contains("1,312"));
+        assert!(corrupt(&spki_der(ID_ML_DSA_65, None, &[0; 1312])).contains("1,952"));
+        assert!(corrupt(b"").contains("empty"));
+        assert!(corrupt(b"\x30\x03garbage").contains("neither a PEM file nor a DER"));
+        let unknown = ObjectIdentifier::new_unwrap("1.3.101.113");
+        match PublicKey::from_bytes(&spki_der(unknown, None, &[0; 57])) {
+            Err(KeyFileError::Unsupported(reason)) => {
+                for oid in [ID_ML_DSA_44, ID_ML_DSA_65, ID_ED25519, ID_HSS_LMS_HASHSIG] {
+                    assert!(reason.contains(&oid.to_string()), "{reason}");
+                }
+            }
+            other => panic!("expected Unsupported, got {other:?}"),
+        }
+        match PublicKey::from_bytes(
+            b"-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n",
+        ) {
+            Err(KeyFileError::Unsupported(reason)) => assert!(reason.contains("CERTIFICATE")),
+            other => panic!("expected Unsupported, got {other:?}"),
+        }
+    }
 
     #[test]
     fn hex_is_lowercase() {

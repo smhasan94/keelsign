@@ -6,9 +6,32 @@ format so MCUboot and embassy-boot users keep their existing update pipeline.
 
 **Status: placeholder / name reservation on crates.io.** The published `0.0.1` crates
 contain no functionality. The verifier described below is unreleased and its API is
-unstable. The host CLI has `keygen` and `pubkey` ([docs/keys.md](docs/keys.md)) and
-`sign` and `inspect` ([docs/signing.md](docs/signing.md)); the CLI's `verify`, the
-embassy-boot adapter and the MCUboot C bindings are not written yet.
+unstable. The host CLI has `keygen` and `pubkey` ([docs/keys.md](docs/keys.md)),
+`sign` and `inspect` ([docs/signing.md](docs/signing.md)) and `verify`
+([docs/verify.md](docs/verify.md)); the embassy-boot adapter and the MCUboot C bindings
+are not written yet.
+
+## Quickstart
+
+Build it once: `cargo install --path keelsign --locked` (or
+`cargo build --release -p keelsign` and put `target/release` on `PATH`). Then, from the
+repository root, sign an imgtool-signed image with a new ML-DSA-65 key and verify it as
+the device would:
+
+```sh
+work="$(mktemp -d)"
+cp tests/fixtures/images/mcuboot-ed25519.bin "$work/app.signed.bin"   # any imgtool-signed image
+cd "$work"
+keelsign keygen --alg ml-dsa-65 --out signing.pem
+keelsign pubkey --key signing.pem --out signing.pub.pem
+keelsign sign --key signing.pem app.signed.bin app.keelsign.bin
+keelsign verify --pub signing.pub.pem app.keelsign.bin
+keelsign inspect app.keelsign.bin
+```
+
+`verify` prints `verified:` and exits 0, or names the reason and exits non-zero (the exit
+codes are in [docs/verify.md](docs/verify.md#exit-codes)). CI runs this block verbatim
+with `scripts/check-quickstart.sh`, within a five-minute budget.
 
 ## What works today
 
@@ -45,7 +68,7 @@ need the boards.
 
 | Crate | Kind | Purpose |
 |---|---|---|
-| `keelsign` | host CLI (pre-release) | `keygen` / `pubkey` / `sign` / `inspect` today; `verify` to come |
+| `keelsign` | host CLI (pre-release) | `keygen` / `pubkey` / `sign` / `inspect` / `verify` MCUboot-format images |
 | `keelsign-verify` | `no_std`, no heap | Parses the header and TLV area, hashes the image in chunks, verifies LMS/HSS, Ed25519 and ML-DSA-44/65 under a policy; typed errors |
 | `keelsign-embassy` (planned) | `no_std` | Adapter for embassy-boot |
 | `keelsign-ffi` (planned) | staticlib | C ABI and cbindgen header for MCUboot's `MCUBOOT_USE_CUSTOM_CRYPTO` hook (`libkeelsign`) |
@@ -69,6 +92,9 @@ A Raspberry Pi Debug Probe drives the Pico 2 W. See [docs/hardware.md](docs/hard
   precedence, the policy matrix and anti-rollback.
 - [docs/keys.md](docs/keys.md): `keelsign keygen` and `pubkey`, the key file formats
   and OIDs, passphrase encryption, key IDs and KEYHASH, and the exit codes.
+- [docs/signing.md](docs/signing.md) and [docs/verify.md](docs/verify.md):
+  `keelsign sign`, `inspect` and `verify`, the policies `verify` checks, public key
+  files and the final exit-code table.
 - [docs/benchmarks.md](docs/benchmarks.md): on-target known-answer tests, stack and flash
   per algorithm, and the toolchains every figure was measured with.
 - [docs/setup.md](docs/setup.md): toolchain, probes, flashing the example boards and
