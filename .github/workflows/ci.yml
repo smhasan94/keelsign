@@ -111,7 +111,7 @@ jobs:
         run: cargo publish --dry-run --locked -p keelsign-verify -p keelsign
 
   # keelsign-verify (no_std, no heap) for both Cortex-M targets, with the `ml-dsa` and
-  # `ed25519` features off and on.
+  # `ed25519` features off and on; since SHA-60 also keelsign-ffi's libkeelsign.a.
   verify-cross:
     name: keelsign-verify ${{ matrix.target }} (features "${{ matrix.features }}")
     runs-on: ubuntu-latest
@@ -152,6 +152,18 @@ jobs:
 
       - name: cargo build
         run: cargo build -p keelsign-verify --release --locked --target ${{ matrix.target }} --features "${{ matrix.features }}"
+
+      # SHA-60: libkeelsign.a (keelsign-ffi) for the same target and feature state, and
+      # its symbol rules: exports exactly keelsign_verify / keelsign_digest, no formatting
+      # code, no panic strings, only the allowlisted trap funnels (docs/ffi.md#nm-check).
+      - name: cargo clippy (keelsign-ffi)
+        run: cargo clippy -p keelsign-ffi --lib --locked --target ${{ matrix.target }} --features "${{ matrix.features }}" -- -D warnings
+
+      - name: cargo build (keelsign-ffi, profile ffi)
+        run: cargo build -p keelsign-ffi --profile ffi --locked --target ${{ matrix.target }} --features "${{ matrix.features }}"
+
+      - name: libkeelsign symbols (no fmt, no panic strings)
+        run: python3 scripts/staticlib_sizes.py --check --features "${{ matrix.features }}" target/${{ matrix.target }}/ffi/libkeelsign.a
 
   cross-build:
     name: cross-build ${{ matrix.project }} (${{ matrix.target }})

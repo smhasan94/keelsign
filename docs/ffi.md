@@ -20,7 +20,8 @@ cargo build -p keelsign-ffi --profile ffi --locked --features ed25519,ml-dsa    
 
 The library is `target[/<triple>]/ffi/libkeelsign.a`. The `ffi` profile is in the root
 `Cargo.toml`: `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`,
-no debug info.
+no debug info. Sizes per target and feature state are in
+[benchmarks.md](benchmarks.md#c-static-library-sha-60).
 
 Features:
 
@@ -204,3 +205,37 @@ sha2's aarch64 backend reads through a NEON intrinsic that Miri's Stacked Borrow
 rejects. The full policy matrix, the digest sweep and the key-rotation test are
 `cfg_attr(miri, ignore)` (too slow under Miri); `miri_subset_of_policy_matrix` covers LMS,
 Ed25519 and (with `ml-dsa`) ML-DSA-44 cells. CI step: `miri (keelsign-ffi)`.
+
+## `nm` check
+
+The shipped archives carry no formatting code and no panic strings (TP3):
+`repo_checks::ffi::staticlib_has_no_formatting_symbols_or_panic_strings` checks the host
+library of both builds with `nm`, and `scripts/staticlib_sizes.py --check` checks every
+thumb archive in the `verify-cross` CI job (step `libkeelsign symbols (no fmt, no panic
+strings)`). They require:
+
+- the exported functions are exactly `keelsign_verify` and `keelsign_digest`;
+- no `core::fmt` symbol (`Formatter`, `fmt::write`, `Display`, `Debug`, `LowerHex`, …);
+- no `.rodata` string but `keelsign-mcuboot-image-v1` (the ML-DSA context), so no file
+  names, `panicked` or `attempt to` messages;
+- every panic-related symbol is one of the libcore trap funnels below, each at most
+  32 bytes (they are 8: a branch into the panic handler, which traps without reading its
+  argument).
+
+The ticket asked for "no `panic_fmt`". That is not reachable on stable Rust: libcore's
+panic entry points, called from sha2 0.11 and the other dependencies' bounds checks, stay
+in the archive even though no valid input reaches them. The check therefore allows exactly
+these funnels:
+
+| Funnel | Builds |
+|---|---|
+| `core::panicking::panic_fmt` | all |
+| `core::slice::copy_from_slice::len_mismatch_fail` | all |
+| `core::panicking::panic_const::panic_const_div_by_zero` | default, `ed25519`, `ed25519,ml-dsa` |
+| `core::panicking::panic_bounds_check` | `ed25519`, `ml-dsa`, `ed25519,ml-dsa` |
+| `core::slice::index::slice_index_fail` | `ed25519`, `ml-dsa`, `ed25519,ml-dsa` |
+| `core::panicking::panic` | `ml-dsa`, `ed25519,ml-dsa` |
+| `core::option::expect_failed`, `core::result::unwrap_failed` | `ml-dsa`, `ed25519,ml-dsa` |
+
+Removing them needs a nightly `panic_immediate_abort` build, or audited
+dependencies (follow-up).

@@ -853,6 +853,52 @@ objdump -d --no-show-raw-insn target/mldsa/thumbv7em-none-eabihf/release/size_ve
 The frame is `sub.w sp, sp, #…` + `sub sp, #…` + 4 B per pushed register; the instance
 is the one with `cmp.w r1, #0x520` (ML-DSA-44) or `#0x7a0` (ML-DSA-65).
 
+## C static library (SHA-60)
+
+`libkeelsign.a` from `keelsign-ffi` ([ffi.md](ffi.md)), built with the root
+`[profile.ffi]` (`opt-level = "z"`, fat LTO, one codegen unit, `panic = "abort"`) for both
+Cortex-M targets in the four feature states. With fat LTO all Rust code, `core` and the
+dependencies included, is in the archive's one `keelsign-*` member; the figures are that
+member's `.text*` and `.rodata*` sections (it has no `.data` or `.bss`), read by
+`scripts/staticlib_sizes.py`. The `compiler_builtins` members are not counted: the
+bootloader's link pulls in only the few it calls, and usually has its own `memcpy` family.
+What a bootloader gains is at most these figures (its linker garbage-collects sections it
+does not reach), measured with [stable Rust 1.91.1](#measurement-toolchains).
+
+| Target | Features | `.text` | `.rodata` | Total |
+|---|---|---|---|---|
+| `thumbv7em-none-eabihf` | (none) | 16,242 B | 390 B | 16,632 B |
+| `thumbv7em-none-eabihf` | `ed25519` | 56,258 B | 1,522 B | 57,780 B |
+| `thumbv7em-none-eabihf` | `ml-dsa` | 31,628 B | 1,824 B | 33,452 B |
+| `thumbv7em-none-eabihf` | `ed25519,ml-dsa` | 71,638 B | 2,956 B | 74,594 B |
+| `thumbv8m.main-none-eabihf` | (none) | 16,240 B | 390 B | 16,630 B |
+| `thumbv8m.main-none-eabihf` | `ed25519` | 55,618 B | 1,522 B | 57,140 B |
+| `thumbv8m.main-none-eabihf` | `ml-dsa` | 31,622 B | 1,824 B | 33,446 B |
+| `thumbv8m.main-none-eabihf` | `ed25519,ml-dsa` | 70,994 B | 2,956 B | 73,950 B |
+
+The default (LMS/HSS only) library is about 16.6 KB. The same script's `--check` (run in
+the `verify-cross` CI job) also proves the archives export only `keelsign_verify` and
+`keelsign_digest`, carry no formatting code and no panic strings
+([ffi.md](ffi.md#nm-check)). Stack and cycles of the C entry points on the boards are a
+follow-up; the verifier figures above apply, plus the about 5 KB of buffers and key tables
+`keelsign_verify` keeps on the stack.
+
+Reproduce (from the repository root; one target directory per feature state, so the
+builds do not overwrite each other; repeat for `thumbv8m.main-none-eabihf`):
+
+```sh
+cargo build -p keelsign-ffi --profile ffi --locked --target thumbv7em-none-eabihf --target-dir target/ffi-sizes/none
+cargo build -p keelsign-ffi --profile ffi --locked --target thumbv7em-none-eabihf --target-dir target/ffi-sizes/ed25519 --features ed25519
+cargo build -p keelsign-ffi --profile ffi --locked --target thumbv7em-none-eabihf --target-dir target/ffi-sizes/ml-dsa --features ml-dsa
+cargo build -p keelsign-ffi --profile ffi --locked --target thumbv7em-none-eabihf --target-dir target/ffi-sizes/ed25519-ml-dsa --features ed25519,ml-dsa
+python3 scripts/staticlib_sizes.py --check target/ffi-sizes/none/thumbv7em-none-eabihf/ffi/libkeelsign.a
+python3 scripts/staticlib_sizes.py --check --features ed25519 target/ffi-sizes/ed25519/thumbv7em-none-eabihf/ffi/libkeelsign.a
+python3 scripts/staticlib_sizes.py --check --features ml-dsa target/ffi-sizes/ml-dsa/thumbv7em-none-eabihf/ffi/libkeelsign.a
+python3 scripts/staticlib_sizes.py --check --features ed25519,ml-dsa target/ffi-sizes/ed25519-ml-dsa/thumbv7em-none-eabihf/ffi/libkeelsign.a
+```
+
+Each command prints its table row.
+
 ## Recorded figures (SHA-275)
 
 Every flash and static-frame figure in this document was measured at one commit with the
@@ -860,7 +906,8 @@ two compilers below, and an ignored repo-check rebuilds them and compares exactl
 
 ### Measurement toolchains
 
-- Flash (`elf_sizes.py`) and the stable ML-DSA prologues: stable
+- Flash (`elf_sizes.py`), the C static library sizes (`staticlib_sizes.py`) and the
+  stable ML-DSA prologues: stable
   `rustc 1.91.1 (ed61e7d7e 2025-11-07)`, the `stable` channel of the bench projects'
   `rust-toolchain.toml` at the time of measurement.
 - Static frames (`-Z emit-stack-sizes`, `stack_frames.py`): nightly
@@ -880,7 +927,7 @@ moved on. The sizes do not depend on the checkout path or the target directory.
 cargo test -p repo-checks --locked --test benchmarks_doc -- --ignored recorded_
 ```
 
-This runs three ignored checks, which need both compilers above with the thumb targets,
+This runs four ignored checks, which need both compilers above with the thumb targets,
 flip-link, `python3` and LLVM objdump:
 
 - `recorded_flash_tables_match_a_fresh_build`: builds both bench projects (release and
@@ -893,6 +940,10 @@ flip-link, `python3` and LLVM objdump:
   `stack_frames.py`, on both boards.
 - `recorded_stable_mldsa_prologues_match_objdump`: disassembles the stable
   `--features ml-dsa` release `size_verify` and compares both `verify_param` prologues.
+- `recorded_ffi_library_sizes_match_a_fresh_build`: builds `libkeelsign.a` for both
+  targets in the four feature states with the commands in
+  [C static library](#c-static-library-sha-60) and compares every row of its table with
+  `staticlib_sizes.py`.
 
 Every figure must match exactly. A failing check lists each mismatch (section, row,
 column, recorded and measured value) or a toolchain that differs from the recorded one.

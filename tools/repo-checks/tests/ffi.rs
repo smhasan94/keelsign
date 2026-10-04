@@ -318,6 +318,23 @@ fn ci_verifies_the_header_and_runs_the_ffi_steps() {
     ] {
         assert!(host.contains(needle.as_str()), "ci job must run `{needle}`");
     }
+    // TP2 / TP3: every verify-cross matrix entry (both Cortex-M targets, four feature
+    // states; repo_checks::verify_crate checks the matrix) lints, builds and checks
+    // libkeelsign.a with the same target and features.
+    let cross = ci_job(&ci, "verify-cross");
+    for needle in [
+        "name: cargo clippy (keelsign-ffi)",
+        "cargo clippy -p keelsign-ffi --lib --locked --target ${{ matrix.target }} --features \"${{ matrix.features }}\" -- -D warnings",
+        "name: cargo build (keelsign-ffi, profile ffi)",
+        "cargo build -p keelsign-ffi --profile ffi --locked --target ${{ matrix.target }} --features \"${{ matrix.features }}\"",
+        "name: libkeelsign symbols (no fmt, no panic strings)",
+        "python3 scripts/staticlib_sizes.py --check --features \"${{ matrix.features }}\" target/${{ matrix.target }}/ffi/libkeelsign.a",
+    ] {
+        assert!(
+            cross.contains(needle),
+            "verify-cross job must run `{needle}`"
+        );
+    }
 }
 
 /// Scope: the manifest and the root `[profile.ffi]` are as specified: `staticlib` named
@@ -926,5 +943,176 @@ fn c_harness_tampered_wrong_key_and_null_inputs_return_documented_codes() {
             ],
         );
         assert_eq!(line, "status=1,1,1,31,3,4,5,6,7", "{} build", build.name());
+    }
+}
+
+// ---- nm check (TP3) and cross builds (TP2) ----------------------------------------------
+
+/// Fragments of mangled names of formatting code.
+const FORMATTING: [&str; 9] = [
+    "4core3fmt",
+    "core..fmt",
+    "Formatter",
+    "fmt5write",
+    "7Display",
+    "5Debug",
+    "8LowerHex",
+    "8UpperHex",
+    "9Arguments",
+];
+
+/// The allowlisted libcore trap funnels (scripts/staticlib_sizes.py `PANIC_ALLOWLIST`).
+const PANIC_FUNNELS: [&str; 8] = [
+    "9panicking9panic_fmt",
+    "panic_const_div_by_zero",
+    "len_mismatch_fail",
+    "panic_bounds_check",
+    "9panicking5panic17h",
+    "16slice_index_fail",
+    "6option13expect_failed",
+    "6result13unwrap_failed",
+];
+
+/// Panic message text that must not be in the library.
+const PANIC_STRINGS: [&str; 5] = [
+    "panicked",
+    "attempt to ",
+    "index out of bounds",
+    "called `Option::unwrap()`",
+    "called `Result::unwrap()`",
+];
+
+/// TP3 (host half; the thumb half is `staticlib_sizes.py --check` in the `verify-cross`
+/// job): the host `libkeelsign.a` of both builds exports exactly `keelsign_verify` and
+/// `keelsign_digest`, has no formatting symbol, no panic symbol but the allowlisted
+/// libcore trap funnels, and no panic message text. The literal "no `panic_fmt`" is not
+/// reachable on stable (docs/ffi.md#nm-check).
+#[test]
+fn staticlib_has_no_formatting_symbols_or_panic_strings() {
+    for build in Build::ALL {
+        let lib = build_library(build);
+        let members = run_ok(Command::new("ar").arg("t").arg(&lib));
+        let member = members
+            .lines()
+            .map(str::trim)
+            .filter(|m| m.starts_with("keelsign-"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            member.len(),
+            1,
+            "one keelsign-* member in {}: {member:?}",
+            lib.display()
+        );
+        let member = member[0];
+        let scratch = ScratchDir::new(&format!("ffi_nm_{}", build.name().replace(',', "_")));
+        run_ok(
+            Command::new("ar")
+                .current_dir(scratch.path())
+                .arg("x")
+                .arg(&lib)
+                .arg(member),
+        );
+        let object = scratch.path().join(member);
+        let symbols = run_ok(Command::new("nm").arg(&object));
+        let mut exports = Vec::new();
+        for line in symbols.lines() {
+            let mut fields = line.split_whitespace().rev();
+            let (Some(name), Some(kind)) = (fields.next(), fields.next()) else {
+                continue;
+            };
+            let name = name
+                .strip_prefix('_')
+                .filter(|_| cfg!(target_os = "macos"))
+                .unwrap_or(name);
+            if kind == "T" {
+                exports.push(name.to_owned());
+            }
+            for fragment in FORMATTING {
+                assert!(
+                    !name.contains(fragment),
+                    "{} build: formatting symbol {name}",
+                    build.name()
+                );
+            }
+            let panicky = ["panic", "_fail", "unwrap", "assert", "unreachable"]
+                .iter()
+                .any(|m| name.contains(m));
+            if panicky && kind != "U" {
+                assert!(
+                    PANIC_FUNNELS.iter().any(|f| name.contains(f)),
+                    "{} build: panic symbol {name} is not an allowlisted trap funnel",
+                    build.name()
+                );
+            }
+        }
+        exports.sort();
+        assert_eq!(
+            exports,
+            ["keelsign_digest", "keelsign_verify"],
+            "{} build: exported functions",
+            build.name()
+        );
+        let bytes = fs::read(&object).expect("read object");
+        let text = String::from_utf8_lossy(&bytes);
+        for needle in PANIC_STRINGS {
+            assert!(
+                !text.contains(needle),
+                "{} build: the library holds panic text `{needle}`",
+                build.name()
+            );
+        }
+    }
+    // The script's allowlist is this one.
+    let script = read("scripts/staticlib_sizes.py");
+    for funnel in PANIC_FUNNELS {
+        let funnel = funnel.trim_end_matches("17h");
+        assert!(
+            script.contains(&format!("\"{funnel}\"")),
+            "scripts/staticlib_sizes.py PANIC_ALLOWLIST must name {funnel}"
+        );
+    }
+    assert!(script.contains("PANIC_FUNNEL_MAX = 32"));
+}
+
+/// TP2 (the CI `verify-cross` job runs the same per matrix entry): keelsign-ffi lints and
+/// builds with the `ffi` profile for both Cortex-M targets in the four feature states,
+/// and every archive passes `staticlib_sizes.py --check`.
+#[test]
+#[ignore = "needs the thumbv7em-none-eabihf and thumbv8m.main-none-eabihf targets; CI verify-cross job covers this"]
+fn keelsign_ffi_cross_builds() {
+    let root = workspace_root();
+    let scratch = ScratchDir::new("ffi_cross");
+    for target in ["thumbv7em-none-eabihf", "thumbv8m.main-none-eabihf"] {
+        for features in ["", "ml-dsa", "ed25519", "ed25519,ml-dsa"] {
+            let target_dir = scratch.path().join(if features.is_empty() {
+                "none".to_owned()
+            } else {
+                features.replace(',', "-")
+            });
+            run_ok(
+                cargo_in(&root, &target_dir)
+                    .args(["clippy", "-p", "keelsign-ffi", "--lib", "--locked"])
+                    .args(["--target", target, "--features", features])
+                    .args(["--", "-D", "warnings"]),
+            );
+            run_ok(
+                cargo_in(&root, &target_dir)
+                    .args([
+                        "build",
+                        "-p",
+                        "keelsign-ffi",
+                        "--profile",
+                        "ffi",
+                        "--locked",
+                    ])
+                    .args(["--target", target, "--features", features]),
+            );
+            let archive = target_dir.join(target).join("ffi").join("libkeelsign.a");
+            run_ok(
+                repo_checks::python_script("staticlib_sizes.py")
+                    .args(["--check", "--features", features])
+                    .arg(&archive),
+            );
+        }
     }
 }

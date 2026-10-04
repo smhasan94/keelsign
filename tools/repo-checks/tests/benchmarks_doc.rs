@@ -10,7 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-const REQUIRED_HEADINGS: [&str; 16] = [
+const REQUIRED_HEADINGS: [&str; 17] = [
     "# ML-DSA verify benchmarks (SHA-34)",
     "## Method",
     "## Prerequisites",
@@ -26,6 +26,7 @@ const REQUIRED_HEADINGS: [&str; 16] = [
     "## pqm4 comparison",
     "## Decision",
     "## Follow-ups",
+    "## C static library (SHA-60)",
     "## Recorded figures (SHA-275)",
 ];
 
@@ -2555,4 +2556,194 @@ fn recorded_stable_mldsa_prologues_match_objdump() {
     }
     report.extend(compare_prologues(&rows, &measured));
     fail_on_drift("stable ML-DSA prologues", &report);
+}
+
+// ---- SHA-60: C static library sizes -----------------------------------------------------
+
+const FFI_SECTION: &str = "## C static library (SHA-60)";
+const FFI_HEADER: &str = "| Target | Features | `.text` | `.rodata` | Total |";
+const FFI_TARGETS: [&str; 2] = ["thumbv7em-none-eabihf", "thumbv8m.main-none-eabihf"];
+/// The feature states, as `--features` takes them and as the table labels them.
+const FFI_FEATURES: [(&str, &str); 4] = [
+    ("", "(none)"),
+    ("ed25519", "`ed25519`"),
+    ("ml-dsa", "`ml-dsa`"),
+    ("ed25519,ml-dsa", "`ed25519,ml-dsa`"),
+];
+
+/// The rows of the C static library table, as written.
+fn ffi_rows(doc: &str) -> Vec<String> {
+    let text = section(doc, FFI_SECTION);
+    let start = text
+        .find(&format!("{FFI_HEADER}\n|---|---|---|---|---|\n"))
+        .unwrap_or_else(|| panic!("{FFI_SECTION} has no `{FFI_HEADER}` table"));
+    text[start..]
+        .lines()
+        .skip(2)
+        .take_while(|l| l.starts_with('|'))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// AC3: docs/benchmarks.md records `libkeelsign.a` for both Cortex-M targets in the four
+/// feature states, each total the sum of its `.text` and `.rodata`, with the script and
+/// the reproduce commands named.
+#[test]
+fn ffi_size_table_is_well_formed() {
+    let doc = doc();
+    let rows = ffi_rows(&doc);
+    assert_eq!(
+        rows.len(),
+        8,
+        "{FFI_SECTION}: one row per target and feature state"
+    );
+    let mut i = 0;
+    for target in FFI_TARGETS {
+        let mut totals = Vec::new();
+        for (_, label) in FFI_FEATURES {
+            let cells: Vec<&str> = rows[i]
+                .trim_matches('|')
+                .split('|')
+                .map(str::trim)
+                .collect();
+            assert_eq!(cells.len(), 5, "row `{}`", rows[i]);
+            assert_eq!(cells[0], format!("`{target}`"), "row {i} target");
+            assert_eq!(cells[1], label, "row {i} features");
+            let text = parse_bytes(cells[2]).unwrap_or_else(|| panic!("row {i}: `{}`", cells[2]));
+            let rodata = parse_bytes(cells[3]).unwrap_or_else(|| panic!("row {i}: `{}`", cells[3]));
+            let total = parse_bytes(cells[4]).unwrap_or_else(|| panic!("row {i}: `{}`", cells[4]));
+            assert_eq!(
+                text + rodata,
+                total,
+                "row `{}`: total is .text + .rodata",
+                rows[i]
+            );
+            for cell in &cells[2..] {
+                let digits = cell.trim_end_matches(" B");
+                assert_eq!(
+                    digits,
+                    grouped(parse_bytes(cell).unwrap()),
+                    "row {i}: `{cell}` is written with thousands separators"
+                );
+            }
+            totals.push(total);
+            i += 1;
+        }
+        // Each feature adds code: none < each single feature < both.
+        assert!(
+            totals[0] < totals[1] && totals[0] < totals[2],
+            "{target}: {totals:?}"
+        );
+        assert!(
+            totals[1] < totals[3] && totals[2] < totals[3],
+            "{target}: {totals:?}"
+        );
+    }
+    let text = normalized(section(&doc, FFI_SECTION));
+    for needle in [
+        "scripts/staticlib_sizes.py",
+        "[profile.ffi]",
+        "stable Rust 1.91.1",
+        "keelsign-*",
+        "cargo build -p keelsign-ffi --profile ffi --locked --target thumbv7em-none-eabihf --target-dir target/ffi-sizes/none",
+        "python3 scripts/staticlib_sizes.py --check --features ed25519,ml-dsa target/ffi-sizes/ed25519-ml-dsa/thumbv7em-none-eabihf/ffi/libkeelsign.a",
+    ] {
+        assert!(
+            text.contains(needle),
+            "{FFI_SECTION} must mention `{needle}`"
+        );
+    }
+    assert!(
+        normalized(section(&doc, "### Checking the recorded figures"))
+            .contains("recorded_ffi_library_sizes_match_a_fresh_build"),
+        "### Checking the recorded figures must name the SHA-60 drift check"
+    );
+}
+
+/// AC3: every row of the C static library table is what the documented build and
+/// `staticlib_sizes.py` give today with the recorded stable compiler.
+#[test]
+#[ignore = "builds libkeelsign.a for both thumb targets in four feature states with the recorded stable rustc (python3); docs/benchmarks.md#checking-the-recorded-figures"]
+fn recorded_ffi_library_sizes_match_a_fresh_build() {
+    let doc = doc();
+    let rows = ffi_rows(&doc);
+    let (stable, _) = recorded_toolchains(&doc);
+    let toolchain = stable_toolchain();
+    let root = workspace_root();
+    let tool = |name: &str| {
+        let mut cmd = Command::new(rustup_proxy(name));
+        cmd.current_dir(&root);
+        for var in [
+            "RUSTUP_TOOLCHAIN",
+            "CARGO_TARGET_DIR",
+            "CARGO_BUILD_TARGET_DIR",
+            "RUSTFLAGS",
+            "CARGO_ENCODED_RUSTFLAGS",
+            "CARGO_BUILD_RUSTFLAGS",
+        ] {
+            cmd.env_remove(var);
+        }
+        for (var, _) in std::env::vars_os() {
+            if var.to_string_lossy().starts_with("CARGO_PROFILE_") {
+                cmd.env_remove(var);
+            }
+        }
+        if let Some(t) = &toolchain {
+            cmd.env("RUSTUP_TOOLCHAIN", t);
+        }
+        cmd
+    };
+    let active = run_ok(tool("rustc").arg("--version"));
+    assert!(
+        active.trim() == stable,
+        "the active compiler is `{}` but docs/benchmarks.md recorded `{stable}`; select it \
+         with KEELSIGN_BENCH_STABLE (docs/benchmarks.md#checking-the-recorded-figures)",
+        active.trim()
+    );
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("ffi-sizes");
+    let mut report = Vec::new();
+    let mut i = 0;
+    for target in FFI_TARGETS {
+        for (features, _) in FFI_FEATURES {
+            let dir_name = if features.is_empty() {
+                "none".to_owned()
+            } else {
+                features.replace(',', "-")
+            };
+            let target_dir = base.join(&dir_name);
+            let mut build = tool("cargo");
+            build
+                .args([
+                    "build",
+                    "-p",
+                    "keelsign-ffi",
+                    "--profile",
+                    "ffi",
+                    "--locked",
+                ])
+                .args(["--target", target])
+                .arg("--target-dir")
+                .arg(&target_dir);
+            if !features.is_empty() {
+                build.args(["--features", features]);
+            }
+            run_ok(&mut build);
+            let archive = target_dir.join(target).join("ffi").join("libkeelsign.a");
+            let mut script = python_script("staticlib_sizes.py");
+            script.arg("--check");
+            if !features.is_empty() {
+                script.args(["--features", features]);
+            }
+            let measured = run_ok(script.arg(&archive));
+            let measured = measured.trim();
+            if measured != rows[i] {
+                report.push(format!(
+                    "{FFI_SECTION}: {target} features `{features}`: recorded `{}`, measured `{measured}`",
+                    rows[i]
+                ));
+            }
+            i += 1;
+        }
+    }
+    fail_on_drift("C static library sizes", &report);
 }
