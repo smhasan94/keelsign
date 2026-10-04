@@ -2,6 +2,7 @@
 members = [
     "keelsign",
     "keelsign-verify",
+    "keelsign-embassy",
     "tools/repo-checks",
     "benches/mldsa-kat",
     "benches/lms-kat",

@@ -10,8 +10,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 /// Crates published to crates.io, in publish order; keelsign depends on keelsign-verify.
 pub const PUBLISHABLE_CRATES: [&str; 2] = ["keelsign-verify", "keelsign"];
 
-/// Published crates that carry their own copies of the root licence files.
-pub const LICENSED_CRATES: [&str; 2] = ["keelsign", "keelsign-verify"];
+/// Crates that carry their own copies of the root licence files: the published ones and
+/// keelsign-embassy (SHA-55; publishable, not yet published).
+pub const LICENSED_CRATES: [&str; 3] = ["keelsign", "keelsign-verify", "keelsign-embassy"];
 
 /// A standalone embedded example project under `examples/`.
 pub struct Example {
