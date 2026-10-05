@@ -2,7 +2,7 @@
 //! cross-builds for both Cortex-M targets with the `ml-dsa` and (SHA-46) `ed25519`
 //! features off and on.
 
-use repo_checks::{EXAMPLES, ScratchDir, cargo_in, run_ok, workspace_root};
+use repo_checks::{EXAMPLES, ScratchDir, cargo_in, ci_job, run_ok, workspace_root};
 use std::fs;
 use std::path::Path;
 
@@ -12,23 +12,6 @@ const FEATURE_STATES: [&str; 4] = ["", "ml-dsa", "ed25519", "ed25519,ml-dsa"];
 fn read(rel: &str) -> String {
     let path = workspace_root().join(rel);
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
-}
-
-/// The text of the CI job `name` (two-space indented key), up to the next job.
-fn ci_job(ci: &str, name: &str) -> String {
-    let start = ci
-        .find(&format!("\n  {name}:"))
-        .unwrap_or_else(|| panic!("ci.yml must have a `{name}` job"));
-    ci[start + 1..]
-        .lines()
-        .enumerate()
-        .take_while(|(i, line)| {
-            let next_job = line.starts_with("  ") && !line.starts_with("   ");
-            let top_level = !line.is_empty() && !line.starts_with(' ');
-            *i == 0 || !(next_job || top_level)
-        })
-        .map(|(_, line)| format!("{line}\n"))
-        .collect()
 }
 
 /// The Rust sources of keelsign-verify, subdirectories included, as (path relative to

@@ -64,18 +64,21 @@ python3 scripts/suite_results.py docs/bench-logs/nrf52840-suite-run1.txt
    `docs/bench-logs/<board>-suite-mldsa-run{1,2,3}.txt` (`<board>` is `nrf52840` or
    `rp2350`; change `run1` in the `tee` path for each run). Reset nothing between runs:
    `probe-rs run` flashes and resets the board itself.
-2. Compare the three runs of each board and feature state:
+2. Compare the three runs of each board and feature state against the suite's test
+   names (`--expect` is required, so a test missing from all three runs still fails):
 
    ```sh
-   python3 scripts/suite_results.py --check-identical docs/bench-logs/nrf52840-suite-run1.txt docs/bench-logs/nrf52840-suite-run2.txt docs/bench-logs/nrf52840-suite-run3.txt
-   python3 scripts/suite_results.py --check-identical docs/bench-logs/nrf52840-suite-mldsa-run1.txt docs/bench-logs/nrf52840-suite-mldsa-run2.txt docs/bench-logs/nrf52840-suite-mldsa-run3.txt
-   python3 scripts/suite_results.py --check-identical docs/bench-logs/rp2350-suite-run1.txt docs/bench-logs/rp2350-suite-run2.txt docs/bench-logs/rp2350-suite-run3.txt
-   python3 scripts/suite_results.py --check-identical docs/bench-logs/rp2350-suite-mldsa-run1.txt docs/bench-logs/rp2350-suite-mldsa-run2.txt docs/bench-logs/rp2350-suite-mldsa-run3.txt
+   SUITE=dwt_cycle_counter_present,mldsa44_kat,mldsa65_kat,mldsa44_bench,mldsa65_bench,lms_kat,lms_bench,lms_rotation_key_b_verifies_against_a_b_and_fails_against_a,image_digest_200k_from_flash,image_digest_bench,policy_matrix_from_flash
+   SUITE_MLDSA="$SUITE,mldsa_images_from_flash"
+   python3 scripts/suite_results.py --check-identical --expect "$SUITE" docs/bench-logs/nrf52840-suite-run1.txt docs/bench-logs/nrf52840-suite-run2.txt docs/bench-logs/nrf52840-suite-run3.txt
+   python3 scripts/suite_results.py --check-identical --expect "$SUITE_MLDSA" docs/bench-logs/nrf52840-suite-mldsa-run1.txt docs/bench-logs/nrf52840-suite-mldsa-run2.txt docs/bench-logs/nrf52840-suite-mldsa-run3.txt
+   python3 scripts/suite_results.py --check-identical --expect "$SUITE" docs/bench-logs/rp2350-suite-run1.txt docs/bench-logs/rp2350-suite-run2.txt docs/bench-logs/rp2350-suite-run3.txt
+   python3 scripts/suite_results.py --check-identical --expect "$SUITE_MLDSA" docs/bench-logs/rp2350-suite-mldsa-run1.txt docs/bench-logs/rp2350-suite-mldsa-run2.txt docs/bench-logs/rp2350-suite-mldsa-run3.txt
    ```
 
    Each prints `identical: N tests ok in all 3 logs` (11, or 12 with `ml-dsa`). It fails
-   if a test is missing from a run, a test's verdict differs between runs, or any verdict
-   is not `ok`.
+   if an expected test is missing from any run, a test's verdict differs between runs, or
+   any verdict is not `ok`.
 3. Run the repo-check, which does the same for all twelve logs with the full test list
    of each feature state:
 
@@ -103,8 +106,12 @@ The suite logs carry the measured figures that are still `pending (hardware)` in
   `MLDSA board=… image=…` lines of `<board>-suite-mldsa-run1.txt` into
   [ML-DSA verify results](benchmarks.md#ml-dsa-verify-results).
 - Copy the same figures into the matching cells of
-  [RAM/flash budget (SHA-47)](benchmarks.md#ramflash-budget-sha-47). The hybrid row stays
-  `pending (SHA-69)`: no test in the suite measures a hybrid verify.
+  [RAM/flash budget (SHA-47)](benchmarks.md#ramflash-budget-sha-47).
+
+Decision (SHA-47, R6): the hybrid row of the budget stays `pending (SHA-69)`, because no
+test in the suite measures a hybrid verify; SHA-69 adds that measurement. SHA-47's AC3 is
+ticked on the recorded flash and static-frame figures plus the measured LMS/HSS, ML-DSA
+and digest cells that P2 fills in.
 
 The three-run consistency check of the benchmarks
 ([benchmarks.md, Three-run consistency](benchmarks.md#three-run-consistency)) is separate:

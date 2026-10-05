@@ -14,10 +14,11 @@ Usage:
   python3 scripts/suite_results.py [--expect NAMES] LOG
       Prints one `name verdict` line per test of the log. Exits 1 if a test's verdict is
       not `ok`, or a name in --expect is missing.
-  python3 scripts/suite_results.py --check-identical [--expect NAMES] LOG1 LOG2 [LOG3 ...]
-      Checks that every log has the same tests (and, with --expect, every expected test),
-      that every test has the same verdict in every log and that every verdict is `ok`.
-      Exits 1 if not.
+  python3 scripts/suite_results.py --check-identical --expect NAMES LOG1 LOG2 [LOG3 ...]
+      Checks that every log has every expected test (and no log has a test the others
+      lack), that every test has the same verdict in every log and that every verdict is
+      `ok`. Exits 1 if not. --expect is required: without it, a test missing from every
+      run would go unnoticed.
 
 NAMES is a comma-separated list of test names. Exits 1 on a log with no test lines or a
 test listed twice in one log, and 2 on a usage error. The format is the one embedded-test
@@ -93,6 +94,8 @@ def main(argv=None):
     expect = [name for name in args.expect.split(",") if name]
     if args.check_identical and len(args.logs) < 2:
         parser.error("--check-identical needs at least two logs")
+    if args.check_identical and not expect:
+        parser.error("--check-identical needs --expect with the suite's test names")
     if not args.check_identical and len(args.logs) != 1:
         parser.error("give one log, or --check-identical with two or more")
     try:

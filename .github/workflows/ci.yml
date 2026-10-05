@@ -24,9 +24,9 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all --check
 
-      # SHA-47: licences, advisories (RustSec), bans and sources of the root workspace
-      # lockfile against deny.toml. A new RustSec advisory fails this step until it is
-      # fixed or ignored with a reason in deny.toml.
+      # SHA-47: licences, advisories (RustSec), bans and sources of the root workspace with
+      # all features of every member enabled (deny.toml `[graph] all-features`). A new
+      # RustSec advisory fails this step until it is fixed or ignored with a reason.
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny@0.20.2

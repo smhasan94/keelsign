@@ -3,7 +3,7 @@
 //! keelsign CLI's JSON dependencies (SHA-51) and test dependencies (SHA-53), and the scoped
 //! `unsafe` exception for the measurement-only `benches/stack-paint` crate.
 
-use repo_checks::{SHIPPED_CRATES, workspace_root};
+use repo_checks::{SHIPPED_CRATES, ci_job, workspace_root};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -824,19 +824,26 @@ fn embassy_dependencies_pinned_exact() {
 const CARGO_DENY_PIN: &str = "0.20.2";
 
 /// The SPDX licence IDs deny.toml allows (SHA-47): keelsign's own MIT and Apache-2.0
-/// and the licences in the root workspace's dependency graph.
-const DENY_LICENSES: [&str; 6] = [
-    "Apache-2.0",
-    "BSD-3-Clause",
-    "MIT",
-    "MIT-0",
-    "Unicode-3.0",
-    "Zlib",
-];
+/// and the licences in the root workspace's all-features dependency graph.
+const DENY_LICENSES: [&str; 5] = ["Apache-2.0", "BSD-3-Clause", "MIT", "Unicode-3.0", "Zlib"];
 
-/// The only advisory deny.toml ignores (SHA-47): `bare-metal` (unmaintained), reached
-/// only through `cortex-m` 0.7.9 (follow-up SHA-323).
-const DENY_IGNORED_ADVISORY: &str = "RUSTSEC-2026-0110";
+/// The advisories deny.toml ignores (SHA-47), all unmaintained-only upstream crates with
+/// no safe upgrade, with what each reason must name: the crate, the path that pulls it in
+/// and the follow-up ticket.
+const DENY_IGNORED_ADVISORIES: [(&str, [&str; 3]); 3] = [
+    (
+        "RUSTSEC-2026-0110",
+        ["bare-metal", "cortex-m 0.7.9", "SHA-323"],
+    ),
+    (
+        "RUSTSEC-2024-0436",
+        ["paste", "embassy-rp 0.10.0 -> pio", "SHA-324"],
+    ),
+    (
+        "RUSTSEC-2026-0173",
+        ["proc-macro-error2", "embassy-rp 0.10.0 -> pio", "SHA-324"],
+    ),
+];
 
 /// The body of the TOML table `[header]`: everything up to the next table header.
 fn toml_table<'a>(toml: &'a str, header: &str) -> &'a str {
@@ -849,26 +856,10 @@ fn toml_table<'a>(toml: &'a str, header: &str) -> &'a str {
     body.find("\n[").map_or(body, |end| &body[..end])
 }
 
-/// The text of the CI job `name` (two-space indented key), up to the next job.
-fn ci_job(ci: &str, name: &str) -> String {
-    let start = ci
-        .find(&format!("\n  {name}:"))
-        .unwrap_or_else(|| panic!("ci.yml must have a `{name}` job"));
-    ci[start + 1..]
-        .lines()
-        .enumerate()
-        .take_while(|(i, line)| {
-            let next_job = line.starts_with("  ") && !line.starts_with("   ");
-            let top_level = !line.is_empty() && !line.starts_with(' ');
-            *i == 0 || !(next_job || top_level)
-        })
-        .map(|(_, line)| format!("{line}\n"))
-        .collect()
-}
-
-/// SHA-47 TP2: deny.toml allows exactly the licences in use, denies yanked crates,
-/// wildcard requirements and every source but crates.io, and ignores one advisory with a
-/// reason that names its follow-up ticket; the `ci` job installs the pinned cargo-deny and
+/// SHA-47 TP2: deny.toml audits all features, allows exactly the licences in use, denies
+/// yanked crates, wildcard requirements and every source but crates.io, and ignores only
+/// the three documented unmaintained advisories, each with a reason that names its path
+/// and follow-up ticket; the `ci` job installs the pinned cargo-deny and
 /// runs `cargo deny --locked check`, and docs/setup.md pins the same version.
 #[test]
 fn deny_toml_is_minimal_and_ci_runs_cargo_deny() {
@@ -880,8 +871,19 @@ fn deny_toml_is_minimal_and_ci_runs_cargo_deny() {
         .collect();
     assert_eq!(
         tables,
-        ["[licenses]", "[advisories]", "[bans]", "[sources]"],
-        "deny.toml has exactly the four check tables, in order"
+        [
+            "[graph]",
+            "[licenses]",
+            "[advisories]",
+            "[bans]",
+            "[sources]"
+        ],
+        "deny.toml has the graph table and the four check tables, in order"
+    );
+    // B1: optional dependencies (keelsign-embassy's board modules) are audited too.
+    assert!(
+        toml_table(&deny, "[graph]").contains("all-features = true"),
+        "[graph] must set `all-features = true`"
     );
     assert!(
         !deny.lines().any(|l| l.trim_start().starts_with("version")),
@@ -918,18 +920,25 @@ fn deny_toml_is_minimal_and_ci_runs_cargo_deny() {
         .collect();
     assert_eq!(
         ignores.len(),
-        1,
-        "exactly one ignored advisory: {ignores:?}"
+        DENY_IGNORED_ADVISORIES.len(),
+        "exactly the documented ignored advisories: {ignores:?}"
     );
-    let ignore = ignores[0];
-    assert!(
-        ignore.contains(&format!("id = \"{DENY_IGNORED_ADVISORY}\"")),
-        "the ignored advisory is {DENY_IGNORED_ADVISORY}: `{ignore}`"
-    );
-    for needle in ["reason = \"", "bare-metal", "cortex-m 0.7.9", "SHA-323"] {
+    for (ignore, (id, needles)) in ignores.iter().zip(DENY_IGNORED_ADVISORIES) {
         assert!(
-            ignore.contains(needle),
-            "the {DENY_IGNORED_ADVISORY} ignore's reason must mention `{needle}`: `{ignore}`"
+            ignore.contains(&format!("{{ id = \"{id}\", reason = \"")),
+            "the ignored advisories are, in order, {:?}, each with a reason: `{ignore}`",
+            DENY_IGNORED_ADVISORIES.map(|(id, _)| id)
+        );
+        for needle in needles {
+            assert!(
+                ignore.contains(needle),
+                "the {id} ignore's reason must mention `{needle}`: `{ignore}`"
+            );
+        }
+        let reason = ignore.split("reason = \"").nth(1).unwrap_or_default();
+        assert!(
+            reason.contains("unmaintained") && reason.contains("SHA-"),
+            "the {id} reason must say it is unmaintained and cite a SHA ticket: `{ignore}`"
         );
     }
     let bans = toml_table(&deny, "[bans]");

@@ -83,7 +83,8 @@ rustup component add --toolchain nightly-2026-09-29 miri rust-src
 
 ### Dependency audit (cargo-deny, SHA-47)
 
-CI checks the root workspace's `Cargo.lock` against `deny.toml` (licences, RustSec
+CI checks the root workspace, with all features of every member enabled (so
+`keelsign-embassy`'s optional board modules too), against `deny.toml` (licences, RustSec
 advisories, bans, sources) with a pinned cargo-deny:
 
 ```sh
@@ -91,7 +92,9 @@ cargo install cargo-deny --version 0.20.2 --locked
 cargo deny --locked check
 ```
 
-The one ignored advisory and its reason are in `deny.toml`. The standalone projects
+The ignored advisories (three unmaintained-only upstream crates with no safe upgrade:
+`bare-metal` through `cortex-m` 0.7, `paste` and `proc-macro-error2` through
+`embassy-rp`'s `pio`) and their reasons are in `deny.toml`. The standalone projects
 under `benches/` and `examples/` and `fuzz/` have their own lockfiles and are not
 checked yet (follow-up SHA-324).
 
@@ -274,10 +277,10 @@ three-identical-runs procedure are in [on-target-tests.md](on-target-tests.md) (
   and the publish dry runs. Since SHA-60 also the `keelsign.h` drift check (cbindgen
   0.29.4), the C harness against `libkeelsign.a` under ASan + UBSan and Miri on
   `keelsign-ffi` (nightly-2026-09-29). Since SHA-47 also `cargo deny --locked check`
-  (cargo-deny 0.20.2, `deny.toml`), which fails on any new RustSec advisory until it is
-  fixed or ignored with a reason, and `cargo doc --no-deps -p keelsign-verify` with
-  `RUSTDOCFLAGS=-D warnings` in all four feature states (none, `ml-dsa`, `ed25519`,
-  `ed25519,ml-dsa`).
+  (cargo-deny 0.20.2, `deny.toml`, all features), which fails on any new RustSec
+  advisory until it is fixed or ignored with a reason, and
+  `cargo doc --no-deps -p keelsign-verify` with `RUSTDOCFLAGS=-D warnings` in all four
+  feature states (none, `ml-dsa`, `ed25519`, `ed25519,ml-dsa`).
 - `verify-cross`: `keelsign-verify`, (SHA-55) `keelsign-embassy` with its board module,
   and (SHA-60) `keelsign-ffi`'s `libkeelsign.a` with the `staticlib_sizes.py --check`
   symbol rules, for both targets with every feature state.

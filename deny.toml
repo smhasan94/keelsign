@@ -1,7 +1,11 @@
-# cargo-deny 0.20.2 configuration for the root workspace (Cargo.lock) (SHA-47).
-# CI runs `cargo deny --locked check` in the `ci` job; docs/setup.md pins the tool.
-# The standalone projects under benches/ and examples/ and fuzz/ have their own
-# lockfiles and are not covered here (follow-up SHA-324).
+# cargo-deny 0.20.2 configuration for the root workspace (Cargo.lock) with all features
+# of every member enabled, so optional dependencies such as keelsign-embassy's board
+# modules are audited too (SHA-47). CI runs `cargo deny --locked check` in the `ci` job;
+# docs/setup.md pins the tool. The standalone projects under benches/ and examples/ and
+# fuzz/ have their own lockfiles and are not covered here (follow-up SHA-324).
+
+[graph]
+all-features = true
 
 [licenses]
 # Every licence in the dependency graph, by SPDX ID. keelsign itself is
@@ -10,15 +14,18 @@ allow = [
     "Apache-2.0",
     "BSD-3-Clause",
     "MIT",
-    "MIT-0",
     "Unicode-3.0",
     "Zlib",
 ]
 
 [advisories]
 yanked = "deny"
+# Unmaintained-only advisories (no known vulnerability) in upstream dependencies with no
+# safe upgrade, each with the path that pulls it in and its follow-up ticket.
 ignore = [
     { id = "RUSTSEC-2026-0110", reason = "bare-metal 0.2.5 is unmaintained (no known vulnerability). It comes only through cortex-m 0.7.9, which embassy-nrf and embassy-rp (keelsign-embassy's optional board modules), mldsa-kat and the measurement-only stack-paint crate use; cortex-m 0.7 has no maintained replacement in that graph yet. Moving off cortex-m 0.7 / bare-metal is follow-up SHA-323." },
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained (no known vulnerability). It comes only through embassy-rp 0.10.0 -> pio -> pio-core (also via pio-parser and pio-proc), keelsign-embassy's optional `rp2350` board module; embassy-rp has no release without it. Tracked with the standalone-project audit in follow-up SHA-324." },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 is unmaintained (no known vulnerability). It comes only through embassy-rp 0.10.0 -> pio -> pio-proc, keelsign-embassy's optional `rp2350` board module; embassy-rp has no release without it. Tracked with the standalone-project audit in follow-up SHA-324." },
 ]
 
 [bans]

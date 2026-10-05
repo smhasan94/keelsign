@@ -129,8 +129,9 @@ fn suite_doc_lists_every_test_and_command() {
             let logs: Vec<String> = (1..=3)
                 .map(|run| format!("docs/bench-logs/{}", log_name(board, mldsa, run)))
                 .collect();
+            let names = if mldsa { "$SUITE_MLDSA" } else { "$SUITE" };
             let command = format!(
-                "python3 scripts/suite_results.py --check-identical {}\n",
+                "python3 scripts/suite_results.py --check-identical --expect \"{names}\" {}\n",
                 logs.join(" ")
             );
             assert!(
@@ -140,6 +141,24 @@ fn suite_doc_lists_every_test_and_command() {
             );
         }
     }
+
+    // The P1 test-name lists are the suite's tests in each feature state.
+    let suite = format!("SUITE={}\n", suite_tests(false).join(","));
+    assert!(
+        doc.contains(&suite),
+        "{SUITE_DOC} must define `{}`",
+        suite.trim_end()
+    );
+    let extra: Vec<&str> = suite_tests(true)
+        .into_iter()
+        .filter(|t| !suite_tests(false).contains(t))
+        .collect();
+    let suite_mldsa = format!("SUITE_MLDSA=\"$SUITE,{}\"\n", extra.join(","));
+    assert!(
+        doc.contains(&suite_mldsa),
+        "{SUITE_DOC} must define `{}`",
+        suite_mldsa.trim_end()
+    );
 
     for (binary, tests, mldsa) in binaries() {
         let row = doc
@@ -252,7 +271,7 @@ fn suite_results_checks_synthetic_logs() {
         &[good[0].clone(), good[1].clone(), missing.clone()],
         &format!("test {} is missing", tests[0]),
     );
-    // The same loss in every run is still caught by --expect.
+    // A test missing from all three runs is caught by the required --expect.
     check(
         &[missing.clone(), missing.clone(), missing],
         &format!("test {} is missing", tests[0]),
@@ -286,10 +305,18 @@ fn suite_results_checks_synthetic_logs() {
     let empty = write("empty.txt", "Error: no probe found\n");
     check(&[good[0].clone(), empty], "no test result lines");
 
-    // --check-identical needs two or more logs.
+    // --check-identical needs --expect: a test missing from every run must not pass.
     let (ok, _, stderr) = run_capture(
         python_script("suite_results.py")
             .arg("--check-identical")
+            .args(&good),
+    );
+    assert!(!ok && stderr.contains("needs --expect"), "{stderr}");
+
+    // --check-identical needs two or more logs.
+    let (ok, _, stderr) = run_capture(
+        python_script("suite_results.py")
+            .args(["--check-identical", &expect])
             .arg(&good[0]),
     );
     assert!(!ok && stderr.contains("at least two logs"), "{stderr}");
