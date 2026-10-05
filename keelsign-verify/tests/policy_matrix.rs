@@ -204,7 +204,7 @@ fn expected(entry: &str, policy: Policy) -> String {
 fn every_manifest_image_matches_its_policy_cells() {
     let manifest = manifest();
     let names = output_names(&manifest);
-    assert_eq!(names.len(), 53, "{names:?}");
+    assert_eq!(names.len(), 58, "{names:?}");
     // TP1's six rows are in the matrix.
     for name in [
         "mcuboot-ed25519.bin",
@@ -233,7 +233,75 @@ fn every_manifest_image_matches_its_policy_cells() {
             cells += 1;
         }
     }
-    assert_eq!(cells, 53 * 3);
+    assert_eq!(cells, 58 * 3);
+}
+
+/// SHA-69 AC2 / TP2: the table-driven matrix has LMS-only, hybrid Ed25519 + LMS (L=1),
+/// hybrid Ed25519 + HSS (L=2) and hybrid Ed25519 + ML-DSA rows, the HSS-2 hybrid rows
+/// with either half tampered or missing, and each row gives its recorded cells in this
+/// build.
+#[test]
+fn matrix_has_lms_only_hybrid_lms_hybrid_hss2_and_hybrid_mldsa_rows() {
+    let manifest = manifest();
+    let names = output_names(&manifest);
+    let ok = ("Ok", "Ok", "Ok");
+    let rows: [(&str, (&str, &str, &str)); 8] = [
+        (
+            "keelsign-lms-m32-h5.bin",
+            ("Ed25519(Missing)", "Ok", "Ed25519(Missing)"),
+        ),
+        ("keelsign-hybrid-ed25519-lms.bin", ok),
+        ("keelsign-hybrid-ed25519-hss2.bin", ok),
+        ("keelsign-hybrid-ed25519-mldsa44.bin", ok),
+        (
+            "keelsign-hybrid-hss2-bad-ed25519.bin",
+            (
+                "Ed25519(SignatureInvalid)",
+                "Ok",
+                "Ed25519(SignatureInvalid)",
+            ),
+        ),
+        (
+            "keelsign-hybrid-hss2-bad-pq.bin",
+            ("Ok", "SignatureInvalid", "SignatureInvalid"),
+        ),
+        (
+            "keelsign-hybrid-hss2-bad-top-level.bin",
+            ("Ok", "SignatureInvalid", "SignatureInvalid"),
+        ),
+        (
+            "keelsign-hybrid-hss2-missing-pq.bin",
+            ("Ok", "MissingPqSignature", "MissingPqSignature"),
+        ),
+    ];
+    for (name, (classical_only, pq_only, hybrid)) in rows {
+        assert!(names.iter().any(|n| n == name), "{name} missing");
+        let entry = entry(&manifest, name);
+        assert_eq!(
+            [
+                cell(&entry, Policy::ClassicalOnly),
+                cell(&entry, Policy::PqOnly),
+                cell(&entry, Policy::Hybrid),
+            ],
+            [classical_only, pq_only, hybrid],
+            "{name}"
+        );
+        let data = read(name);
+        let keys = keys_for(&entry);
+        for &policy in Policy::ALL {
+            let got = verdict(&run(&data, &keys, policy));
+            assert_eq!(got, expected(&entry, policy), "{name} under {policy:?}");
+        }
+    }
+    // The HSS-2 hybrid image is a two-level key with an Ed25519 pair.
+    let hss2 = entry(&manifest, "keelsign-hybrid-ed25519-hss2.bin");
+    assert_eq!(field(&hss2, "algorithm").unwrap(), "LmsHss");
+    assert_eq!(field(&hss2, "ed25519").unwrap(), "true");
+    assert!(
+        field(&hss2, "public_key_hex")
+            .unwrap()
+            .starts_with("00000002")
+    );
 }
 
 #[test]

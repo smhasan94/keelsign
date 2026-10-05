@@ -462,6 +462,14 @@ The ML-DSA verifier (SHA-44) adds two signed images and seventeen mutations:
 | `keelsign-mldsa{44,65}-*.bin` (15) | mutations: body and protected TLV tampered (with and without the SHA256 TLV recomputed), signature `c̃` flipped, hint count over ω, signature truncated, key ID flipped, signature taken from the `-protected-tlvs` image |
 | `keelsign-hybrid-mldsa44-missing-pq.bin`, `keelsign-hybrid-mldsa44-stripped-pq.bin` | `keelsign-hybrid-ed25519-mldsa44.bin` without its `0x4BA1` TLV, and without `0x4BA0` and `0x4BA1` |
 
+The hybrid Ed25519 + LMS work on the device (SHA-69) adds one signed image and four
+mutations:
+
+| File | Notes |
+|---|---|
+| `keelsign-hybrid-ed25519-hss2.bin` | imgtool Ed25519 plus an HSS L=2 signature (2,644 bytes), both levels `LMS_SHA256_M32_H5` / `LMOTS_SHA256_N32_W8`, under its own key |
+| `keelsign-hybrid-hss2-bad-ed25519.bin`, `keelsign-hybrid-hss2-bad-pq.bin`, `keelsign-hybrid-hss2-bad-top-level.bin`, `keelsign-hybrid-hss2-missing-pq.bin` | mutations of it: `ED25519` byte 0 flipped, the last `0x4BA3` byte (bottom-level path) flipped, `0x4BA3` byte 12 (`C[0]` of the top level's one-time signature) flipped, `0x4BA3` removed |
+
 Every image's `MANIFEST.json` entry carries a `policy` object, its expected verdict under
 `classical_only`, `pq_only` and `hybrid`; docs/policy.md's matrix table,
 `keelsign-verify/tests/policy_matrix.rs` and `policy-matrix.bin` are checked against it.

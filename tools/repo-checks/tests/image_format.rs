@@ -585,7 +585,7 @@ fn image_fixtures_match_manifest() {
             entry
         } else if name == POLICY_MATRIX_BIN {
             // SHA-46 / SHA-44: the KSPM v2 index (the cells with the `ml-dsa` feature on
-            // and off), one case per `in_policy_matrix_bin` output: 52.
+            // and off), one case per `in_policy_matrix_bin` output: 57.
             let entry = json_object(json_object(&manifest, "policy_matrix"), name);
             assert_eq!(bytes.len().to_string(), json_field(entry, "bytes"));
             assert_eq!(&bytes[..4], b"KSPM", "{name}: magic");
@@ -596,7 +596,7 @@ fn image_fixtures_match_manifest() {
             );
             assert_eq!(json_field(entry, "version"), "2", "{name}: version");
             let count = u16::from_le_bytes([bytes[6], bytes[7]]);
-            assert_eq!(count, 52, "{name}: cases");
+            assert_eq!(count, 57, "{name}: cases");
             assert_eq!(count.to_string(), json_field(entry, "count"));
             assert_eq!(
                 usize::from(count),
@@ -686,8 +686,8 @@ fn image_fixtures_match_manifest() {
     }
     assert_eq!(
         outputs.matches("\"derived_from\": ").count(),
-        18 + 17,
-        "the eighteen SHA-46 and seventeen SHA-44 mutations"
+        18 + 17 + 4,
+        "the eighteen SHA-46, seventeen SHA-44 and four SHA-69 mutations"
     );
     // SHA-44: the ML-DSA test keys (fixed public seeds, recorded in the manifest), and
     // every ML-DSA output carries its set's test key.

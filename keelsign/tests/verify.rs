@@ -188,7 +188,7 @@ fn verify_agrees_with_keelsign_verify_on_every_manifest_fixture_and_policy() {
     let dir = scratch("verify", "agreement");
     let ed = ed25519_test_public_key();
     let outputs = manifest_outputs();
-    assert_eq!(outputs.len(), 53, "MANIFEST.json outputs");
+    assert_eq!(outputs.len(), 58, "MANIFEST.json outputs");
     let mut checked = 0;
     for (name, entry) in &outputs {
         let image = fixture_path(name);
@@ -263,7 +263,7 @@ fn verify_agrees_with_keelsign_verify_on_every_manifest_fixture_and_policy() {
         }
         checked += 1;
     }
-    assert_eq!(checked, 53);
+    assert_eq!(checked, 58);
     // The big-endian image is the malformed case.
     verify_cmd(&[
         &"--pub",

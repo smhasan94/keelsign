@@ -462,7 +462,7 @@ mod tests {
     fn cases() -> Vec<Case<'static>> {
         let fixture = Fixture::parse(POLICY_TARGET).unwrap();
         let cases: Vec<Case<'static>> = fixture.cases().collect::<Result<_, _>>().unwrap();
-        assert_eq!(cases.len(), 52);
+        assert_eq!(cases.len(), 57);
         cases
     }
 
@@ -541,7 +541,7 @@ mod tests {
         }
     }
 
-    /// AC2 / TP1: every cell of the SHA-46 policy matrix (52 images × 3 policies) gives
+    /// AC2 / TP1: every cell of the SHA-46 policy matrix (57 images × 3 policies) gives
     /// the same verdict through the C ABI as through `keelsign_verify::verify`, and the
     /// verdict the matrix records for this build's features.
     #[test]
@@ -557,7 +557,7 @@ mod tests {
                 cells += 1;
             }
         }
-        assert_eq!(cells, 52 * 3);
+        assert_eq!(cells, 57 * 3);
     }
 
     /// AC4: a slice of the matrix that miri runs. Under miri only cells that need no
@@ -617,11 +617,11 @@ mod tests {
     /// AC2: `keelsign_digest` gives MANIFEST.json's `digest_hex` for every image that
     /// parses, and the parse error for the one that does not.
     #[test]
-    #[cfg_attr(miri, ignore = "hashes 53 images; too slow under miri")]
+    #[cfg_attr(miri, ignore = "hashes 58 images; too slow under miri")]
     fn digest_matches_the_manifest_digest_for_every_image() {
         let mut images: Vec<(&str, &[u8])> = policy_kat::IMAGES.to_vec();
         images.push(("mcuboot-ed25519-200k.bin", IMAGE_200K));
-        assert_eq!(images.len(), 53);
+        assert_eq!(images.len(), 58);
         for (name, image) in images {
             let (status, out) = digest(image);
             match manifest_field(name, "expect_parse").as_str() {

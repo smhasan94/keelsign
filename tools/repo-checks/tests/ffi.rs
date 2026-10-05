@@ -691,14 +691,14 @@ fn cases() -> Vec<Case<'static>> {
         .cases()
         .collect::<Result<_, _>>()
         .expect("every case parses");
-    assert_eq!(cases.len(), 52);
+    assert_eq!(cases.len(), 57);
     cases
 }
 
 /// AC2 (CI step `C harness (libkeelsign, ASan+UBSan)`): a C99 program compiled with
 /// `-Wall -Wextra -Werror -pedantic` and sanitizers links `libkeelsign.a` (default and
 /// `ed25519,ml-dsa` builds) and, through the C ABI, gives every cell of the SHA-46 policy
-/// matrix its recorded verdict (52 images × 3 policies × 2 builds), the documented
+/// matrix its recorded verdict (57 images × 3 policies × 2 builds), the documented
 /// results for a verified image, MANIFEST.json's digest for every image, and Ok for the
 /// 200 KB image under ClassicalOnly.
 #[test]
@@ -760,7 +760,7 @@ fn c_harness_links_libkeelsign_and_verifies_the_golden_fixtures() {
             }
         }
     }
-    assert_eq!(cells, 52 * 3 * 2);
+    assert_eq!(cells, 57 * 3 * 2);
 
     // The version, image length and security counter of a verified image.
     let lms = cases()
