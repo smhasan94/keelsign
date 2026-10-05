@@ -353,3 +353,97 @@ fn keelsign_verify_docs_build_without_warnings() {
         );
     }
 }
+
+/// The lines of the first fenced code block in `text` after `heading`, without the
+/// fences. `prefix` is stripped from every line first (`"//!"` for crate docs).
+fn fenced_block(text: &str, heading: &str, prefix: &str) -> Vec<String> {
+    let lines: Vec<String> = text
+        .lines()
+        .map(|l| {
+            let l = l.strip_prefix(prefix).unwrap_or(l);
+            l.strip_prefix(' ').unwrap_or(l).to_owned()
+        })
+        .collect();
+    let start = lines
+        .iter()
+        .position(|l| l == heading)
+        .unwrap_or_else(|| panic!("missing heading `{heading}`"));
+    let open = lines[start..]
+        .iter()
+        .position(|l| l.starts_with("```"))
+        .map(|i| start + i)
+        .unwrap_or_else(|| panic!("no code block after `{heading}`"));
+    lines[open + 1..]
+        .iter()
+        .take_while(|l| !l.starts_with("```"))
+        .cloned()
+        .collect()
+}
+
+/// SHA-47 AC2 / TP3: keelsign-verify/README.md shows exactly the visible lines of the
+/// crate-level `# Example` doctest (a runnable doctest, not an ignored block), 12 to 20
+/// lines that verify under a policy and run the anti-rollback check.
+#[test]
+fn readme_example_matches_crate_doctest() {
+    let lib = read("keelsign-verify/src/lib.rs");
+    let doc: String = lib
+        .lines()
+        .take_while(|l| l.starts_with("//!"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let fence = doc
+        .lines()
+        .skip_while(|l| *l != "//! # Example")
+        .find(|l| l.starts_with("//! ```"))
+        .expect("the `# Example` section must have a code block");
+    assert_eq!(
+        fence, "//! ```",
+        "the example must be a plain (runnable) doctest, not `ignore`/`no_run`"
+    );
+    let doctest = fenced_block(&doc, "# Example", "//!");
+    assert!(
+        doctest
+            .iter()
+            .any(|l| l.starts_with("# ") && l.contains("include_bytes!")),
+        "the hidden setup must embed the fixture image"
+    );
+    let visible: Vec<&String> = doctest
+        .iter()
+        .filter(|l| !(l.starts_with("# ") || *l == "#"))
+        .collect();
+    assert!(
+        (12..=20).contains(&visible.len()),
+        "the example must be 12 to 20 visible lines, not {}",
+        visible.len()
+    );
+    for needle in [
+        "TrustedKeys::",
+        "Algorithm::LmsHss",
+        "verify(&mut slot, &keys, Policy::PqOnly,",
+        "security_counter",
+        "cmp_ignoring_build_num",
+    ] {
+        assert!(
+            visible.iter().any(|l| l.contains(needle)),
+            "the example must show `{needle}`"
+        );
+    }
+
+    let readme = read("keelsign-verify/README.md");
+    assert!(
+        readme.contains("\n## Example\n\n"),
+        "keelsign-verify/README.md must have an `## Example` section"
+    );
+    let shown = fenced_block(&readme, "## Example", "");
+    let fence = readme
+        .lines()
+        .skip_while(|l| *l != "## Example")
+        .find(|l| l.starts_with("```"))
+        .expect("README example block");
+    assert_eq!(fence, "```rust", "the README example is a `rust` block");
+    let visible: Vec<String> = visible.into_iter().cloned().collect();
+    assert_eq!(
+        shown, visible,
+        "keelsign-verify/README.md `## Example` must be the doctest's visible lines verbatim"
+    );
+}

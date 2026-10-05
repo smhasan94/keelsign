@@ -33,6 +33,40 @@ hybrid with Ed25519.
 
 Repository: <https://github.com/smhasan94/keelsign>
 
+## Example
+
+Verify a slot under `Policy::PqOnly` against one trusted LMS/HSS key, then run the
+caller's anti-rollback check. These are the visible lines of the crate-level doctest
+(`src/lib.rs`, `# Example`), which runs in the repository's `cargo test` with the test
+fixture `tests/fixtures/images/keelsign-lms-protected-tlvs.bin` and its public key; the
+fixture is not in the published crate. On a device, read the slot through a
+`NorFlashReader` over the board's flash; with the `ed25519` feature,
+`TrustedKeys::with_ed25519` and `Policy::Hybrid` add the Ed25519 half
+([docs/policy.md](https://github.com/smhasan94/keelsign/blob/main/docs/policy.md)).
+
+```rust
+use core::cmp::Ordering;
+use keelsign_verify::image::ImageVersion;
+use keelsign_verify::{Algorithm, DEFAULT_CHUNK_LEN, Policy, TrustedKey, TrustedKeys, verify};
+
+// The device's trusted LMS/HSS public key (raw HSS encoding), typically in flash.
+let lms_key = TrustedKey { algorithm: Algorithm::LmsHss, public_key: &lms_public_key };
+let keys = TrustedKeys::<1>::new(&[lms_key])?;
+
+// The candidate image. A `&[u8]` reads it here; on a device, use a `NorFlashReader`.
+let mut slot: &[u8] = image;
+let mut tlv_buf = [0u8; 4096];
+let mut chunk = [0u8; DEFAULT_CHUNK_LEN];
+let verified = verify(&mut slot, &keys, Policy::PqOnly, &mut tlv_buf, &mut chunk)?;
+
+// Anti-rollback is the caller's: refuse a downgrade or a lower security counter.
+let running = ImageVersion { major: 1, minor: 2, revision: 0, build_num: 0 };
+let stored_counter = 7;
+let downgrade = verified.version.cmp_ignoring_build_num(&running) == Ordering::Less;
+let rolled_back = verified.security_counter.unwrap_or(0) < stored_counter;
+assert!(!downgrade && !rolled_back, "refuse the update");
+```
+
 ## Licence
 
 Licensed under either of
