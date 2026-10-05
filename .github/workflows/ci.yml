@@ -86,6 +86,16 @@ jobs:
       - name: cargo test (keelsign-verify, ed25519 + ml-dsa)
         run: cargo test -p keelsign-verify --locked --features ed25519,ml-dsa
 
+      # SHA-47: keelsign-verify's rustdoc builds without a warning in every feature state.
+      - name: cargo doc (keelsign-verify, -D warnings)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: |
+          cargo doc --no-deps -p keelsign-verify --locked
+          cargo doc --no-deps -p keelsign-verify --locked --features ml-dsa
+          cargo doc --no-deps -p keelsign-verify --locked --features ed25519
+          cargo doc --no-deps -p keelsign-verify --locked --features ed25519,ml-dsa
+
       # SHA-51: keelsign enables keelsign-verify/ml-dsa, so `cargo test --workspace` runs
       # policy-kat with ML-DSA on; run it alone for the ML-DSA-off cells (KSPM off-set).
       - name: cargo test (policy-kat, no features)

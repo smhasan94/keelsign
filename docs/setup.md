@@ -273,7 +273,9 @@ The exact commands, the measurement method and the results are in
   0.29.4), the C harness against `libkeelsign.a` under ASan + UBSan and Miri on
   `keelsign-ffi` (nightly-2026-09-29). Since SHA-47 also `cargo deny --locked check`
   (cargo-deny 0.20.2, `deny.toml`), which fails on any new RustSec advisory until it is
-  fixed or ignored with a reason.
+  fixed or ignored with a reason, and `cargo doc --no-deps -p keelsign-verify` with
+  `RUSTDOCFLAGS=-D warnings` in all four feature states (none, `ml-dsa`, `ed25519`,
+  `ed25519,ml-dsa`).
 - `verify-cross`: `keelsign-verify`, (SHA-55) `keelsign-embassy` with its board module,
   and (SHA-60) `keelsign-ffi`'s `libkeelsign.a` with the `staticlib_sizes.py --check`
   symbol rules, for both targets with every feature state.

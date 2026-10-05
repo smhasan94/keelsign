@@ -284,3 +284,72 @@ fn keelsign_verify_cross_builds() {
         }
     }
 }
+
+/// The `cargo doc` arguments for keelsign-verify in feature state `features`.
+fn doc_args(features: &str) -> Vec<&str> {
+    let mut args = vec!["doc", "--no-deps", "-p", "keelsign-verify", "--locked"];
+    if !features.is_empty() {
+        args.extend(["--features", features]);
+    }
+    args
+}
+
+/// SHA-47 AC2: the `ci` job builds keelsign-verify's rustdoc with `-D warnings` in every
+/// feature state.
+#[test]
+fn ci_builds_keelsign_verify_docs_without_warnings() {
+    let ci = read(".github/workflows/ci.yml");
+    let host = ci_job(&ci, "ci");
+    let start = host
+        .find("- name: cargo doc (keelsign-verify, -D warnings)")
+        .expect("the ci job must have a `cargo doc (keelsign-verify, -D warnings)` step");
+    let step: String = host[start..]
+        .lines()
+        .enumerate()
+        .take_while(|(i, line)| *i == 0 || !line.trim_start().starts_with("- "))
+        .map(|(_, line)| format!("{line}\n"))
+        .collect();
+    assert!(
+        step.contains("RUSTDOCFLAGS: -D warnings"),
+        "the cargo doc step must deny rustdoc warnings:\n{step}"
+    );
+    for features in FEATURE_STATES {
+        let command = format!("{}\n", doc_args(features).join(" "));
+        assert!(
+            step.contains(&format!("cargo {command}")),
+            "the cargo doc step must run `cargo {}`",
+            command.trim_end()
+        );
+    }
+}
+
+/// SHA-47 AC2: `cargo doc --no-deps -p keelsign-verify` builds without a warning in every
+/// feature state (`RUSTDOCFLAGS=-D warnings`).
+#[test]
+fn keelsign_verify_docs_build_without_warnings() {
+    let root = workspace_root();
+    let scratch = ScratchDir::new("verify_docs");
+    for features in FEATURE_STATES {
+        let mut cmd = cargo_in(&root, scratch.path());
+        cmd.args(doc_args(features))
+            .env("RUSTDOCFLAGS", "-D warnings")
+            .env_remove("RUSTFLAGS");
+        let out = cmd.output().expect("spawn cargo doc");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            out.status.success(),
+            "cargo doc (features \"{features}\") failed:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("warning"),
+            "cargo doc (features \"{features}\") warned:\n{stderr}"
+        );
+        assert!(
+            scratch
+                .path()
+                .join("doc/keelsign_verify/index.html")
+                .is_file(),
+            "cargo doc must write doc/keelsign_verify/index.html"
+        );
+    }
+}

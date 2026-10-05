@@ -129,6 +129,8 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo test -p keelsign-verify --locked --features ed25519,ml-dsa
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p keelsign-verify --locked --features ed25519,ml-dsa
+cargo deny --locked check   # cargo-deny 0.20.2, see docs/setup.md
 ```
 
 The recorded flash and stack figures in `docs/benchmarks.md` are checked against a fresh
