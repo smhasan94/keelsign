@@ -116,6 +116,8 @@ A Raspberry Pi Debug Probe drives the Pico 2 W. See [docs/hardware.md](docs/hard
   procedures.
 - [docs/setup.md](docs/setup.md): toolchain, probes, flashing the example boards and
   on-target tests.
+- [docs/on-target-tests.md](docs/on-target-tests.md): the on-target test suite on both
+  boards, how to run it and the three-identical-runs check.
 - [docs/hardware.md](docs/hardware.md) and [docs/release.md](docs/release.md): the bill
   of materials and the human-only release steps.
 

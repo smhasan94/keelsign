@@ -17,7 +17,7 @@ const REQUIRED_HEADINGS: [&str; 11] = [
     "## CI",
 ];
 
-const REQUIRED_TERMS: [&str; 9] = [
+const REQUIRED_TERMS: [&str; 10] = [
     "udev",
     ".cargo/config.toml",
     "probe-rs-tools",
@@ -28,6 +28,8 @@ const REQUIRED_TERMS: [&str; 9] = [
     "embedded-test",
     // SHA-47: the pinned dependency audit.
     "cargo-deny",
+    // SHA-47: the on-target suite procedure.
+    "on-target-tests.md",
 ];
 
 #[test]

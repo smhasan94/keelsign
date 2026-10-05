@@ -95,6 +95,16 @@ pub fn bench_target_lock(bench: &Example) -> MutexGuard<'static, ()> {
     LOCKS[i].lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// The on-target ML-DSA KAT and benchmark tests in `tests/kat.rs` named in the SHA-34
+/// plan (shared with the SHA-47 suite checks).
+pub const MLDSA_KAT_ON_TARGET_TESTS: [&str; 5] = [
+    "dwt_cycle_counter_present",
+    "mldsa44_kat",
+    "mldsa65_kat",
+    "mldsa44_bench",
+    "mldsa65_bench",
+];
+
 /// Files the SHA-65 LMS/HSS additions put in every bench project, relative to its
 /// directory.
 pub const LMS_BENCH_FILES: [&str; 3] = [

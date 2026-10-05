@@ -261,7 +261,9 @@ cargo test --release
 ```
 
 The exact commands, the measurement method and the results are in
-[benchmarks.md](benchmarks.md).
+[benchmarks.md](benchmarks.md). The whole suite (every test binary of both bench
+projects, with and without the bench `ml-dsa` feature), its run commands and the
+three-identical-runs procedure are in [on-target-tests.md](on-target-tests.md) (SHA-47).
 
 ## CI
 
