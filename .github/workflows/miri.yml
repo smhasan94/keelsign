@@ -1,0 +1,70 @@
+name: Miri
+
+# SHA-327: keelsign-ffi's pointer-contract tests under Miri (docs/ffi.md#miri), off the
+# `ci` job's critical path: on a PR only when keelsign-ffi/** or this file changed, on
+# every push to main, nightly and on demand. The gate is a step condition so the jobs
+# always report a conclusion (a workflow-level `paths:` filter would leave a required
+# check pending forever).
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "47 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: miri-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  miri:
+    name: miri keelsign-ffi (features "${{ matrix.features }}")
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        features: ["", "ed25519,ml-dsa"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # the PR merge commit and both parents: HEAD^1 is the base
+
+      - name: keelsign-ffi changed?
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ -n "$(git diff --name-only HEAD^1 HEAD -- keelsign-ffi .github/workflows/miri.yml)" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::keelsign-ffi unchanged: miri not run on this PR (it runs on main after merge and nightly)"
+          fi
+
+      - uses: dtolnay/rust-toolchain@master
+        if: steps.changes.outputs.run == 'true'
+        with:
+          toolchain: nightly-2026-09-29
+          components: miri, rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.changes.outputs.run == 'true'
+        with:
+          key: miri-features-${{ matrix.features || 'none' }}
+
+      - name: miri (keelsign-ffi)
+        if: steps.changes.outputs.run == 'true'
+        env:
+          RUSTFLAGS: --cfg sha2_backend="soft"
+          MIRIFLAGS: -Zmiri-symbolic-alignment-check
+        run: |
+          cargo +nightly-2026-09-29 miri setup
+          cargo +nightly-2026-09-29 miri test -p keelsign-ffi --locked --features "${{ matrix.features }}"
