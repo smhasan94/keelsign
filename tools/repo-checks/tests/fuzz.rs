@@ -1,7 +1,10 @@
 //! SHA-39: the parse_image fuzz crate, its committed corpus, the fuzz workflow, the
 //! fixture wrapper scripts/make-fixtures.sh and their docs.
 
-use repo_checks::{python_script, run_capture, sha256_hex, workspace_root};
+use repo_checks::{
+    job_steps, python_script, run_capture, sha256_hex, squash, step_with, workflow_job,
+    workspace_root,
+};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -166,81 +169,6 @@ fn corpus_is_committed_and_matches_its_manifest() {
     );
 }
 
-/// `text` without comments (lines starting with `#`, and ` #…` to the end of a line),
-/// whitespace or quotes: harmless reformatting (line breaks, indentation, quoting) does
-/// not change it, so checks match key tokens rather than exact layout.
-fn squash(text: &str) -> String {
-    text.lines()
-        .map(|line| {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with('#') {
-                return "";
-            }
-            match line.find(" #") {
-                Some(at) => &line[..at],
-                None => line,
-            }
-        })
-        .flat_map(str::chars)
-        .filter(|c| !c.is_whitespace() && *c != '"' && *c != '\'')
-        .collect()
-}
-
-/// The text of the job `name` in a workflow: from its `  name:` line up to the next
-/// line indented by exactly two spaces (the next job, or a comment before it).
-fn job<'a>(workflow: &'a str, name: &str) -> &'a str {
-    let start = workflow
-        .find(&format!("\n  {name}:\n"))
-        .unwrap_or_else(|| panic!("no job {name}"));
-    let body = &workflow[start + 1..];
-    let end = body
-        .match_indices('\n')
-        .map(|(i, _)| i)
-        .find(|&i| {
-            let rest = &body[i + 1..];
-            rest.starts_with("  ") && !rest.starts_with("   ")
-        })
-        .unwrap_or(body.len());
-    &body[..end]
-}
-
-/// The steps of a job, each squashed: the text from one `- ` item of its `steps:` list
-/// to the next.
-fn steps(job: &str) -> Vec<String> {
-    let lines: Vec<&str> = job.lines().collect();
-    let start = lines
-        .iter()
-        .position(|l| l.trim() == "steps:")
-        .expect("steps:");
-    let indent = lines[start + 1..]
-        .iter()
-        .find(|l| l.trim_start().starts_with("- "))
-        .map(|l| l.len() - l.trim_start().len())
-        .expect("a step");
-    let mut out: Vec<String> = Vec::new();
-    for line in &lines[start + 1..] {
-        let is_item =
-            line.len() - line.trim_start().len() == indent && line.trim_start().starts_with("- ");
-        if is_item {
-            out.push(String::new());
-        }
-        if let Some(step) = out.last_mut() {
-            step.push_str(line);
-            step.push('\n');
-        }
-    }
-    out.iter().map(|s| squash(s)).collect()
-}
-
-/// The index of the one step containing every token in `tokens` (squashed).
-fn step_with(steps: &[String], job: &str, tokens: &[&str]) -> usize {
-    let found: Vec<usize> = (0..steps.len())
-        .filter(|&i| tokens.iter().all(|t| steps[i].contains(&squash(t))))
-        .collect();
-    assert_eq!(found.len(), 1, "{job}: steps with {tokens:?}: {found:?}");
-    found[0]
-}
-
 /// SHA-39 AC2 and TP3: .github/workflows/fuzz.yml runs the smoke on every PR and the
 /// 30-minute run nightly (schedule and manual dispatch), on the pinned nightly with the
 /// pinned cargo-fuzz, with a read-only token; the nightly job always summarises and
@@ -270,8 +198,8 @@ fn fuzz_workflow_runs_smoke_on_prs_and_nightly() {
     }
     assert_eq!(squash(&block), "permissions:contents:read");
 
-    let check = job(&wf, "fuzz-check");
-    let check_steps = steps(check);
+    let check = workflow_job(&wf, "fuzz-check");
+    let check_steps = job_steps(check);
     for run in [
         "cargo fmt --manifest-path fuzz/Cargo.toml --check",
         "cargo clippy --manifest-path fuzz/Cargo.toml --all-targets --locked -- -D warnings",
@@ -286,12 +214,12 @@ fn fuzz_workflow_runs_smoke_on_prs_and_nightly() {
         "fuzz-check runs on every event"
     );
 
-    let smoke = job(&wf, "fuzz-smoke");
+    let smoke = workflow_job(&wf, "fuzz-smoke");
     assert!(squash(smoke).contains(&squash("if: github.event_name == 'pull_request'")));
-    let smoke_steps = steps(smoke);
+    let smoke_steps = job_steps(smoke);
     step_with(&smoke_steps, "fuzz-smoke", &["run: scripts/fuzz.sh smoke"]);
 
-    let nightly = job(&wf, "fuzz-nightly");
+    let nightly = workflow_job(&wf, "fuzz-nightly");
     let n = squash(nightly);
     for token in [
         "if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
@@ -301,7 +229,7 @@ fn fuzz_workflow_runs_smoke_on_prs_and_nightly() {
         assert!(n.contains(&squash(token)), "fuzz-nightly lacks {token:?}");
     }
     for (name, text) in [("fuzz-smoke", smoke), ("fuzz-nightly", nightly)] {
-        let s = steps(text);
+        let s = job_steps(text);
         step_with(
             &s,
             name,
@@ -320,7 +248,7 @@ fn fuzz_workflow_runs_smoke_on_prs_and_nightly() {
         );
     }
     // In order: the run, the summary (always), the upload (always), TP1, coverage.
-    let ns = steps(nightly);
+    let ns = job_steps(nightly);
     let run = step_with(&ns, "fuzz-nightly", &["run: scripts/fuzz.sh nightly"]);
     let summary = step_with(
         &ns,

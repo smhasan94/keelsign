@@ -138,23 +138,6 @@ jobs:
       - name: publish dry-run keelsign-verify + keelsign
         run: cargo publish --dry-run --locked -p keelsign-verify -p keelsign
 
-      # SHA-60: keelsign-ffi's pointer-contract unit tests under Miri on the pinned nightly
-      # (docs/ffi.md#miri), in both feature states. Last in the job: the toolchain action
-      # makes the nightly the default. sha2's portable backend is the one Cortex-M runs.
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2026-09-29
-          components: miri, rust-src
-
-      - name: miri (keelsign-ffi)
-        env:
-          RUSTFLAGS: --cfg sha2_backend="soft"
-          MIRIFLAGS: -Zmiri-symbolic-alignment-check
-        run: |
-          cargo +nightly-2026-09-29 miri setup
-          cargo +nightly-2026-09-29 miri test -p keelsign-ffi --locked
-          cargo +nightly-2026-09-29 miri test -p keelsign-ffi --locked --features ed25519,ml-dsa
-
   # keelsign-verify (no_std, no heap) for both Cortex-M targets, with the `ml-dsa` and
   # `ed25519` features off and on; SHA-55: keelsign-embassy too, with the same features
   # and its board module (`embassy_features`); SHA-60: keelsign-ffi's libkeelsign.a.

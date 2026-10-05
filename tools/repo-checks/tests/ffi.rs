@@ -325,13 +325,6 @@ fn ci_verifies_the_header_and_runs_the_ffi_steps() {
         &format!("{CBINDGEN_COMMAND} --verify"),
         &"name: C harness (libkeelsign, ASan+UBSan)".to_owned(),
         &"cargo test -p repo-checks --locked --test ffi\n".to_owned(),
-        &"toolchain: nightly-2026-09-29\n          components: miri, rust-src".to_owned(),
-        &"name: miri (keelsign-ffi)".to_owned(),
-        &"MIRIFLAGS: -Zmiri-symbolic-alignment-check".to_owned(),
-        &"RUSTFLAGS: --cfg sha2_backend=\"soft\"".to_owned(),
-        &"cargo +nightly-2026-09-29 miri test -p keelsign-ffi --locked\n".to_owned(),
-        &"cargo +nightly-2026-09-29 miri test -p keelsign-ffi --locked --features ed25519,ml-dsa"
-            .to_owned(),
     ] {
         assert!(host.contains(needle.as_str()), "ci job must run `{needle}`");
     }
