@@ -229,7 +229,7 @@ fn readme_quickstart_block_names_every_command() {
     assert!(block.contains("signing.pem.state"));
     let before = section.split("```sh\n").next().unwrap_or_default();
     assert!(
-        before.contains("stateful") && before.contains("docs/keys.md#stateful-lms-keys"),
+        before.contains("stateful") && before.contains("docs/lms.md#rules-for-handling-a-key"),
         "the quickstart warns that LMS/HSS keys are stateful before the block"
     );
 }

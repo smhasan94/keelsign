@@ -246,27 +246,8 @@ next `sign` uses the one after it, never the same one. `sign` prints the leaf it
 (`leaf: 0 of 1024 (1023 left)`) and `inspect` shows the leaf of every level
 (`leaf indices`).
 
-Rules for an LMS/HSS key:
-
-- Keep `FILE`, `FILE.state` and `FILE.journal` together in one directory on a local
-  disk, and sign only with keelsign. The lock is advisory and local: two machines (or a
-  network file system that does not honour `flock`) are not kept apart.
-- Never copy the key to a second machine and sign on both, and never restore it from a
-  backup to sign again: either reuses leaves. A restored state file alone is caught by
-  the journal (exit 10); a restored or copied directory (key, state and journal
-  together) cannot be told apart from the original, so keelsign does not detect it.
-- A missing state file or journal is refused (exit 10). keelsign does not rebuild them:
-  if the state is lost, retire the key and enrol a new one.
-- A state file of another key is refused (exit 10): the state is bound to the key ID of
-  the key's public key, not to file names or times.
-- Plan the next key before the leaves run out: `sign` prints how many are left, and a
-  used-up key fails with exit code 11 (`LeafIndexExhausted`). Generate the new key, put
-  its public key on the devices, then switch.
-- `keygen` refuses to replace an existing key, state file or journal without `--force`
-  (exit 3). `--force` writes a new key with fresh state; the old key's state is gone.
-  Never run `keygen --force` over a key while a `sign` with it is running: the running
-  `sign` can then write the old key's state over the new key's state file, and the new
-  key is refused with exit code 10 (its state belongs to another key) from then on.
+The rules for handling an LMS/HSS key (one signer, never sign from a copy, backups,
+retiring a key, what `--force` does) are in [lms.md, Rules for handling a key](lms.md#rules-for-handling-a-key).
 
 ## Passphrase encryption
 

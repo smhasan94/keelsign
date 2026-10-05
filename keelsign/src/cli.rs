@@ -395,7 +395,7 @@ fn keygen(args: &KeygenArgs) -> Result<(), Error> {
             "note: LMS/HSS keys are stateful: every signature uses up one of {} leaves, \
              recorded in {} and {}. Sign only with keelsign, keep the three files together, \
              never copy the key to a second machine and never restore it from a backup \
-             (docs/keys.md#stateful-lms-keys).",
+             (docs/lms.md#rules-for-handling-a-key).",
             lms.leaves(),
             state.display(),
             journal.display()

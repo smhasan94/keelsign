@@ -84,6 +84,8 @@ fn signing_md_documents_inspect_schema_and_stability_policy() {
         "state file",
         "journal",
         "keys.md#stateful-lms-keys",
+        // SHA-69: the handling rules moved to docs/lms.md.
+        "lms.md#rules-for-handling-a-key",
         "LeafIndexExhausted",
         "leaf: 0 of 1024 (1023 left)",
         "`leaf_indices`",

@@ -249,7 +249,7 @@ new leaf. Exit code 10 means the state is refused: the state file or journal mis
 another key's state file, a state file behind its journal (restored from a copy), a
 corrupt one, or another keelsign process signing with the key; exit code 11
 (`LeafIndexExhausted`) means every leaf is used. The rules for handling an LMS/HSS key
-are in [keys.md, Stateful LMS keys](keys.md#stateful-lms-keys).
+are in [lms.md, Rules for handling a key](lms.md#rules-for-handling-a-key).
 
 With one level the image verifies under keelsign-verify's default and CNSA 2.0 policies;
 with two levels under the default policy only. `inspect` shows the leaf of every level
