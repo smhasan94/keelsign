@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: miri-${{ github.event.pull_request.number || github.ref }}
+  group: miri-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -40,9 +40,14 @@ jobs:
       - name: keelsign-ffi changed?
         id: changes
         run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [ -n "$(git diff --name-only HEAD^1 HEAD -- keelsign-ffi .github/workflows/miri.yml)" ]; then
+            exit 0
+          fi
+          # Assigned first so a git error (no HEAD^1) fails the step instead of
+          # reading as "unchanged".
+          changed="$(git diff --name-only HEAD^1 HEAD -- keelsign-ffi .github/workflows/miri.yml)"
+          if [ -n "$changed" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -65,6 +70,7 @@ jobs:
         env:
           RUSTFLAGS: --cfg sha2_backend="soft"
           MIRIFLAGS: -Zmiri-symbolic-alignment-check
+          FEATURES: ${{ matrix.features }}
         run: |
           cargo +nightly-2026-09-29 miri setup
-          cargo +nightly-2026-09-29 miri test -p keelsign-ffi --locked --features "${{ matrix.features }}"
+          cargo +nightly-2026-09-29 miri test -p keelsign-ffi --locked --features "$FEATURES"

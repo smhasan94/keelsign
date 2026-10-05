@@ -15,8 +15,11 @@ const JOB_NAMES: [&str; 2] = [
 ];
 /// The nightly schedule.
 const CRON: &str = "cron: \"47 3 * * *\"";
-/// The PR gate: the paths whose change makes a pull request run Miri.
-const GATE: &str = "git diff --name-only HEAD^1 HEAD -- keelsign-ffi .github/workflows/miri.yml";
+/// The PR gate: the paths whose change makes a pull request run Miri. Assigned to a
+/// variable before the test so a git error (no `HEAD^1`) fails the step under `bash -e`
+/// instead of reading as "unchanged".
+const GATE: &str =
+    "changed=\"$(git diff --name-only HEAD^1 HEAD -- keelsign-ffi .github/workflows/miri.yml)\"";
 /// The step condition every Miri step carries.
 const RUN_IF: &str = "if: steps.changes.outputs.run == 'true'";
 
@@ -55,6 +58,9 @@ fn miri_workflow_runs_both_passes_on_ffi_changes_main_and_nightly() {
         "push:branches: [main]",
         &format!("schedule:- {CRON}"),
         "workflow_dispatch:",
+        // One group per PR; every push, schedule and dispatch run has its own group, so
+        // runs on main never cancel each other.
+        "group: miri-${{ github.event.pull_request.number || github.run_id }}",
         "cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
     ] {
         assert!(all.contains(&squash(token)), "miri.yml lacks {token:?}");
@@ -96,13 +102,19 @@ fn miri_workflow_runs_both_passes_on_ffi_changes_main_and_nightly() {
         "miri",
         &["uses: actions/checkout@v4", "fetch-depth: 2"],
     );
+    // The default PR checkout is the merge commit, whose first parent is the base.
+    assert!(
+        !steps[checkout].contains("ref:"),
+        "checkout must keep the default ref (the PR merge commit)"
+    );
     let changes = step_with(
         &steps,
         "miri",
         &[
             "id: changes",
-            "\"${{ github.event_name }}\" != \"pull_request\"",
+            "[ \"$GITHUB_EVENT_NAME\" != \"pull_request\" ]",
             GATE,
+            "if [ -n \"$changed\" ]",
             "echo \"run=true\" >> \"$GITHUB_OUTPUT\"",
             "echo \"run=false\" >> \"$GITHUB_OUTPUT\"",
         ],
@@ -110,6 +122,14 @@ fn miri_workflow_runs_both_passes_on_ffi_changes_main_and_nightly() {
     assert!(
         !steps[changes].contains("if:") && !steps[checkout].contains("if:"),
         "checkout and the change detection always run"
+    );
+    assert!(
+        !steps[changes].contains(&squash("-n \"$(git diff")),
+        "the gate must not test a command substitution directly (it masks git errors)"
+    );
+    assert!(
+        !steps[changes].contains("${{"),
+        "the gate reads the event from the environment, not an expression"
     );
     let toolchain = step_with(
         &steps,
@@ -129,9 +149,10 @@ fn miri_workflow_runs_both_passes_on_ffi_changes_main_and_nightly() {
             RUN_IF,
             "RUSTFLAGS: --cfg sha2_backend=\"soft\"",
             "MIRIFLAGS: -Zmiri-symbolic-alignment-check",
+            "FEATURES: ${{ matrix.features }}",
             &format!("cargo +{MIRI_TOOLCHAIN} miri setup"),
             &format!(
-                "cargo +{MIRI_TOOLCHAIN} miri test -p keelsign-ffi --locked --features \"${{{{ matrix.features }}}}\""
+                "cargo +{MIRI_TOOLCHAIN} miri test -p keelsign-ffi --locked --features \"$FEATURES\""
             ),
         ],
     );

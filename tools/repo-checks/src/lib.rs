@@ -323,8 +323,8 @@ pub fn workflow_job<'a>(workflow: &'a str, name: &str) -> &'a str {
     &body[..end]
 }
 
-/// The steps of a job (from [`workflow_job`]), each squashed: the text from one `- ` item of its `steps:` list
-/// to the next.
+/// The steps of a job (from [`workflow_job`]), each squashed: the text from one `- ` item
+/// of its `steps:` list to the next.
 pub fn job_steps(job: &str) -> Vec<String> {
     let lines: Vec<&str> = job.lines().collect();
     let start = lines
