@@ -742,7 +742,8 @@ fn image_digest_section_records_ram_bound() {
 
 /// SHA-46: the hybrid verify section records the flash delta of `size_verify` over its
 /// baseline on both boards and profiles, the static frame, cycles and peak stack as
-/// values or `pending (SHA-69)`, and the reproduce commands.
+/// values or `pending (hardware)` (SHA-69: measured by `hybrid_verify_bench`), and the
+/// reproduce commands.
 #[test]
 fn hybrid_verify_section_records_flash_delta() {
     let doc = doc();
@@ -758,6 +759,14 @@ fn hybrid_verify_section_records_flash_delta() {
         "POLICY board=",
         "NorFlashReader",
         "docs/policy.md",
+        // SHA-69: the on-target hybrid measurement.
+        "hybrid_verify_bench",
+        "keelsign-hybrid-ed25519-hss2.bin",
+        "BENCH board=nrf52840 set=Hybrid-Ed25519+LMS-M32_H5-L1",
+        "set=Hybrid-Ed25519+HSS-M32_H5x2-L2",
+        "CYCCNT",
+        "stack_paint",
+        "passed=171/171",
     ] {
         assert!(
             hybrid.contains(term),
@@ -781,8 +790,8 @@ fn hybrid_verify_section_records_flash_delta() {
         }
         for cell in &row[4..6] {
             assert!(
-                cell == "pending (SHA-69)" || !cell.is_empty() && !cell.contains("pending"),
-                "{board}: `{cell}` must be a value or `pending (SHA-69)`"
+                cell == PENDING || !cell.is_empty() && !cell.contains("pending"),
+                "{board}: `{cell}` must be a value or `{PENDING}`"
             );
         }
         for profile in ["release", "size"] {
@@ -808,11 +817,130 @@ fn hybrid_verify_section_records_flash_delta() {
         "size_verify_baseline target/thumbv7em-none-eabihf/size/size_verify",
         "cargo +nightly rustc --release --locked --bin size_verify --target-dir target/nightly -- -Z emit-stack-sizes",
         "cargo test -p keelsign-verify --locked --features ed25519 --test policy_matrix",
+        // SHA-69: the suite log is the one recorded source of the hybrid figures.
+        "python3 scripts/bench_summarize.py docs/bench-logs/nrf52840-suite-run1.txt",
+        "cargo test --release --locked --test policy -- hybrid_verify_bench\n",
     ] {
         assert!(
             reproduce.contains(command),
             "### Hybrid reproduce must list `{command}`"
         );
+    }
+}
+
+/// A scalar field of the MANIFEST.json output `name`, without quotes.
+fn manifest_output_field(name: &str, field: &str) -> String {
+    let path = workspace_root().join("tests/fixtures/images/MANIFEST.json");
+    let manifest =
+        fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let start = manifest
+        .find(&format!("\n    \"{name}\": {{"))
+        .unwrap_or_else(|| panic!("MANIFEST.json has no output `{name}`"));
+    let entry = &manifest[start..];
+    let entry = &entry[..entry.find("\n    }").expect("entry closes")];
+    let needle = format!("\"{field}\": ");
+    let at = entry
+        .find(&needle)
+        .unwrap_or_else(|| panic!("{name}: no field `{field}`"))
+        + needle.len();
+    let rest = &entry[at..];
+    rest[..rest.find([',', '\n']).unwrap_or(rest.len())]
+        .trim()
+        .trim_matches('"')
+        .to_owned()
+}
+
+/// SHA-69 AC3: the per-image hybrid table has one row per board and hybrid Ed25519 +
+/// LMS/HSS image; each image is a hybrid LMS/HSS output of MANIFEST.json with the HSS
+/// level count the row names, its signature bytes are the 64-byte Ed25519 signature plus
+/// the manifest's HSS signature length, its flash cells copy [Hybrid results], and its
+/// cycles and peak stack are values or `pending (hardware)`.
+#[test]
+fn hybrid_per_image_table_matches_manifest_and_hybrid_results() {
+    let doc = doc();
+    let per_image = section(&doc, "### Hybrid per-image results");
+    let table = table_with_header(per_image, "| Board | Image |")
+        .expect("### Hybrid per-image results has a `| Board | Image |` table");
+    assert_eq!(
+        table[0],
+        [
+            "Board",
+            "Image",
+            "PQ half",
+            "Signature bytes (Ed25519 + PQ)",
+            "Flash Δ release",
+            "Flash Δ size",
+            "Cycles",
+            "Peak stack",
+        ],
+        "### Hybrid per-image results: table columns"
+    );
+    let headline = table_with_header(
+        section(&doc, "### Hybrid results"),
+        "| Board | Flash Δ release |",
+    )
+    .expect("### Hybrid results table");
+    const IMAGES: [(&str, &str); 2] = [
+        ("keelsign-hybrid-ed25519-lms.bin", "HSS L=1"),
+        ("keelsign-hybrid-ed25519-hss2.bin", "HSS L=2"),
+    ];
+    assert_eq!(
+        table.len() - 1,
+        BOARDS.len() * IMAGES.len(),
+        "one row per board × hybrid image"
+    );
+    for board in BOARDS {
+        let source = row_with_key(&headline, &[board]);
+        for (image, levels) in IMAGES {
+            let row = row_with_key(&table, &[board, &format!("`{image}`")]);
+            assert_eq!(manifest_output_field(image, "ed25519"), "true", "{image}");
+            assert_eq!(
+                manifest_output_field(image, "algorithm"),
+                "LmsHss",
+                "{image}"
+            );
+            let level_count: u32 = levels.trim_start_matches("HSS L=").parse().unwrap();
+            assert!(
+                manifest_output_field(image, "public_key_hex")
+                    .starts_with(&format!("{level_count:08x}")),
+                "{image}: an HSS key with L={level_count}"
+            );
+            assert!(
+                row[column_index(&table, "PQ half")].starts_with(levels),
+                "{board} {image}: PQ half must start with `{levels}`"
+            );
+            let pq: u64 = manifest_output_field(image, "signature_lens")
+                .parse()
+                .expect("one PQ signature");
+            assert_eq!(
+                parse_bytes(&row[column_index(&table, "Signature bytes (Ed25519 + PQ)")]),
+                Some(64 + pq),
+                "{board} {image}: signature bytes"
+            );
+            for column in ["Flash Δ release", "Flash Δ size"] {
+                assert_eq!(
+                    row[column_index(&table, column)],
+                    source[column_index(&headline, column)],
+                    "{board} {image}: {column} must copy ### Hybrid results"
+                );
+            }
+            for column in ["Cycles", "Peak stack"] {
+                let cell = &row[column_index(&table, column)];
+                assert!(
+                    cell == PENDING || !cell.is_empty() && !cell.contains("pending"),
+                    "{board} {image}: {column} `{cell}` must be a value or `{PENDING}`"
+                );
+            }
+        }
+        // The headline table is the L=1 image.
+        let l1 = row_with_key(&table, &[board, "`keelsign-hybrid-ed25519-lms.bin`"]);
+        for column in ["Cycles", "Peak stack"] {
+            assert_eq!(
+                l1[column_index(&table, column)],
+                source[column_index(&headline, column)],
+                "{board}: ### Hybrid results {column} is the L=1 image's"
+            );
+        }
     }
 }
 
@@ -836,7 +964,7 @@ fn mldsa_verify_section_records_stack() {
         "CYCCNT",
         "NorFlashReader",
         "-Z emit-stack-sizes",
-        "passed=156/156",
+        "passed=171/171",
     ] {
         assert!(
             mldsa.contains(term),
@@ -2981,7 +3109,11 @@ fn budget_table_matches_source_tables() {
         }
     }
     assert!(
-        budget.contains("pending (SHA-69)") && budget.contains("on-target-tests.md"),
-        "{BUDGET_SECTION} must mark the hybrid row pending (SHA-69) and point at the suite's P2"
+        budget.contains("hybrid_verify_bench") && budget.contains("on-target-tests.md"),
+        "{BUDGET_SECTION} must name the hybrid measurement (SHA-69) and point at the suite's P2"
+    );
+    assert!(
+        !doc.contains("pending (SHA-69)"),
+        "docs/benchmarks.md: SHA-69 measures the hybrid verify; its cells are `{PENDING}`"
     );
 }

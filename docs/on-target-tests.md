@@ -20,10 +20,10 @@ below. An on-device CI job is a later ticket (E8.1).
 | `tests/kat.rs` | `dwt_cycle_counter_present`, `mldsa44_kat`, `mldsa65_kat`, `mldsa44_bench`, `mldsa65_bench` | SHA-34 | both | `KAT board=… result=ok` per case; `BENCH board=… set=ML-DSA-44 … saturated=false` per case |
 | `tests/lms.rs` | `lms_kat`, `lms_rotation_key_b_verifies_against_a_b_and_fails_against_a`, `lms_bench` | SHA-65, SHA-240 | both | `KAT board=… set=LMS … result=ok`; `ROTATION board=… … ok`; `BENCH board=… set=LMS-… saturated=false` |
 | `tests/image.rs` | `image_digest_200k_from_flash`, `image_digest_bench` | SHA-42 (E3.1) | both | `DIGEST board=… from_flash=ok sha256_tlv=ok chunks=64,256,4096 ok`; `DIGEST board=… bytes=204800 chunk=256 cycles=… peak_stack=… saturated=false` |
-| `tests/policy.rs` | `policy_matrix_from_flash` | SHA-46 (E3.2) | both | `POLICY board=… passed=156/156` and no `result=FAIL` |
+| `tests/policy.rs` | `policy_matrix_from_flash`, `hybrid_verify_bench` | SHA-46 (E3.2), SHA-69 | both | `POLICY board=… passed=171/171` and no `result=FAIL`; `BENCH board=… set=Hybrid-… ok=true … saturated=false` per hybrid image |
 | `tests/mldsa_verify.rs` | `mldsa_images_from_flash` | SHA-44 (E3.3) | `--features ml-dsa` only | `MLDSA board=… passed=5/5` |
 
-Without the bench `ml-dsa` feature the suite is 11 tests; with it, 12 (the policy matrix
+Without the bench `ml-dsa` feature the suite is 12 tests; with it, 13 (the policy matrix
 then verifies its ML-DSA cells instead of expecting the feature-off verdicts, and
 `mldsa_verify` is built). The ML-DSA feature build goes to its own target directory,
 `target/mldsa`, as in CI, so the feature-off build is untouched.
@@ -68,7 +68,7 @@ python3 scripts/suite_results.py docs/bench-logs/nrf52840-suite-run1.txt
    names (`--expect` is required, so a test missing from all three runs still fails):
 
    ```sh
-   SUITE=dwt_cycle_counter_present,mldsa44_kat,mldsa65_kat,mldsa44_bench,mldsa65_bench,lms_kat,lms_bench,lms_rotation_key_b_verifies_against_a_b_and_fails_against_a,image_digest_200k_from_flash,image_digest_bench,policy_matrix_from_flash
+   SUITE=dwt_cycle_counter_present,mldsa44_kat,mldsa65_kat,mldsa44_bench,mldsa65_bench,lms_kat,lms_bench,lms_rotation_key_b_verifies_against_a_b_and_fails_against_a,image_digest_200k_from_flash,image_digest_bench,policy_matrix_from_flash,hybrid_verify_bench
    SUITE_MLDSA="$SUITE,mldsa_images_from_flash"
    python3 scripts/suite_results.py --check-identical --expect "$SUITE" docs/bench-logs/nrf52840-suite-run1.txt docs/bench-logs/nrf52840-suite-run2.txt docs/bench-logs/nrf52840-suite-run3.txt
    python3 scripts/suite_results.py --check-identical --expect "$SUITE_MLDSA" docs/bench-logs/nrf52840-suite-mldsa-run1.txt docs/bench-logs/nrf52840-suite-mldsa-run2.txt docs/bench-logs/nrf52840-suite-mldsa-run3.txt
@@ -76,7 +76,7 @@ python3 scripts/suite_results.py docs/bench-logs/nrf52840-suite-run1.txt
    python3 scripts/suite_results.py --check-identical --expect "$SUITE_MLDSA" docs/bench-logs/rp2350-suite-mldsa-run1.txt docs/bench-logs/rp2350-suite-mldsa-run2.txt docs/bench-logs/rp2350-suite-mldsa-run3.txt
    ```
 
-   Each prints `identical: N tests ok in all 3 logs` (11, or 12 with `ml-dsa`). It fails
+   Each prints `identical: N tests ok in all 3 logs` (12, or 13 with `ml-dsa`). It fails
    if an expected test is missing from any run, a test's verdict differs between runs, or
    any verdict is not `ok`.
 3. Run the repo-check, which does the same for all twelve logs with the full test list
@@ -105,13 +105,18 @@ The suite logs carry the measured figures that are still `pending (hardware)` in
 - ML-DSA verify: copy each set's largest `peak_stack=` and its `cycles=` from the
   `MLDSA board=… image=…` lines of `<board>-suite-mldsa-run1.txt` into
   [ML-DSA verify results](benchmarks.md#ml-dsa-verify-results).
+- Hybrid verify (SHA-69): copy `cycles=` and `peak_stack=` of the two
+  `BENCH board=… set=Hybrid-…` lines of `hybrid_verify_bench` into
+  [Hybrid per-image results](benchmarks.md#hybrid-per-image-results), and the L=1 line
+  (`set=Hybrid-Ed25519+LMS-M32_H5-L1`) into [Hybrid results](benchmarks.md#hybrid-results).
+  `python3 scripts/bench_summarize.py docs/bench-logs/<board>-suite-run1.txt` lists them
+  with the LMS/HSS and ML-DSA sets.
 - Copy the same figures into the matching cells of
   [RAM/flash budget (SHA-47)](benchmarks.md#ramflash-budget-sha-47).
 
-Decision (SHA-47, R6): the hybrid row of the budget stays `pending (SHA-69)`, because no
-test in the suite measures a hybrid verify; SHA-69 adds that measurement. SHA-47's AC3 is
-ticked on the recorded flash and static-frame figures plus the measured LMS/HSS, ML-DSA
-and digest cells that P2 fills in.
+SHA-69 added `hybrid_verify_bench`; the hybrid cells are `pending (hardware)` until P2.
+SHA-47's AC3 is ticked on the recorded flash and static-frame figures plus the measured
+LMS/HSS, ML-DSA and digest cells that P2 fills in.
 
 The three-run consistency check of the benchmarks
 ([benchmarks.md, Three-run consistency](benchmarks.md#three-run-consistency)) is separate:

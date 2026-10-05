@@ -242,11 +242,16 @@ Without it, the cells whose post-quantum half reaches the ML-DSA backend are
 | `keelsign-hybrid-bad-ed25519.bin` | `Ed25519(SignatureInvalid)` | `Ok` | `Ed25519(SignatureInvalid)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: ED25519 TLV value byte 0 ^= 0x01 |
 | `keelsign-hybrid-bad-pq.bin` | `Ok` | `SignatureInvalid` | `SignatureInvalid` | mutation of `keelsign-hybrid-ed25519-lms.bin`: LMS/HSS signature TLV (0x4BA3) last byte ^= 0x01 |
 | `keelsign-hybrid-bad-sha256.bin` | `Image(DigestMismatch)` | `Image(DigestMismatch)` | `Image(DigestMismatch)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: SHA256 TLV value byte 0 ^= 0x01 |
+| `keelsign-hybrid-ed25519-hss2.bin` | `Ok` | `Ok` | `Ok` | hybrid: imgtool Ed25519 (KEYHASH + ED25519) plus HSS L=2, both levels LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 |
 | `keelsign-hybrid-ed25519-lms.bin` | `Ok` | `Ok` | `Ok` | hybrid: imgtool Ed25519 (KEYHASH + ED25519) plus LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8, HSS L=1 |
 | `keelsign-hybrid-ed25519-mldsa44.bin` | `Ok` | `Ok` | `Ok` | hybrid: imgtool Ed25519 (KEYHASH + ED25519) plus an ML-DSA-44 signature under the ML-DSA-44 test key (without `ml-dsa`: see [The ml-dsa feature](#the-ml-dsa-feature)) |
 | `keelsign-hybrid-flag-compressed.bin` | `Image(Compressed)` | `Image(Compressed)` | `Image(Compressed)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: `IMAGE_F_COMPRESSED_LZMA2` (0x400) set in `ih_flags` |
 | `keelsign-hybrid-flag-encrypted.bin` | `Image(Encrypted)` | `Image(Encrypted)` | `Image(Encrypted)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: `IMAGE_F_ENCRYPTED_AES128` (0x04) set in `ih_flags` |
 | `keelsign-hybrid-flag-non-bootable.bin` | `Image(NonBootable)` | `Image(NonBootable)` | `Image(NonBootable)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: `IMAGE_F_NON_BOOTABLE` (0x10) set in `ih_flags` |
+| `keelsign-hybrid-hss2-bad-ed25519.bin` | `Ed25519(SignatureInvalid)` | `Ok` | `Ed25519(SignatureInvalid)` | mutation of `keelsign-hybrid-ed25519-hss2.bin`: ED25519 TLV value byte 0 ^= 0x01 |
+| `keelsign-hybrid-hss2-bad-pq.bin` | `Ok` | `SignatureInvalid` | `SignatureInvalid` | mutation of `keelsign-hybrid-ed25519-hss2.bin`: LMS/HSS signature TLV (0x4BA3) last byte (bottom-level path) ^= 0x01 |
+| `keelsign-hybrid-hss2-bad-top-level.bin` | `Ok` | `SignatureInvalid` | `SignatureInvalid` | mutation of `keelsign-hybrid-ed25519-hss2.bin`: LMS/HSS signature TLV (0x4BA3) byte 12 (level-0 LM-OTS C[0]) ^= 0x01 |
+| `keelsign-hybrid-hss2-missing-pq.bin` | `Ok` | `MissingPqSignature` | `MissingPqSignature` | mutation of `keelsign-hybrid-ed25519-hss2.bin`: LMS/HSS signature TLV (0x4BA3) removed |
 | `keelsign-hybrid-keyhash-only.bin` | `Ed25519(Missing)` | `Ok` | `Ed25519(Missing)` | mutation of `keelsign-hybrid-ed25519-lms.bin`: ED25519 TLV removed: KEYHASH alone |
 | `keelsign-hybrid-missing-key-id.bin` | `Ok` | `MissingKeyId` | `MissingKeyId` | mutation of `keelsign-hybrid-ed25519-lms.bin`: key-ID TLV (0x4BA0) removed |
 | `keelsign-hybrid-missing-pq.bin` | `Ok` | `MissingPqSignature` | `MissingPqSignature` | mutation of `keelsign-hybrid-ed25519-lms.bin`: LMS/HSS signature TLV (0x4BA3) removed |

@@ -5,7 +5,7 @@ application verify the image in its DFU slot with `keelsign-verify` before it ma
 image for swap. The image format is MCUboot's (docs/image-format.md), so the same
 signed image works with MCUboot and embassy-boot. This page has the partition layout of
 both boards, the bootloader, how to build and flash the example applications, and the
-on-target procedures P1 to P4. The procedures need the boards (NEEDS-HARDWARE): a human
+on-target procedures P1 to P5. The procedures need the boards (NEEDS-HARDWARE): a human
 runs them and records the RTT log and the state word.
 
 The flow on the device:
@@ -420,6 +420,12 @@ and marks it only if the image is newer than itself (app A is 1.0.0, app B 2.0.0
 `build_num` ignored), then resets. The version check is the anti-rollback `accept` hook
 in action: an older, validly signed image written to the DFU slot is verified and then
 refused with `NotAccepted`. The `soak` feature verifies in a loop and never marks.
+The `hybrid` feature (SHA-69) switches to `Policy::Hybrid`: an image needs a valid
+Ed25519 signature under the Ed25519 test key (`tests/fixtures/images/keys/ed25519-test-key.pem`)
+and a valid LMS/HSS signature under one of the LMS/HSS keys of
+`keelsign-hybrid-ed25519-lms.bin` (HSS L=1) and `keelsign-hybrid-ed25519-hss2.bin`
+(HSS L=2) (`Config<'static, 2, 1>`). After the `hello` line every build logs its policy
+(`policy PqOnly` or `policy Hybrid`).
 
 Flash app A into the active slot with the probe as the runner (it writes the ELF at
 ACTIVE + 0x200 and leaves the state page and the DFU slot alone), from
@@ -428,6 +434,7 @@ ACTIVE + 0x200 and leaves the state page and the DFU slot alone), from
 ```sh
 cargo run --release                     # app A, RTT log in the terminal
 cargo run --release --features soak     # P4
+cargo run --release --features hybrid   # P5
 ```
 
 Write an image into the DFU slot (the bootloader and app A stay):
@@ -550,6 +557,69 @@ write and erase.)
    swap is power-fail safe and resumes; the board ends in app A with `Revert` handled.
 
 Record the number of resets and the state words for each board.
+
+## P5 hybrid Ed25519 + LMS update (NEEDS-HARDWARE)
+
+The hybrid build accepts an image only if both halves verify: the Ed25519 pair imgtool
+writes and the LMS/HSS signature keelsign adds (SHA-69). Required on the nRF52840-DK
+(`examples/nrf52840-boot-app`); optional on the Pico 2 W (`examples/rp2350-boot-app`,
+the same steps with its addresses). The host mirror on a mock flash, both updaters, is
+`mark::hybrid_lms_cases_mark_iff_both_halves_verify`
+(`cargo test -p keelsign-embassy --locked hybrid_lms_cases`).
+
+1. Flash the bootloader, then app A with the hybrid build:
+   `cargo run --release --features hybrid`.
+2. Expect `hello from keelsign boot app A`, `policy Hybrid`,
+   `state Boot: verifying the DFU slot` and `no update: Rejected(Parse(BadMagic))`.
+3. For each image below: write it into the DFU slot, reset, and record the log and the
+   state word.
+
+| Image | Expected log (app A, hybrid build) | State word |
+|---|---|---|
+| `tests/fixtures/images/keelsign-hybrid-ed25519-lms.bin` (good, HSS L=1) | `update 1.2.3+4 verified and marked for swap; resetting`, then as P1 steps 5 and 6: the swap, the watchdog reset, `state Revert: the update was reverted; app A confirmed` | `Swap` (first byte `f0`) before the reset, `Boot` after `mark_booted` |
+| `tests/fixtures/images/keelsign-hybrid-ed25519-hss2.bin` (good, HSS L=2) | as the line above | as above |
+| `tests/fixtures/images/keelsign-hybrid-bad-ed25519.bin` (Ed25519 tampered) | `no update: Rejected(Ed25519(SignatureInvalid))` | unchanged (`Boot`) |
+| `tests/fixtures/images/keelsign-hybrid-bad-pq.bin` (LMS tampered) | `no update: Rejected(SignatureInvalid)` | unchanged |
+| `tests/fixtures/images/keelsign-hybrid-missing-pq.bin` (LMS removed) | `no update: Rejected(MissingPqSignature)` | unchanged |
+| `tests/fixtures/images/keelsign-hybrid-hss2-bad-ed25519.bin` | `no update: Rejected(Ed25519(SignatureInvalid))` | unchanged |
+| `tests/fixtures/images/keelsign-hybrid-hss2-bad-pq.bin` (bottom level tampered) | `no update: Rejected(SignatureInvalid)` | unchanged |
+| `tests/fixtures/images/keelsign-hybrid-hss2-bad-top-level.bin` (top level tampered) | `no update: Rejected(SignatureInvalid)` | unchanged |
+| `tests/fixtures/images/keelsign-hybrid-hss2-missing-pq.bin` | `no update: Rejected(MissingPqSignature)` | unchanged |
+| `tests/fixtures/images/keelsign-lms-m32-h5.bin` (LMS only, no Ed25519 pair) | `no update: Rejected(Ed25519(Missing))` | unchanged |
+
+Each reject is also logged by the adapter as
+`keelsign-embassy: update not marked: Rejected(...)`, and app A boots again after every
+case (`hello from keelsign boot app A`, `policy Hybrid`, `state Boot`).
+
+4. App B, signed hybrid, boots. Make a new LMS/HSS key and put its 60 raw public-key
+   bytes into `HYBRID_LMS_KEY_L1` in `src/main.rs` for this run only, as P3 step 1 does
+   for `TRUSTED_KEY` (do not commit it: repo-checks pins the key to the fixture). The
+   Ed25519 half uses the committed TEST KEY, which the hybrid build trusts:
+
+   ```sh
+   keelsign keygen --alg lms-sha256-m32-h10 --out lms.pem
+   cargo build --release --features b,hybrid
+   rust-objcopy -O binary target/thumbv7em-none-eabihf/release/nrf52840-boot-app b.bin
+   # RP2350: target/thumbv8m.main-none-eabihf/release/rp2350-boot-app
+   imgtool sign --key ../../tests/fixtures/images/keys/ed25519-test-key.pem \
+       --public-key-format hash --header-size 0x200 --pad-header --align 4 \
+       --version 2.0.0 --slot-size 0x40000 b.bin b.signed.bin   # RP2350: --slot-size 0x80000
+   keelsign sign --key lms.pem b.signed.bin b.keelsign.bin      # keeps imgtool's Ed25519 pair
+   keelsign pubkey --key lms.pem --out lms.pub.pem
+   keelsign verify --policy hybrid --pub lms.pub.pem \
+       --pub ../../tests/fixtures/images/keys/ed25519-test-key.spki.der b.keelsign.bin   # exit 0
+   ```
+
+5. Flash app A with the same edited key (`cargo run --release --features hybrid`), write
+   `b.keelsign.bin` into the DFU slot and reset. Expect from app A:
+   `update 2.0.0+0 verified and marked for swap; resetting`. After the swap:
+   `hello from keelsign boot app B`, `policy Hybrid` and
+   `state Swap: app B confirmed (mark_booted)`; the state word reads `Boot` after
+   `mark_booted` (nRF `d0 d0 d0 d0`, RP2350 `d0 ff ff ff`).
+6. Revert the key edit. Record the RTT logs and state words of steps 2 to 5.
+
+The DFU slot is trusted from the application's verify to the next reset, as for the
+post-quantum build ([Limitations](#limitations)).
 
 ## Limitations
 

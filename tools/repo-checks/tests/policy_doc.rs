@@ -212,7 +212,7 @@ fn policy_doc_has_required_sections() {
 fn matrix_table_matches_manifest() {
     let manifest = manifest_cells();
     let doc = doc_cells(&doc());
-    assert_eq!(manifest.len(), 53, "every MANIFEST.json output");
+    assert_eq!(manifest.len(), 58, "every MANIFEST.json output");
     let doc_names: Vec<&String> = doc.keys().collect();
     let manifest_names: Vec<&String> = manifest.keys().collect();
     assert_eq!(

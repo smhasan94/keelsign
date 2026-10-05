@@ -268,10 +268,11 @@ jobs:
         if: ${{ !matrix.bench }}
         run: cargo build --release --locked --target ${{ matrix.target }}
 
-      # SHA-55: the boot apps' app-B and soak variants (docs/embassy.md P3, P4).
-      - name: cargo clippy (boot app, features b,soak)
+      # SHA-55: the boot apps' app-B and soak variants (docs/embassy.md P3, P4); SHA-69:
+      # and the hybrid Ed25519 + LMS/HSS build (P5).
+      - name: cargo clippy (boot app, features b,soak,hybrid)
         if: ${{ contains(matrix.project, 'boot-app') }}
-        run: cargo clippy --locked --target ${{ matrix.target }} --features b,soak -- -D warnings
+        run: cargo clippy --locked --target ${{ matrix.target }} --features b,soak,hybrid -- -D warnings
 
       - name: cargo clippy (all targets)
         if: ${{ matrix.bench }}

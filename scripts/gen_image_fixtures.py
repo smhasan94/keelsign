@@ -55,13 +55,17 @@ Images (all: header size 0x200, version 1.2.3+4, the same 1,536-byte body):
   * keelsign-hybrid-reserved-tlv-protected.bin (SHA-46): the hybrid layout plus imgtool
     `--custom-tlv 0x4ba0 <16 bytes>`, a keelsign-block TLV in the protected area (inside
     M; both signatures are valid over that M); verify rejects it.
+  * keelsign-hybrid-ed25519-hss2.bin (SHA-69): imgtool Ed25519 plus an HSS L=2
+    signature, both levels M32_H5 / N32_W8 (the source of the HSS-2 hybrid mutations).
 
 Policy mutations (SHA-46): deterministic edits of keelsign-hybrid-ed25519-lms.bin (and
 one of keelsign-hybrid-protected-tlvs.bin) as regenerated in the same run, listed in
 MUTATIONS with what they change. SHA-44 adds the ML-DSA mutations (tampered body and
 protected TLV, with and without the SHA256 TLV recomputed, tampered, malformed and
 truncated signatures, an untrusted key ID, a signature from another image, and the PQ
-half stripped from the ML-DSA hybrid image). They are not re-signed: imgtool would reject most of
+half stripped from the ML-DSA hybrid image). SHA-69 adds four edits of
+keelsign-hybrid-ed25519-hss2.bin (Ed25519 tampered, the bottom and the top HSS level
+tampered, the HSS signature removed). They are not re-signed: imgtool would reject most of
 them (`imgtool_verify: false`), and the manifest records `derived_from` and `mutation`.
 The key fields are copied from the base so tests can build its trusted key.
 
@@ -307,6 +311,10 @@ IMAGES = [
     ("keelsign-mldsa65-protected-tlvs.bin",
      "ML-DSA-65 under the ML-DSA-65 test key, with protected SEC_CNT and vendor TLV 0x10A0",
      ["mldsa65"], None, True, False, "Ok"),
+    # SHA-69: hybrid Ed25519 + HSS L=2.
+    ("keelsign-hybrid-ed25519-hss2.bin",
+     "hybrid: imgtool Ed25519 (KEYHASH + ED25519) plus HSS L=2, both levels LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8",
+     ["lms"], LMS_M32_H5 * 2, False, True, "Ok"),
 ]
 
 # Extra imgtool `--custom-tlv` TLVs (protected area) per image (SHA-46).
@@ -323,6 +331,7 @@ IMAGE_F_NON_BOOTABLE = 0x10
 IMAGE_F_COMPRESSED_LZMA2 = 0x400
 HYBRID_BASE = "keelsign-hybrid-ed25519-lms.bin"
 HYBRID_PROTECTED_BASE = "keelsign-hybrid-protected-tlvs.bin"
+HYBRID_HSS2_BASE = "keelsign-hybrid-ed25519-hss2.bin"
 
 
 def _tlv_index(tlvs, kind):
@@ -547,6 +556,18 @@ MUTATIONS = [
      "ML-DSA-44 signature TLV (0x4BA1) removed"),
     ("keelsign-hybrid-mldsa44-stripped-pq.bin", MLDSA_HYBRID_BASE, _remove_all(0x4BA0, 0x4BA1),
      "key-ID TLV (0x4BA0) and ML-DSA-44 signature TLV (0x4BA1) removed: a plain imgtool Ed25519 image"),
+    # SHA-69: either half of the hybrid Ed25519 + HSS L=2 image tampered or missing. The
+    # HSS signature is u32 Nspk | level-0 LMS signature (u32 q | u32 ots_type | C | y ...)
+    # | pub[1] | level-1 LMS signature, so value byte 12 is C[0] of the level-0 LM-OTS
+    # signature (the top level) and the last byte is in the level-1 (bottom) path.
+    ("keelsign-hybrid-hss2-bad-ed25519.bin", HYBRID_HSS2_BASE, _flip_value(TLV_ED25519, 0),
+     "ED25519 TLV value byte 0 ^= 0x01"),
+    ("keelsign-hybrid-hss2-bad-pq.bin", HYBRID_HSS2_BASE, _flip_value(0x4BA3, -1),
+     "LMS/HSS signature TLV (0x4BA3) last byte (bottom-level path) ^= 0x01"),
+    ("keelsign-hybrid-hss2-bad-top-level.bin", HYBRID_HSS2_BASE, _flip_value(0x4BA3, 12),
+     "LMS/HSS signature TLV (0x4BA3) byte 12 (level-0 LM-OTS C[0]) ^= 0x01"),
+    ("keelsign-hybrid-hss2-missing-pq.bin", HYBRID_HSS2_BASE, _remove(0x4BA3),
+     "LMS/HSS signature TLV (0x4BA3) removed"),
 ]
 
 # The verdict strings of the policy matrix, numbered: the expectation codes of
@@ -666,6 +687,13 @@ POLICY = {
     "keelsign-mldsa65-foreign-sig.bin": _pq_only("SignatureInvalid"),
     "keelsign-hybrid-mldsa44-missing-pq.bin": _cells("Ok", "MissingPqSignature", "MissingPqSignature"),
     "keelsign-hybrid-mldsa44-stripped-pq.bin": _cells("Ok", "MissingPqSignature", "MissingPqSignature"),
+    # SHA-69.
+    "keelsign-hybrid-ed25519-hss2.bin": _all("Ok"),
+    "keelsign-hybrid-hss2-bad-ed25519.bin": _cells("Ed25519(SignatureInvalid)", "Ok",
+                                                   "Ed25519(SignatureInvalid)"),
+    "keelsign-hybrid-hss2-bad-pq.bin": _cells("Ok", "SignatureInvalid", "SignatureInvalid"),
+    "keelsign-hybrid-hss2-bad-top-level.bin": _cells("Ok", "SignatureInvalid", "SignatureInvalid"),
+    "keelsign-hybrid-hss2-missing-pq.bin": _cells("Ok", "MissingPqSignature", "MissingPqSignature"),
 }
 
 _UA44 = "UnsupportedAlgorithm(MlDsa44)"

@@ -48,6 +48,13 @@
       "sha256": "37846111772c1455ab9c8c8896d4f596bf288c26d8ce989cfe9d545c42f8c874",
       "source": "tests/fixtures/images/keelsign-hybrid-bad-sha256.bin"
     },
+    "fixture-keelsign-hybrid-ed25519-hss2.bin": {
+      "bytes": 4860,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "6f3032d9da2c55b89293ece0d26c374f965ee66f2c95ecf198f65583c7b4d407",
+      "source": "tests/fixtures/images/keelsign-hybrid-ed25519-hss2.bin"
+    },
     "fixture-keelsign-hybrid-ed25519-lms.bin": {
       "bytes": 3512,
       "expect_parse": "Ok",
@@ -82,6 +89,34 @@
       "expect_read_from_4k": "Ok",
       "sha256": "af1865036bd7efeb4686ec7ebadd0509326d5400468748fb80ba68d912726f0a",
       "source": "tests/fixtures/images/keelsign-hybrid-flag-non-bootable.bin"
+    },
+    "fixture-keelsign-hybrid-hss2-bad-ed25519.bin": {
+      "bytes": 4860,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "afabe1ce271f809583c95b59fdfae3821c061e7c1a8bdfc5f38a226b6d882140",
+      "source": "tests/fixtures/images/keelsign-hybrid-hss2-bad-ed25519.bin"
+    },
+    "fixture-keelsign-hybrid-hss2-bad-pq.bin": {
+      "bytes": 4860,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "be8438b48e762a1c66fc83fff045664dc01e479dab0c2bfef4851a6106de9da4",
+      "source": "tests/fixtures/images/keelsign-hybrid-hss2-bad-pq.bin"
+    },
+    "fixture-keelsign-hybrid-hss2-bad-top-level.bin": {
+      "bytes": 4860,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "37992af6c19ba402f033d8b57815c0d3a8b516d87ccaa0a536382ec916c6bab2",
+      "source": "tests/fixtures/images/keelsign-hybrid-hss2-bad-top-level.bin"
+    },
+    "fixture-keelsign-hybrid-hss2-missing-pq.bin": {
+      "bytes": 2212,
+      "expect_parse": "Ok",
+      "expect_read_from_4k": "Ok",
+      "sha256": "ff477e12b9d1d23687f48375cf939847425de95d572742242e5c307af86814d9",
+      "source": "tests/fixtures/images/keelsign-hybrid-hss2-missing-pq.bin"
     },
     "fixture-keelsign-hybrid-keyhash-only.bin": {
       "bytes": 3444,

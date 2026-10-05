@@ -17,7 +17,7 @@ repository root, sign an imgtool-signed image with a new LMS/HSS key and verify 
 **LMS/HSS keys are stateful:** each signature uses up one leaf of the key, so `keygen`
 also writes `signing.pem.state` and `signing.pem.journal`, and `sign` records the leaf
 there before it signs. Keep the three files together and never copy or restore the key
-(a reused leaf breaks it); read [docs/keys.md](docs/keys.md#stateful-lms-keys) before
+(a reused leaf breaks it); read [docs/lms.md](docs/lms.md#rules-for-handling-a-key) before
 signing real firmware. (`--alg ml-dsa-65` gives a stateless ML-DSA key instead.)
 
 ```sh
@@ -55,8 +55,8 @@ keelsign inspect app.keelsign.bin                                 # shows the le
 
 ## Documentation
 
-- [docs/keys.md](docs/keys.md), [docs/signing.md](docs/signing.md),
-  [docs/verify.md](docs/verify.md): the CLI, key files and exit codes.
+- [docs/keys.md](docs/keys.md), [docs/lms.md](docs/lms.md), [docs/signing.md](docs/signing.md),
+  [docs/verify.md](docs/verify.md): the CLI, key files, LMS/HSS state and exit codes.
 - [docs/image-format.md](docs/image-format.md), [docs/policy.md](docs/policy.md),
   [docs/embassy.md](docs/embassy.md), [docs/ffi.md](docs/ffi.md): the image format, the
   policies, and the verifier from embassy-boot and from C.

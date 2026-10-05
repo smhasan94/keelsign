@@ -427,6 +427,15 @@ fn bench_tests_use_embedded_test_harness() {
             "POLICY board=",
             "Policy::ALL",
             "POLICY_TARGET",
+            // SHA-69: `hybrid_verify_bench` times and stack-paints a hybrid verify of the
+            // L=1 and L=2 images and logs `BENCH` lines for scripts/bench_summarize.py.
+            "stack_paint",
+            "Cycles",
+            "BENCH board=",
+            "Policy::Hybrid",
+            "keelsign-hybrid-ed25519-lms.bin",
+            "keelsign-hybrid-ed25519-hss2.bin",
+            "!mark.saturated && mark.bytes <= STACK_LIMIT",
         ] {
             assert!(
                 policy.contains(needle),

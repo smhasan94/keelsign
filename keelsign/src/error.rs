@@ -268,7 +268,7 @@ impl fmt::Display for Error {
                     LmsStateError::Missing => write!(
                         f,
                         "{path} is missing: an LMS/HSS key signs only with its state file and \
-                         journal (docs/keys.md#stateful-lms-keys); if this key has signed \
+                         journal (docs/lms.md#rules-for-handling-a-key); if this key has signed \
                          before, retire it rather than recreate them"
                     ),
                     LmsStateError::ForeignKey { expected, found } => write!(
