@@ -148,6 +148,79 @@ fn every_policy_matrix_case_marks_iff_the_verdict_is_ok() {
     assert_eq!(cells, policy_kat::TARGET_CASES * 3);
 }
 
+/// SHA-69 AC1 / TP1 on the host (the mock-flash mirror of docs/embassy.md P5): under
+/// `Policy::Hybrid`, with the image's LMS/HSS key and the Ed25519 test key trusted, both
+/// updaters mark the good HSS L=1 and L=2 hybrid images for swap and reject every image
+/// with either half tampered or missing, naming the half, without writing anything.
+#[test]
+fn hybrid_lms_cases_mark_iff_both_halves_verify() {
+    use keelsign_verify::Ed25519Error;
+    let fixture = fixture();
+    let cases: [(&str, Option<keelsign_verify::Error>); 10] = [
+        ("keelsign-hybrid-ed25519-lms.bin", None),
+        ("keelsign-hybrid-ed25519-hss2.bin", None),
+        (
+            "keelsign-hybrid-bad-ed25519.bin",
+            Some(keelsign_verify::Error::Ed25519(
+                Ed25519Error::SignatureInvalid,
+            )),
+        ),
+        (
+            "keelsign-hybrid-hss2-bad-ed25519.bin",
+            Some(keelsign_verify::Error::Ed25519(
+                Ed25519Error::SignatureInvalid,
+            )),
+        ),
+        (
+            "keelsign-hybrid-bad-pq.bin",
+            Some(keelsign_verify::Error::SignatureInvalid),
+        ),
+        (
+            "keelsign-hybrid-hss2-bad-pq.bin",
+            Some(keelsign_verify::Error::SignatureInvalid),
+        ),
+        (
+            "keelsign-hybrid-hss2-bad-top-level.bin",
+            Some(keelsign_verify::Error::SignatureInvalid),
+        ),
+        (
+            "keelsign-hybrid-missing-pq.bin",
+            Some(keelsign_verify::Error::MissingPqSignature),
+        ),
+        (
+            "keelsign-hybrid-hss2-missing-pq.bin",
+            Some(keelsign_verify::Error::MissingPqSignature),
+        ),
+        (
+            LMS_IMAGE,
+            Some(keelsign_verify::Error::Ed25519(Ed25519Error::Missing)),
+        ),
+    ];
+    for (name, expected) in cases {
+        let key = pq_key(&fixture.case(name).unwrap()).unwrap();
+        let config = Config::new(Policy::Hybrid, [key], ed25519_keys());
+        let (blocking, b_flash) = mark_blocking(flash_with(image(name)), &config);
+        let (asynchronous, a_flash) = mark_async(flash_with(image(name)), &config);
+        assert_eq!(asynchronous, blocking, "{name}: async == blocking");
+        assert_eq!(a_flash.mem, b_flash.mem, "{name}: the same flash contents");
+        match expected {
+            None => {
+                let verified = blocking.unwrap_or_else(|e| panic!("{name}: {e:?}"));
+                assert_eq!(verified.policy, Policy::Hybrid, "{name}");
+                assert_eq!(verified.pq_key, Some(key), "{name}");
+                assert_eq!(
+                    verified.ed25519_key,
+                    Some(ed25519_keys()[0]),
+                    "{name}: the Ed25519 test key"
+                );
+                assert_eq!(state_word(&b_flash), [SWAP_MAGIC; 4], "{name}: marked");
+                assert!(mutations_only_in_state(&b_flash.ops), "{name}");
+            }
+            Some(error) => assert_rejected_and_not_marked(blocking, &b_flash, error),
+        }
+    }
+}
+
 #[test]
 fn large_image_verifies_from_a_256k_slot() {
     assert_eq!(LARGE_IMAGE.len(), 205_579);

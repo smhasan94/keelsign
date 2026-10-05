@@ -194,7 +194,8 @@ fn ci_cross_builds_keelsign_embassy_and_boot_apps() {
         "cargo build --release --locked --target ${{ matrix.target }}",
         "flip-link",
         // SHA-55 review: the boot apps' b and soak variants, boot-app entries only.
-        "if: ${{ contains(matrix.project, 'boot-app') }}\n        run: cargo clippy --locked --target ${{ matrix.target }} --features b,soak -- -D warnings",
+        // SHA-69: and the hybrid variant.
+        "if: ${{ contains(matrix.project, 'boot-app') }}\n        run: cargo clippy --locked --target ${{ matrix.target }} --features b,soak,hybrid -- -D warnings",
     ] {
         assert!(
             builds.contains(needle),
@@ -331,6 +332,8 @@ fn boot_app_examples_are_standalone_and_link_past_the_header() {
             "indexing_slicing = \"deny\"".to_owned(),
             "\nb = []\n".to_owned(),
             "\nsoak = []\n".to_owned(),
+            // SHA-69: the hybrid build forwards keelsign-verify's Ed25519 half only.
+            "\nhybrid = [\"keelsign-embassy/ed25519\"]\n".to_owned(),
         ] {
             assert!(
                 cargo_toml.contains(&needle),
@@ -370,10 +373,19 @@ fn boot_app_examples_are_standalone_and_link_past_the_header() {
             "{name}: {hal} must enable {}",
             app.hal_feature
         );
+        // embassy-boot's own verify features stay off (they remove `mark_updated`); the
+        // Ed25519 half of the `hybrid` build is keelsign-verify's (SHA-69).
+        let boot = dependency_line(&cargo_toml, "embassy-boot");
         assert!(
-            !cargo_toml.contains("ed25519") && !cargo_toml.contains("salty"),
-            "{name}: embassy-boot's verify features must stay off"
+            !boot.contains("ed25519") && !boot.contains("salty"),
+            "{name}: embassy-boot's verify features must stay off: {boot}"
         );
+        for krate in ["salty", "ed25519-dalek", "ed25519-compact"] {
+            assert!(
+                !cargo_toml.contains(krate),
+                "{name}: no direct `{krate}` dependency; the hybrid build uses keelsign-verify's"
+            );
+        }
 
         // The partitions: state after the bootloader, the application linked 0x200 (the
         // MCUboot header) past the start of the active slot, the DFU slot one page larger.
@@ -449,6 +461,10 @@ fn boot_app_examples_are_standalone_and_link_past_the_header() {
             "from_linkerfile",
             "feature = \"soak\"",
             "feature = \"b\"",
+            // SHA-69: the hybrid build and the policy in the boot log.
+            "feature = \"hybrid\"",
+            "Policy::Hybrid",
+            "info!(\"policy {}\", POLICY_NAME);",
         ] {
             assert!(
                 main.contains(needle),
@@ -517,13 +533,104 @@ fn boot_app_trusted_key_matches_fixture_manifest() {
     }
 }
 
+/// The bytes of the `static {name}: [u8; N] = [ … ];` array in a main.rs.
+fn static_bytes(main: &str, name: &str) -> Vec<u8> {
+    let start = main
+        .find(&format!("static {name}: [u8; "))
+        .unwrap_or_else(|| panic!("main.rs has no `{name}` array"));
+    trusted_key_bytes(&main[start..].replacen(name, "TRUSTED_KEY", 1))
+}
+
+/// The `public_key_hex` of a MANIFEST.json output, as bytes.
+fn manifest_public_key(manifest: &str, image: &str) -> Vec<u8> {
+    let entry = manifest
+        .find(&format!("\"{image}\": {{"))
+        .unwrap_or_else(|| panic!("MANIFEST.json lists {image}"));
+    let entry = &manifest[entry..];
+    let entry = &entry[..entry.find("\n    }").expect("entry ends")];
+    let hex = entry
+        .split("\"public_key_hex\": \"")
+        .nth(1)
+        .and_then(|v| v.split('"').next())
+        .expect("public_key_hex");
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("hex"))
+        .collect()
+}
+
+/// SHA-69 AC1: the boot apps' `hybrid` build trusts exactly the keys of the hybrid
+/// fixtures docs/embassy.md P5 flashes: the LMS/HSS keys of
+/// `keelsign-hybrid-ed25519-lms.bin` (L=1) and `keelsign-hybrid-ed25519-hss2.bin` (L=2) and
+/// the Ed25519 test key, under `Policy::Hybrid` with `Config<'static, 2, 1>`; the default
+/// build stays `PqOnly` with one key.
+#[test]
+fn boot_app_hybrid_config_matches_fixture_keys() {
+    let manifest = read("tests/fixtures/images/MANIFEST.json");
+    let l1 = manifest_public_key(&manifest, "keelsign-hybrid-ed25519-lms.bin");
+    let l2 = manifest_public_key(&manifest, "keelsign-hybrid-ed25519-hss2.bin");
+    assert_eq!(&l1[..4], &[0, 0, 0, 1], "an HSS L=1 key");
+    assert_eq!(&l2[..4], &[0, 0, 0, 2], "an HSS L=2 key");
+    let spki =
+        fs::read(workspace_root().join("tests/fixtures/images/keys/ed25519-test-key.spki.der"))
+            .expect("read the Ed25519 test key");
+    assert_eq!(spki.len(), 44, "an Ed25519 SubjectPublicKeyInfo");
+    let ed = spki[12..].to_vec();
+    for app in &BOOT_EXAMPLES {
+        let main = read_app(app, "src/main.rs");
+        for (name, expected) in [
+            ("HYBRID_LMS_KEY_L1", &l1),
+            ("HYBRID_LMS_KEY_L2", &l2),
+            ("ED25519_TEST_KEY", &ed),
+        ] {
+            assert_eq!(
+                &static_bytes(&main, name),
+                expected,
+                "{}: {name} must be the fixture's key",
+                app.name
+            );
+            assert!(
+                main.contains(&format!(
+                    "#[cfg(feature = \"hybrid\")]\nstatic {name}: [u8; "
+                )),
+                "{}: {name} exists only in the hybrid build",
+                app.name
+            );
+        }
+        for needle in [
+            "#[cfg(not(feature = \"hybrid\"))]\nstatic TRUSTED_KEY: [u8; 60] = [",
+            "const N: usize = if cfg!(feature = \"hybrid\") { 2 } else { 1 };",
+            "const E: usize = if cfg!(feature = \"hybrid\") { 1 } else { 0 };",
+            "#[cfg(not(feature = \"hybrid\"))]\nconst CONFIG: Config<'static, N, E> = Config::new(\n    Policy::PqOnly,",
+            "#[cfg(feature = \"hybrid\")]\nconst CONFIG: Config<'static, N, E> = Config::new(\n    Policy::Hybrid,",
+            "public_key: &HYBRID_LMS_KEY_L1,",
+            "public_key: &HYBRID_LMS_KEY_L2,",
+            "public_key: &ED25519_TEST_KEY,",
+        ] {
+            assert!(
+                main.contains(needle),
+                "{}: src/main.rs must contain `{needle}`",
+                app.name
+            );
+        }
+    }
+}
+
 #[test]
 #[ignore = "needs thumbv* targets and flip-link; CI cross-build job covers this"]
 fn boot_app_examples_cross_build() {
     for app in &BOOT_EXAMPLES {
         let dir = workspace_root().join("examples").join(app.name);
         let target_dir = dir.join("target");
-        for features in ["", "b", "soak", "b,soak"] {
+        for features in [
+            "",
+            "b",
+            "soak",
+            "b,soak",
+            "hybrid",
+            "b,hybrid",
+            "b,soak,hybrid",
+        ] {
             run_ok(cargo_in(&dir, &target_dir).args([
                 "clippy",
                 "--locked",
@@ -638,7 +745,8 @@ fn adapter_readme_is_under_a_page_and_covers_keys_policy_partitions() {
 }
 
 /// SHA-55 TP1, TP2, TP4 and the on-target half of AC2: docs/embassy.md has the
-/// NEEDS-HARDWARE procedures P1 to P4 with their commands and expected output, both
+/// NEEDS-HARDWARE procedures P1 to P4 (and SHA-69's P5, the hybrid build) with their
+/// commands and expected output, both
 /// boards' partition tables and the out-of-tree bootloader, and the README links it.
 #[test]
 fn embassy_doc_has_the_hardware_procedures() {
@@ -652,6 +760,7 @@ fn embassy_doc_has_the_hardware_procedures() {
         "## P2 tampered and untrusted images (NEEDS-HARDWARE)",
         "## P3 full update with app B (NEEDS-HARDWARE, needs SHA-67; ML-DSA-44 DEFERRED to SHA-169)",
         "## P4 reset during verification (NEEDS-HARDWARE)",
+        "## P5 hybrid Ed25519 + LMS update (NEEDS-HARDWARE)",
         "## Limitations",
     ] {
         assert!(
@@ -697,6 +806,29 @@ fn embassy_doc_has_the_hardware_procedures() {
         "state Swap: app B confirmed (mark_booted)",
         "--features soak",
         "mark::reset_at_any_point_during_mark_leaves_boot_or_swap",
+        // SHA-69 P5: the hybrid build, its fixtures and app B signed hybrid.
+        "procedures P1 to P5",
+        "cargo run --release --features hybrid",
+        "policy Hybrid",
+        "tests/fixtures/images/keelsign-hybrid-ed25519-lms.bin",
+        "tests/fixtures/images/keelsign-hybrid-ed25519-hss2.bin",
+        "tests/fixtures/images/keelsign-hybrid-bad-ed25519.bin",
+        "tests/fixtures/images/keelsign-hybrid-bad-pq.bin",
+        "tests/fixtures/images/keelsign-hybrid-missing-pq.bin",
+        "tests/fixtures/images/keelsign-hybrid-hss2-bad-ed25519.bin",
+        "tests/fixtures/images/keelsign-hybrid-hss2-bad-pq.bin",
+        "tests/fixtures/images/keelsign-hybrid-hss2-bad-top-level.bin",
+        "tests/fixtures/images/keelsign-hybrid-hss2-missing-pq.bin",
+        "Rejected(Ed25519(SignatureInvalid))",
+        "Rejected(MissingPqSignature)",
+        "Rejected(Ed25519(Missing))",
+        "cargo build --release --features b,hybrid",
+        "--public-key-format hash",
+        "keelsign sign --key lms.pem b.signed.bin b.keelsign.bin",
+        "HYBRID_LMS_KEY_L1",
+        "nRF52840-DK",
+        "optional on the Pico 2 W",
+        "mark::hybrid_lms_cases_mark_iff_both_halves_verify",
     ] {
         assert!(
             doc.contains(needle),
@@ -712,6 +844,7 @@ fn embassy_doc_has_the_hardware_procedures() {
             "verified and marked for swap; resetting",
             "no update: {}",
             "soak: verify {} ok (not marked)",
+            "policy {}",
         ] {
             assert!(
                 main.contains(line),

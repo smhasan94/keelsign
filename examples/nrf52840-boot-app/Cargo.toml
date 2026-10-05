@@ -15,6 +15,10 @@ b = []
 # Verify the DFU slot in a loop and never mark it (docs/embassy.md P4: reset during
 # verification).
 soak = []
+# Policy::Hybrid (SHA-69, docs/embassy.md P5): Ed25519 + LMS/HSS, trusting the two hybrid
+# fixture LMS/HSS keys and the Ed25519 test key. The Ed25519 half is keelsign-verify's;
+# embassy-boot's own verify features stay off.
+hybrid = ["keelsign-embassy/ed25519"]
 
 [dependencies]
 embassy-executor = { version = "=0.10.0", features = ["defmt", "platform-cortex-m", "executor-thread"] }

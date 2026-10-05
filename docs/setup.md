@@ -289,7 +289,7 @@ three-identical-runs procedure are in [on-target-tests.md](on-target-tests.md) (
   `thumbv8m.main-none-eabihf`; docs/embassy.md) it installs the target and flip-link and
   runs `cargo fmt --check`, `cargo clippy --locked --target <triple> -- -D warnings` and
   `cargo build --release --locked --target <triple>` in the example directory (the
-  boot apps also `cargo clippy` with `--features b,soak`). For each
+  boot apps also `cargo clippy` with `--features b,soak,hybrid`). For each
   bench project (`benches/nrf52840-mldsa`, `benches/rp2350-mldsa`) it runs
   `cargo fmt --check`, `cargo clippy --locked --target <triple> --all-targets -- -D warnings`,
   `cargo test --no-run --release --locked --target <triple>` (builds the on-target test
