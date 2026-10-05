@@ -16,9 +16,9 @@ repository root, sign an imgtool-signed image with a new LMS/HSS key and verify 
 
 **LMS/HSS keys are stateful:** each signature uses up one leaf of the key, so `keygen`
 also writes `signing.pem.state` and `signing.pem.journal`, and `sign` records the leaf
-there before it signs. Keep the three files together and never copy or restore the key;
-read [docs/keys.md](docs/keys.md#stateful-lms-keys) before signing real firmware.
-(`--alg ml-dsa-65` gives a stateless ML-DSA key instead.)
+there before it signs. Keep the three files together and never copy or restore the key
+(a reused leaf breaks it); read [docs/keys.md](docs/keys.md#stateful-lms-keys) before
+signing real firmware. (`--alg ml-dsa-65` gives a stateless ML-DSA key instead.)
 
 ```sh
 work="$(mktemp -d)"
@@ -37,7 +37,7 @@ keelsign inspect app.keelsign.bin                                 # shows the le
 ## What is supported
 
 - **Signatures:** LMS/HSS (RFC 8554, SP 800-208), ML-DSA-44/65 (FIPS 204) and Ed25519
-  for hybrid images; a strict CNSA 2.0 mode accepts single-tree LMS only.
+  (classical and hybrid); a strict CNSA 2.0 mode accepts single-tree LMS only.
 - **Policies:** `ClassicalOnly`, `PqOnly` and `Hybrid`; one hybrid image serves all
   three ([docs/policy.md](docs/policy.md)).
 - **Device budget:** the verifier is `no_std`, heap-free and `unsafe`-free. LMS/HSS

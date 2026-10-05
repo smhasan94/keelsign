@@ -82,13 +82,18 @@ fn root_readme_status_is_accurate() {
     }
 }
 
+/// Whether `line` opens or closes a code fence; fences indented inside list items count.
+fn is_fence(line: &str) -> bool {
+    line.trim_start().starts_with("```")
+}
+
 /// The text of each `## ` section, keyed by heading, in order. Headings inside code
 /// fences are ignored.
 fn h2_sections(markdown: &str) -> Vec<(String, String)> {
     let mut sections: Vec<(String, String)> = Vec::new();
     let mut in_fence = false;
     for line in markdown.lines() {
-        if line.starts_with("```") {
+        if is_fence(line) {
             in_fence = !in_fence;
         }
         if !in_fence && let Some(heading) = line.strip_prefix("## ") {
@@ -109,12 +114,12 @@ fn sh_blocks(text: &str) -> Vec<Vec<String>> {
     // `Some(is_sh, lines)` while inside a fence.
     let mut fence: Option<(bool, Vec<String>)> = None;
     for line in text.lines() {
-        let is_fence = line.starts_with("```");
+        let fence_line = is_fence(line);
         match fence.take() {
-            None if is_fence => fence = Some((line.trim() == "```sh", Vec::new())),
+            None if fence_line => fence = Some((line.trim() == "```sh", Vec::new())),
             None => {}
-            Some((true, lines)) if is_fence => blocks.push(lines),
-            Some((false, _)) if is_fence => {}
+            Some((true, lines)) if fence_line => blocks.push(lines),
+            Some((false, _)) if fence_line => {}
             Some((is_sh, mut lines)) => {
                 lines.push(line.to_string());
                 fence = Some((is_sh, lines));
@@ -197,7 +202,7 @@ fn markdown_links(markdown: &str) -> Vec<String> {
     let mut links = Vec::new();
     let mut in_fence = false;
     for line in markdown.lines() {
-        if line.starts_with("```") {
+        if is_fence(line) {
             in_fence = !in_fence;
             continue;
         }
@@ -222,12 +227,16 @@ fn markdown_links(markdown: &str) -> Vec<String> {
 /// The GitHub anchor slug of each heading in `markdown`, outside code fences: lower-case,
 /// punctuation other than `-` and `_` removed, spaces turned into `-`; a repeated slug
 /// gets `-1`, `-2`, ... appended.
+///
+/// Known differences from GitHub's rule: link markup inside a heading is slugged as
+/// written (GitHub slugs only the link text), and tabs and combining marks are not
+/// handled as GitHub does. No current doc heading hits any of them.
 fn github_anchors(markdown: &str) -> Vec<String> {
     let mut anchors = Vec::new();
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut in_fence = false;
     for line in markdown.lines() {
-        if line.starts_with("```") {
+        if is_fence(line) {
             in_fence = !in_fence;
             continue;
         }
@@ -268,6 +277,7 @@ fn root_readme_links_resolve() {
     let root = workspace_root();
     let readme = read("README.md");
     let links = markdown_links(&readme);
+    // README has 21 links today; the floor catches a parser that matches nothing.
     assert!(
         links.len() >= 15,
         "found only {} links in README.md; the link scan is broken",
