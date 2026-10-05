@@ -275,10 +275,9 @@ three-identical-runs procedure are in [on-target-tests.md](on-target-tests.md) (
 - `ci`: host fmt, clippy and tests for the root workspace (including the host ML-DSA
   KATs in `benches/mldsa-kat`), the packaging repo-checks (`--test packaging -- --ignored`)
   and the publish dry runs. Since SHA-60 also the `keelsign.h` drift check (cbindgen
-  0.29.4), the C harness against `libkeelsign.a` under ASan + UBSan and Miri on
-  `keelsign-ffi` (nightly-2026-09-29). Since SHA-47 also `cargo deny --locked check`
-  (cargo-deny 0.20.2, `deny.toml`, all features), which fails on any new RustSec
-  advisory until it is fixed or ignored with a reason, and
+  0.29.4) and the C harness against `libkeelsign.a` under ASan + UBSan. Since SHA-47
+  also `cargo deny --locked check` (cargo-deny 0.20.2, `deny.toml`, all features), which
+  fails on any new RustSec advisory until it is fixed or ignored with a reason, and
   `cargo doc --no-deps -p keelsign-verify` with `RUSTDOCFLAGS=-D warnings` in all four
   feature states (none, `ml-dsa`, `ed25519`, `ed25519,ml-dsa`).
 - `verify-cross`: `keelsign-verify`, (SHA-55) `keelsign-embassy` with its board module,
@@ -294,6 +293,12 @@ three-identical-runs procedure are in [on-target-tests.md](on-target-tests.md) (
   `cargo fmt --check`, `cargo clippy --locked --target <triple> --all-targets -- -D warnings`,
   `cargo test --no-run --release --locked --target <triple>` (builds the on-target test
   binary without running it) and `cargo build --release --locked --target <triple> --bins`.
+
+`.github/workflows/miri.yml` (SHA-327) runs `keelsign-ffi`'s pointer-contract tests under
+Miri on nightly-2026-09-29, in parallel with `ci`: jobs `miri keelsign-ffi (features "")`
+and `miri keelsign-ffi (features "ed25519,ml-dsa")`, on pull requests that change
+`keelsign-ffi/**` or the workflow, on every push to `main`, nightly and on
+`workflow_dispatch` ([ffi.md](ffi.md#miri)).
 
 CI never flashes a board. The ignored repo-checks tests (`toolchain::*`,
 `examples::*_cross_builds`, `embassy::*_cross_build*`, `benches::*_cross_builds`,

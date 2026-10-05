@@ -285,6 +285,81 @@ pub fn ci_job(ci: &str, name: &str) -> String {
         .collect()
 }
 
+/// `text` without comments (lines starting with `#`, and ` #…` to the end of a line),
+/// whitespace or quotes: harmless reformatting (line breaks, indentation, quoting) does
+/// not change it, so checks match key tokens rather than exact layout.
+pub fn squash(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with('#') {
+                return "";
+            }
+            match line.find(" #") {
+                Some(at) => &line[..at],
+                None => line,
+            }
+        })
+        .flat_map(str::chars)
+        .filter(|c| !c.is_whitespace() && *c != '"' && *c != '\'')
+        .collect()
+}
+
+/// The text of the job `name` in a workflow: from its `  name:` line up to the next
+/// line indented by exactly two spaces (the next job, or a comment before it).
+pub fn workflow_job<'a>(workflow: &'a str, name: &str) -> &'a str {
+    let start = workflow
+        .find(&format!("\n  {name}:\n"))
+        .unwrap_or_else(|| panic!("no job {name}"));
+    let body = &workflow[start + 1..];
+    let end = body
+        .match_indices('\n')
+        .map(|(i, _)| i)
+        .find(|&i| {
+            let rest = &body[i + 1..];
+            rest.starts_with("  ") && !rest.starts_with("   ")
+        })
+        .unwrap_or(body.len());
+    &body[..end]
+}
+
+/// The steps of a job (from [`workflow_job`]), each squashed: the text from one `- ` item
+/// of its `steps:` list to the next.
+pub fn job_steps(job: &str) -> Vec<String> {
+    let lines: Vec<&str> = job.lines().collect();
+    let start = lines
+        .iter()
+        .position(|l| l.trim() == "steps:")
+        .expect("steps:");
+    let indent = lines[start + 1..]
+        .iter()
+        .find(|l| l.trim_start().starts_with("- "))
+        .map(|l| l.len() - l.trim_start().len())
+        .expect("a step");
+    let mut out: Vec<String> = Vec::new();
+    for line in &lines[start + 1..] {
+        let is_item =
+            line.len() - line.trim_start().len() == indent && line.trim_start().starts_with("- ");
+        if is_item {
+            out.push(String::new());
+        }
+        if let Some(step) = out.last_mut() {
+            step.push_str(line);
+            step.push('\n');
+        }
+    }
+    out.iter().map(|s| squash(s)).collect()
+}
+
+/// The index of the one step containing every token in `tokens` (squashed).
+pub fn step_with(steps: &[String], job: &str, tokens: &[&str]) -> usize {
+    let found: Vec<usize> = (0..steps.len())
+        .filter(|&i| tokens.iter().all(|t| steps[i].contains(&squash(t))))
+        .collect();
+    assert_eq!(found.len(), 1, "{job}: steps with {tokens:?}: {found:?}");
+    found[0]
+}
+
 /// A per-test scratch directory under the system temp dir, unique per process
 /// and test name. It is removed when dropped.
 pub struct ScratchDir(PathBuf);
