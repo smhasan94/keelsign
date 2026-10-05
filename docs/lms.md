@@ -65,16 +65,17 @@ keys: the same break one level up.
 
 An HSS public key is `u32str(L) || pub[0]`: the number of levels `L` followed by the top
 tree's public key. Inside an L=2 signature, the level-0 part is an ordinary LMS signature
-over the bottom tree's public key `pub[1]`. By construction that part is also a valid
-L=1 signature over those same bytes under the key `u32str(1) || pub[0]`.
+over the bottom tree's public key `pub[1]`. By construction, with `u32str(0)` (no
+signed lower levels) in front, that part is also a valid L=1 signature over those same
+bytes under the key `u32str(1) || pub[0]`.
 
 That L=1 key has a different key ID from the L=2 key `u32str(2) || pub[0]`, so a device
 that trusts only the L=2 key is not affected. keelsign's image signatures are over a
 32-byte image digest and `pub[1]` is 56 bytes, so with keelsign's verifier that top-level
-signature does not pass as an image signature by itself. The rule still stands: a
+signature does not pass as an image signature by itself. The rule still stands, because a
 verifier that accepts other message shapes, a future image format or a mistake in a device
-key list must not turn every published top-level signature into a usable L=1 signature,
-and there is never a reason to trust both forms.
+key list could turn every published top-level signature into a usable L=1 signature, and
+there is never a reason to trust both forms.
 
 The rule: **never trust the same LMS tree at two different L values.** keelsign helps:
 `keelsign keygen` fixes L when it creates a key (it is part of the public key, and every
