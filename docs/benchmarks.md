@@ -899,6 +899,58 @@ python3 scripts/staticlib_sizes.py --check --features ed25519,ml-dsa target/ffi-
 
 Each command prints its table row.
 
+## RAM/flash budget (SHA-47)
+
+What each verify path costs on the two boards, in one place. Nothing here is measured
+separately: every cell is copied from the table its Source column names, and the
+repo-check `budget_table_matches_source_tables` keeps each cell equal to its source, so
+a re-measurement updates the source table and this one together.
+
+- **Flash Δ** is the code a path adds over its bench baseline, in the `release` and
+  `size` profiles ([stable Rust 1.91.1](#measurement-toolchains)). The static RAM delta
+  is 0 for every path: all state is on the stack.
+- **Static frame** is the compiled own-frame chain (nightly `-Z emit-stack-sizes`),
+  checked against the 32 KB (32,768 B) device budget. The hybrid chain includes the
+  caller's 4 KiB TLV buffer and 256 B chunk; the digest and LMS/HSS chains do not. For
+  ML-DSA it is the `verify_param` frame alone, on top of the `verify_with` chain
+  (4,912 B with the buffers); the stable release prologues to budget with are
+  97,544 B / 158,192 B ([Stack the feature needs](#stack-the-feature-needs)).
+- **Peak stack (measured)** and **Cycles** need the boards: the on-target suite logs
+  them ([on-target-tests.md, P2](on-target-tests.md#p2-peak-stack-and-cycles-needs-hardware)).
+  No test measures a hybrid verify yet, so that row is `pending (SHA-69)`.
+- The ML-DSA flash Δ is the bench `ml-dsa` feature on top of the hybrid `size_verify`,
+  one figure for both sets (one build carries both arms).
+
+| Board | Verify path | Flash Δ release | Flash Δ size | Static frame (compiled) | Peak stack (measured) | Cycles | Source |
+|---|---|---|---|---|---|---|---|
+| nrf52840 | Image digest (200 KB, 256 B chunk) | 10,368 B | 10,168 B | 520 B | pending (hardware) | pending (hardware) | [Digest results](#digest-results) |
+| nrf52840 | LMS SHA-256 M32/W8 | 7,216 B | 5,384 B | 1,512 B | pending (hardware) | pending (hardware) | [LMS results](#lms-results) |
+| nrf52840 | LMS SHA-256/192 M24/W8 | 7,216 B | 5,384 B | 1,512 B | pending (hardware) | pending (hardware) | [LMS results](#lms-results) |
+| nrf52840 | Hybrid Ed25519 + LMS | 74,736 B | 59,380 B | 12,760 B | pending (SHA-69) | pending (SHA-69) | [Hybrid results](#hybrid-results) |
+| nrf52840 | ML-DSA-44 | 55,232 B | 13,832 B | 93,456 B | pending (hardware) | pending (hardware) | [ML-DSA verify results](#ml-dsa-verify-results) |
+| nrf52840 | ML-DSA-65 | 55,232 B | 13,832 B | 153,080 B | pending (hardware) | pending (hardware) | [ML-DSA verify results](#ml-dsa-verify-results) |
+| rp2350 | Image digest (200 KB, 256 B chunk) | 10,400 B | 10,204 B | 520 B | pending (hardware) | pending (hardware) | [Digest results](#digest-results) |
+| rp2350 | LMS SHA-256 M32/W8 | 7,224 B | 5,384 B | 1,512 B | pending (hardware) | pending (hardware) | [LMS results](#lms-results) |
+| rp2350 | LMS SHA-256/192 M24/W8 | 7,224 B | 5,384 B | 1,512 B | pending (hardware) | pending (hardware) | [LMS results](#lms-results) |
+| rp2350 | Hybrid Ed25519 + LMS | 74,656 B | 59,372 B | 12,760 B | pending (SHA-69) | pending (SHA-69) | [Hybrid results](#hybrid-results) |
+| rp2350 | ML-DSA-44 | 55,176 B | 13,828 B | 93,456 B | pending (hardware) | pending (hardware) | [ML-DSA verify results](#ml-dsa-verify-results) |
+| rp2350 | ML-DSA-65 | 55,176 B | 13,828 B | 153,080 B | pending (hardware) | pending (hardware) | [ML-DSA verify results](#ml-dsa-verify-results) |
+
+Code size of the C static library `libkeelsign.a` per feature state, the most a
+bootloader linking it gains ([C static library](#c-static-library-sha-60), `.text` +
+`.rodata`):
+
+| Target | Features | Total |
+|---|---|---|
+| `thumbv7em-none-eabihf` | (none) | 16,632 B |
+| `thumbv7em-none-eabihf` | `ed25519` | 57,780 B |
+| `thumbv7em-none-eabihf` | `ml-dsa` | 33,452 B |
+| `thumbv7em-none-eabihf` | `ed25519,ml-dsa` | 74,594 B |
+| `thumbv8m.main-none-eabihf` | (none) | 16,630 B |
+| `thumbv8m.main-none-eabihf` | `ed25519` | 57,140 B |
+| `thumbv8m.main-none-eabihf` | `ml-dsa` | 33,446 B |
+| `thumbv8m.main-none-eabihf` | `ed25519,ml-dsa` | 73,950 B |
+
 ## Recorded figures (SHA-275)
 
 Every flash and static-frame figure in this document was measured at one commit with the

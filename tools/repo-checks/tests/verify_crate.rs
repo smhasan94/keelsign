@@ -2,7 +2,7 @@
 //! cross-builds for both Cortex-M targets with the `ml-dsa` and (SHA-46) `ed25519`
 //! features off and on.
 
-use repo_checks::{EXAMPLES, ScratchDir, cargo_in, run_ok, workspace_root};
+use repo_checks::{EXAMPLES, ScratchDir, cargo_in, ci_job, run_ok, workspace_root};
 use std::fs;
 use std::path::Path;
 
@@ -12,23 +12,6 @@ const FEATURE_STATES: [&str; 4] = ["", "ml-dsa", "ed25519", "ed25519,ml-dsa"];
 fn read(rel: &str) -> String {
     let path = workspace_root().join(rel);
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
-}
-
-/// The text of the CI job `name` (two-space indented key), up to the next job.
-fn ci_job(ci: &str, name: &str) -> String {
-    let start = ci
-        .find(&format!("\n  {name}:"))
-        .unwrap_or_else(|| panic!("ci.yml must have a `{name}` job"));
-    ci[start + 1..]
-        .lines()
-        .enumerate()
-        .take_while(|(i, line)| {
-            let next_job = line.starts_with("  ") && !line.starts_with("   ");
-            let top_level = !line.is_empty() && !line.starts_with(' ');
-            *i == 0 || !(next_job || top_level)
-        })
-        .map(|(_, line)| format!("{line}\n"))
-        .collect()
 }
 
 /// The Rust sources of keelsign-verify, subdirectories included, as (path relative to
@@ -283,4 +266,167 @@ fn keelsign_verify_cross_builds() {
             cross_build(&root, scratch.path(), example.target, features);
         }
     }
+}
+
+/// The `cargo doc` arguments for keelsign-verify in feature state `features`.
+fn doc_args(features: &str) -> Vec<&str> {
+    let mut args = vec!["doc", "--no-deps", "-p", "keelsign-verify", "--locked"];
+    if !features.is_empty() {
+        args.extend(["--features", features]);
+    }
+    args
+}
+
+/// SHA-47 AC2: the `ci` job builds keelsign-verify's rustdoc with `-D warnings` in every
+/// feature state.
+#[test]
+fn ci_builds_keelsign_verify_docs_without_warnings() {
+    let ci = read(".github/workflows/ci.yml");
+    let host = ci_job(&ci, "ci");
+    let start = host
+        .find("- name: cargo doc (keelsign-verify, -D warnings)")
+        .expect("the ci job must have a `cargo doc (keelsign-verify, -D warnings)` step");
+    let step: String = host[start..]
+        .lines()
+        .enumerate()
+        .take_while(|(i, line)| *i == 0 || !line.trim_start().starts_with("- "))
+        .map(|(_, line)| format!("{line}\n"))
+        .collect();
+    assert!(
+        step.contains("RUSTDOCFLAGS: -D warnings"),
+        "the cargo doc step must deny rustdoc warnings:\n{step}"
+    );
+    for features in FEATURE_STATES {
+        let command = format!("{}\n", doc_args(features).join(" "));
+        assert!(
+            step.contains(&format!("cargo {command}")),
+            "the cargo doc step must run `cargo {}`",
+            command.trim_end()
+        );
+    }
+}
+
+/// SHA-47 AC2: `cargo doc --no-deps -p keelsign-verify` builds without a warning in every
+/// feature state (`RUSTDOCFLAGS=-D warnings`).
+#[test]
+fn keelsign_verify_docs_build_without_warnings() {
+    let root = workspace_root();
+    let scratch = ScratchDir::new("verify_docs");
+    for features in FEATURE_STATES {
+        let mut cmd = cargo_in(&root, scratch.path());
+        cmd.args(doc_args(features))
+            .env("RUSTDOCFLAGS", "-D warnings")
+            .env_remove("RUSTFLAGS");
+        let out = cmd.output().expect("spawn cargo doc");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            out.status.success(),
+            "cargo doc (features \"{features}\") failed:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("warning"),
+            "cargo doc (features \"{features}\") warned:\n{stderr}"
+        );
+        assert!(
+            scratch
+                .path()
+                .join("doc/keelsign_verify/index.html")
+                .is_file(),
+            "cargo doc must write doc/keelsign_verify/index.html"
+        );
+    }
+}
+
+/// The lines of the first fenced code block in `text` after `heading`, without the
+/// fences. `prefix` is stripped from every line first (`"//!"` for crate docs).
+fn fenced_block(text: &str, heading: &str, prefix: &str) -> Vec<String> {
+    let lines: Vec<String> = text
+        .lines()
+        .map(|l| {
+            let l = l.strip_prefix(prefix).unwrap_or(l);
+            l.strip_prefix(' ').unwrap_or(l).to_owned()
+        })
+        .collect();
+    let start = lines
+        .iter()
+        .position(|l| l == heading)
+        .unwrap_or_else(|| panic!("missing heading `{heading}`"));
+    let open = lines[start..]
+        .iter()
+        .position(|l| l.starts_with("```"))
+        .map(|i| start + i)
+        .unwrap_or_else(|| panic!("no code block after `{heading}`"));
+    lines[open + 1..]
+        .iter()
+        .take_while(|l| !l.starts_with("```"))
+        .cloned()
+        .collect()
+}
+
+/// SHA-47 AC2 / TP3: keelsign-verify/README.md shows exactly the visible lines of the
+/// crate-level `# Example` doctest (a runnable doctest, not an ignored block), 12 to 20
+/// lines that verify under a policy and run the anti-rollback check.
+#[test]
+fn readme_example_matches_crate_doctest() {
+    let lib = read("keelsign-verify/src/lib.rs");
+    let doc: String = lib
+        .lines()
+        .take_while(|l| l.starts_with("//!"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let fence = doc
+        .lines()
+        .skip_while(|l| *l != "//! # Example")
+        .find(|l| l.starts_with("//! ```"))
+        .expect("the `# Example` section must have a code block");
+    assert_eq!(
+        fence, "//! ```",
+        "the example must be a plain (runnable) doctest, not `ignore`/`no_run`"
+    );
+    let doctest = fenced_block(&doc, "# Example", "//!");
+    assert!(
+        doctest
+            .iter()
+            .any(|l| l.starts_with("# ") && l.contains("include_bytes!")),
+        "the hidden setup must embed the fixture image"
+    );
+    let visible: Vec<&String> = doctest
+        .iter()
+        .filter(|l| !(l.starts_with("# ") || *l == "#"))
+        .collect();
+    assert!(
+        (12..=20).contains(&visible.len()),
+        "the example must be 12 to 20 visible lines, not {}",
+        visible.len()
+    );
+    for needle in [
+        "TrustedKeys::",
+        "Algorithm::LmsHss",
+        "verify(&mut slot, &keys, Policy::PqOnly,",
+        "security_counter",
+        "cmp_ignoring_build_num",
+    ] {
+        assert!(
+            visible.iter().any(|l| l.contains(needle)),
+            "the example must show `{needle}`"
+        );
+    }
+
+    let readme = read("keelsign-verify/README.md");
+    assert!(
+        readme.contains("\n## Example\n\n"),
+        "keelsign-verify/README.md must have an `## Example` section"
+    );
+    let shown = fenced_block(&readme, "## Example", "");
+    let fence = readme
+        .lines()
+        .skip_while(|l| *l != "## Example")
+        .find(|l| l.starts_with("```"))
+        .expect("README example block");
+    assert_eq!(fence, "```rust", "the README example is a `rust` block");
+    let visible: Vec<String> = visible.into_iter().cloned().collect();
+    assert_eq!(
+        shown, visible,
+        "keelsign-verify/README.md `## Example` must be the doctest's visible lines verbatim"
+    );
 }

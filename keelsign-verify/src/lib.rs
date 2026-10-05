@@ -21,6 +21,48 @@
 //! the digest chunk. Every failure is a distinct [`Error`] variant;
 //! [`Error::Ed25519`] names the classical half and [`Error::Image`] an image rule.
 //!
+//! # Example
+//!
+//! Verify a slot under [`Policy::PqOnly`] against one trusted LMS/HSS key, then run the
+//! caller's anti-rollback check (SHA-47; the crate README shows the same lines). The
+//! hidden setup reads a repository test fixture (`keelsign-lms-protected-tlvs.bin`, which
+//! carries a protected `SEC_CNT` of 7) and its public key, so this doctest runs from a
+//! repository checkout, not from the published crate.
+//!
+//! ```
+//! # let image: &[u8] =
+//! #     include_bytes!("../../tests/fixtures/images/keelsign-lms-protected-tlvs.bin");
+//! # let manifest = include_str!("../../tests/fixtures/images/MANIFEST.json");
+//! # let entry = &manifest[manifest.find("\"keelsign-lms-protected-tlvs.bin\": {").unwrap()..];
+//! # let hex = entry.split("\"public_key_hex\": \"").nth(1).unwrap();
+//! # let hex = &hex[..hex.find('"').unwrap()];
+//! # let lms_public_key: Vec<u8> = (0..hex.len())
+//! #     .step_by(2)
+//! #     .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+//! #     .collect();
+//! use core::cmp::Ordering;
+//! use keelsign_verify::image::ImageVersion;
+//! use keelsign_verify::{Algorithm, DEFAULT_CHUNK_LEN, Policy, TrustedKey, TrustedKeys, verify};
+//!
+//! // The device's trusted LMS/HSS public key (raw HSS encoding), typically in flash.
+//! let lms_key = TrustedKey { algorithm: Algorithm::LmsHss, public_key: &lms_public_key };
+//! let keys = TrustedKeys::<1>::new(&[lms_key])?;
+//!
+//! // The candidate image. A `&[u8]` reads it here; on a device, use a `NorFlashReader`.
+//! let mut slot: &[u8] = image;
+//! let mut tlv_buf = [0u8; 4096];
+//! let mut chunk = [0u8; DEFAULT_CHUNK_LEN];
+//! let verified = verify(&mut slot, &keys, Policy::PqOnly, &mut tlv_buf, &mut chunk)?;
+//!
+//! // Anti-rollback is the caller's: refuse a downgrade or a lower security counter.
+//! let running = ImageVersion { major: 1, minor: 2, revision: 0, build_num: 0 };
+//! let stored_counter = 7;
+//! let downgrade = verified.version.cmp_ignoring_build_num(&running) == Ordering::Less;
+//! let rolled_back = verified.security_counter.unwrap_or(0) < stored_counter;
+//! assert!(!downgrade && !rolled_back, "refuse the update");
+//! # Ok::<(), Box<dyn core::error::Error>>(())
+//! ```
+//!
 //! # Building blocks
 //!
 //! - [`image`] parses and validates an MCUboot image (header, protected and unprotected

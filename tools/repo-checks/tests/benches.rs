@@ -3,9 +3,9 @@
 use repo_checks::{
     BENCHES, DIGEST_BENCH_FILES, DIGEST_ON_TARGET_TESTS, DIGEST_SIZE_BINS, DIGEST_STACK_LIMIT,
     Example, LMS_BENCH_FILES, LMS_ON_TARGET_TESTS, LMS_SIZE_BINS, LMS_STACK_LIMIT,
-    MLDSA_ON_TARGET_TESTS, MLDSA_VERIFY_BENCH_FILES, POLICY_BENCH_FILES, POLICY_ON_TARGET_TESTS,
-    POLICY_SIZE_BINS, ScratchDir, bench_target_lock, cargo_in, python_script, run_capture, run_ok,
-    workspace_root,
+    MLDSA_KAT_ON_TARGET_TESTS, MLDSA_ON_TARGET_TESTS, MLDSA_VERIFY_BENCH_FILES, POLICY_BENCH_FILES,
+    POLICY_ON_TARGET_TESTS, POLICY_SIZE_BINS, ScratchDir, bench_target_lock, cargo_in,
+    python_script, run_capture, run_ok, workspace_root,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -22,15 +22,6 @@ const BENCH_FILES: [&str; 10] = [
     "src/bin/size_baseline.rs",
     "src/bin/size_mldsa44.rs",
     "src/bin/size_mldsa65.rs",
-];
-
-/// The on-target tests named in the SHA-34 plan.
-const ON_TARGET_TESTS: [&str; 5] = [
-    "dwt_cycle_counter_present",
-    "mldsa44_kat",
-    "mldsa65_kat",
-    "mldsa44_bench",
-    "mldsa65_bench",
 ];
 
 const SIZE_BINS: [&str; 3] = ["size_baseline", "size_mldsa44", "size_mldsa65"];
@@ -320,7 +311,7 @@ fn bench_tests_use_embedded_test_harness() {
                 bench.name
             );
         }
-        for test in ON_TARGET_TESTS {
+        for test in MLDSA_KAT_ON_TARGET_TESTS {
             assert!(
                 kat.contains(&format!("fn {test}(")),
                 "{}: tests/kat.rs must define the on-target test `{test}`",

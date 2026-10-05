@@ -10,7 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-const REQUIRED_HEADINGS: [&str; 17] = [
+const REQUIRED_HEADINGS: [&str; 18] = [
     "# ML-DSA verify benchmarks (SHA-34)",
     "## Method",
     "## Prerequisites",
@@ -27,6 +27,7 @@ const REQUIRED_HEADINGS: [&str; 17] = [
     "## Decision",
     "## Follow-ups",
     "## C static library (SHA-60)",
+    "## RAM/flash budget (SHA-47)",
     "## Recorded figures (SHA-275)",
 ];
 
@@ -2746,4 +2747,241 @@ fn recorded_ffi_library_sizes_match_a_fresh_build() {
         }
     }
     fail_on_drift("C static library sizes", &report);
+}
+
+// ---- SHA-47: RAM/flash budget -------------------------------------------------------------
+
+const BUDGET_SECTION: &str = "## RAM/flash budget (SHA-47)";
+
+/// The index of column `name` in a table's header row (element 0 of `table_with_header`).
+fn column_index(table: &[Vec<String>], name: &str) -> usize {
+    table[0]
+        .iter()
+        .position(|c| c == name)
+        .unwrap_or_else(|| panic!("no column `{name}` in {:?}", table[0]))
+}
+
+/// The body row of `table` whose first cells are `key`.
+fn row_with_key<'a>(table: &'a [Vec<String>], key: &[&str]) -> &'a [String] {
+    table[1..]
+        .iter()
+        .find(|r| key.iter().zip(r.iter()).all(|(k, c)| k == c))
+        .unwrap_or_else(|| panic!("no row {key:?} in {:?}", table[0]))
+}
+
+/// One budget-table column's source: the source column and, for an `a / b` cell, which
+/// half.
+type ColumnSource = (&'static str, &'static str, Option<usize>);
+
+/// One budget-table verify path: its name, the source heading, the source table's header
+/// prefix, the source row key after the board (the set, if any) and its columns.
+type BudgetPath = (
+    &'static str,
+    &'static str,
+    &'static str,
+    Option<&'static str>,
+    &'static [ColumnSource],
+);
+
+/// SHA-47 AC3 (CI): the RAM/flash budget only copies figures already recorded. Every cell
+/// of its per-path table equals the cell of the source table its Source column links (the
+/// pending hardware cells included, so filling one in the source fills it here), every row
+/// of its library table equals the C static library table, and every byte figure in the
+/// section's prose is quoted elsewhere in the document.
+#[test]
+fn budget_table_matches_source_tables() {
+    let doc = doc();
+    let budget_at = doc
+        .find(&format!("\n{BUDGET_SECTION}\n"))
+        .expect("budget section");
+    let recorded_at = doc
+        .find("\n## Recorded figures (SHA-275)\n")
+        .expect("recorded figures section");
+    assert!(
+        budget_at < recorded_at,
+        "{BUDGET_SECTION} must come before ## Recorded figures (SHA-275)"
+    );
+    let budget = section(&doc, BUDGET_SECTION);
+    let table = table_with_header(budget, "| Board | Verify path |")
+        .unwrap_or_else(|| panic!("{BUDGET_SECTION} has no `| Board | Verify path |` table"));
+    assert_eq!(
+        table[0],
+        [
+            "Board",
+            "Verify path",
+            "Flash Δ release",
+            "Flash Δ size",
+            "Static frame (compiled)",
+            "Peak stack (measured)",
+            "Cycles",
+            "Source",
+        ],
+        "{BUDGET_SECTION}: table columns"
+    );
+
+    const DIGEST_COLUMNS: [ColumnSource; 5] = [
+        ("Flash Δ release", "Flash Δ release", None),
+        ("Flash Δ size", "Flash Δ size", None),
+        ("Static frame (compiled)", "Static frame (compiled)", None),
+        ("Peak stack (measured)", "Peak stack (measured)", None),
+        ("Cycles", "Digest cycles (200 KB, 256 B chunk)", None),
+    ];
+    const LMS_COLUMNS: [ColumnSource; 5] = [
+        ("Flash Δ release", "Flash Δ release", None),
+        ("Flash Δ size", "Flash Δ size", None),
+        ("Static frame (compiled)", "Static frame (compiled)", None),
+        ("Peak stack (measured)", "Peak stack (measured)", None),
+        ("Cycles", "Verify cycles (headline)", None),
+    ];
+    const HYBRID_COLUMNS: [ColumnSource; 5] = [
+        ("Flash Δ release", "Flash Δ release", None),
+        ("Flash Δ size", "Flash Δ size", None),
+        (
+            "Static frame (compiled)",
+            "Static frame (compiled, deepest chain)",
+            None,
+        ),
+        ("Peak stack (measured)", "Peak stack", None),
+        ("Cycles", "Cycles", None),
+    ];
+    const MLDSA_COLUMNS: [ColumnSource; 5] = [
+        (
+            "Flash Δ release",
+            "Flash Δ ml-dsa (release / size)",
+            Some(0),
+        ),
+        ("Flash Δ size", "Flash Δ ml-dsa (release / size)", Some(1)),
+        ("Static frame (compiled)", "Static frame release", None),
+        ("Peak stack (measured)", "Peak stack (measured)", None),
+        ("Cycles", "Cycles", None),
+    ];
+    let paths: [BudgetPath; 6] = [
+        (
+            "Image digest (200 KB, 256 B chunk)",
+            "### Digest results",
+            "| Board | Digest cycles",
+            None,
+            &DIGEST_COLUMNS,
+        ),
+        (
+            "LMS SHA-256 M32/W8",
+            "### LMS results",
+            "| Board | Set |",
+            Some("LMS SHA-256 M32/W8"),
+            &LMS_COLUMNS,
+        ),
+        (
+            "LMS SHA-256/192 M24/W8",
+            "### LMS results",
+            "| Board | Set |",
+            Some("LMS SHA-256/192 M24/W8"),
+            &LMS_COLUMNS,
+        ),
+        (
+            "Hybrid Ed25519 + LMS",
+            "### Hybrid results",
+            "| Board | Flash Δ release |",
+            None,
+            &HYBRID_COLUMNS,
+        ),
+        (
+            "ML-DSA-44",
+            "### ML-DSA verify results",
+            "| Board | Set |",
+            Some("ML-DSA-44"),
+            &MLDSA_COLUMNS,
+        ),
+        (
+            "ML-DSA-65",
+            "### ML-DSA verify results",
+            "| Board | Set |",
+            Some("ML-DSA-65"),
+            &MLDSA_COLUMNS,
+        ),
+    ];
+    assert_eq!(
+        table.len() - 1,
+        BOARDS.len() * paths.len(),
+        "{BUDGET_SECTION}: one row per board × verify path"
+    );
+    for board in BOARDS {
+        for (path, heading, header, set, columns) in paths {
+            let row = row_with_key(&table, &[board, path]);
+            let source = table_with_header(section(&doc, heading), header)
+                .unwrap_or_else(|| panic!("{heading} has no `{header}` table"));
+            let mut key = vec![board];
+            key.extend(set);
+            let source_row = row_with_key(&source, &key);
+            for &(budget_column, source_column, part) in columns {
+                let cell = &row[column_index(&table, budget_column)];
+                let source_cell = &source_row[column_index(&source, source_column)];
+                let expected = match part {
+                    Some(at) => source_cell
+                        .split(" / ")
+                        .nth(at)
+                        .unwrap_or_else(|| panic!("`{source_cell}` has no part {at}")),
+                    None => source_cell.as_str(),
+                };
+                assert_eq!(
+                    cell, expected,
+                    "{BUDGET_SECTION}: {board} `{path}` {budget_column} must copy {heading} \
+                     `{source_column}`"
+                );
+            }
+            let anchor = heading
+                .trim_start_matches('#')
+                .trim()
+                .to_lowercase()
+                .replace(' ', "-")
+                .replace(['(', ')', '/'], "");
+            let link = format!("[{}](#{anchor})", heading.trim_start_matches('#').trim());
+            assert_eq!(
+                row[column_index(&table, "Source")],
+                link,
+                "{BUDGET_SECTION}: {board} `{path}` must link its source"
+            );
+        }
+    }
+
+    // The library sizes are the C static library table's totals.
+    let library = table_with_header(budget, "| Target | Features | Total |")
+        .unwrap_or_else(|| panic!("{BUDGET_SECTION} has no `| Target | Features | Total |` table"));
+    let ffi = table_with_header(section(&doc, FFI_SECTION), FFI_HEADER)
+        .unwrap_or_else(|| panic!("{FFI_SECTION} has no `{FFI_HEADER}` table"));
+    assert_eq!(
+        library.len() - 1,
+        FFI_TARGETS.len() * FFI_FEATURES.len(),
+        "{BUDGET_SECTION}: one library row per target × feature state"
+    );
+    for row in &library[1..] {
+        let source = row_with_key(&ffi, &[&row[0], &row[1]]);
+        assert_eq!(
+            row[2],
+            source[column_index(&ffi, "Total")],
+            "{BUDGET_SECTION}: libkeelsign.a {} {} total must copy {FFI_SECTION}",
+            row[0],
+            row[1]
+        );
+    }
+
+    // Every byte figure in the section is quoted elsewhere: nothing is re-derived.
+    let elsewhere = format!(
+        "{}{}",
+        &doc[..budget_at],
+        &doc[budget_at + 1 + BUDGET_SECTION.len() + budget.len()..]
+    );
+    let words: Vec<&str> = budget.split_whitespace().collect();
+    for pair in words.windows(2) {
+        let number = pair[0].trim_start_matches(['(', '|']);
+        if pair[1].starts_with('B') && number.starts_with(|c: char| c.is_ascii_digit()) {
+            assert!(
+                contains_number(&elsewhere, number),
+                "{BUDGET_SECTION} quotes {number} B, which no other section records"
+            );
+        }
+    }
+    assert!(
+        budget.contains("pending (SHA-69)") && budget.contains("on-target-tests.md"),
+        "{BUDGET_SECTION} must mark the hybrid row pending (SHA-69) and point at the suite's P2"
+    );
 }

@@ -3,7 +3,7 @@
 //! keelsign CLI's JSON dependencies (SHA-51) and test dependencies (SHA-53), and the scoped
 //! `unsafe` exception for the measurement-only `benches/stack-paint` crate.
 
-use repo_checks::{SHIPPED_CRATES, workspace_root};
+use repo_checks::{SHIPPED_CRATES, ci_job, workspace_root};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -817,5 +817,213 @@ fn embassy_dependencies_pinned_exact() {
                 "{lockfile}: embassy-boot must not depend on {absent}"
             );
         }
+    }
+}
+
+/// The cargo-deny version CI installs and docs/setup.md pins (SHA-47).
+const CARGO_DENY_PIN: &str = "0.20.2";
+
+/// The SPDX licence IDs deny.toml allows (SHA-47): keelsign's own MIT and Apache-2.0
+/// and the licences in the root workspace's all-features dependency graph.
+const DENY_LICENSES: [&str; 5] = ["Apache-2.0", "BSD-3-Clause", "MIT", "Unicode-3.0", "Zlib"];
+
+/// The advisories deny.toml ignores (SHA-47), all unmaintained-only upstream crates with
+/// no safe upgrade, with what each reason must name: the crate, the path that pulls it in
+/// and the follow-up ticket.
+const DENY_IGNORED_ADVISORIES: [(&str, [&str; 3]); 3] = [
+    (
+        "RUSTSEC-2026-0110",
+        ["bare-metal", "cortex-m 0.7.9", "SHA-323"],
+    ),
+    (
+        "RUSTSEC-2024-0436",
+        ["paste", "embassy-rp 0.10.0 -> pio", "SHA-324"],
+    ),
+    (
+        "RUSTSEC-2026-0173",
+        ["proc-macro-error2", "embassy-rp 0.10.0 -> pio", "SHA-324"],
+    ),
+];
+
+/// The body of the TOML table `[header]`: everything up to the next table header.
+fn toml_table<'a>(toml: &'a str, header: &str) -> &'a str {
+    let start = toml
+        .find(&format!("\n{header}\n"))
+        .map(|i| i + 1)
+        .or_else(|| toml.starts_with(&format!("{header}\n")).then_some(0))
+        .unwrap_or_else(|| panic!("deny.toml must have a `{header}` table"));
+    let body = &toml[start + header.len()..];
+    body.find("\n[").map_or(body, |end| &body[..end])
+}
+
+/// SHA-47 TP2: deny.toml audits all features, allows exactly the licences in use, denies
+/// yanked crates, wildcard requirements and every source but crates.io, and ignores only
+/// the three documented unmaintained advisories, each with a reason that names its path
+/// and follow-up ticket; the `ci` job installs the pinned cargo-deny and
+/// runs `cargo deny --locked check`, and docs/setup.md pins the same version.
+#[test]
+fn deny_toml_is_minimal_and_ci_runs_cargo_deny() {
+    let deny = read("deny.toml");
+    let tables: Vec<&str> = deny
+        .lines()
+        .filter(|l| l.starts_with('['))
+        .map(str::trim)
+        .collect();
+    assert_eq!(
+        tables,
+        [
+            "[graph]",
+            "[licenses]",
+            "[advisories]",
+            "[bans]",
+            "[sources]"
+        ],
+        "deny.toml has the graph table and the four check tables, in order"
+    );
+    // B1: optional dependencies (keelsign-embassy's board modules) are audited too.
+    assert!(
+        toml_table(&deny, "[graph]").contains("all-features = true"),
+        "[graph] must set `all-features = true`"
+    );
+    assert!(
+        !deny.lines().any(|l| l.trim_start().starts_with("version")),
+        "deny.toml must not set a `version` key (cargo-deny 0.20 has one config format)"
+    );
+
+    let licenses = toml_table(&deny, "[licenses]");
+    let allow = licenses
+        .split("allow = [")
+        .nth(1)
+        .and_then(|rest| rest.split(']').next())
+        .expect("[licenses] must have an `allow` list");
+    let allowed: Vec<&str> = allow
+        .split(',')
+        .map(|s| s.trim().trim_matches('"'))
+        .filter(|s| !s.is_empty())
+        .collect();
+    assert_eq!(allowed, DENY_LICENSES, "deny.toml licence allowlist");
+    for project in ["MIT", "Apache-2.0"] {
+        assert!(
+            allowed.contains(&project),
+            "keelsign's own licence {project} must be allowed"
+        );
+    }
+
+    let advisories = toml_table(&deny, "[advisories]");
+    assert!(
+        advisories.contains("yanked = \"deny\""),
+        "[advisories] must deny yanked crates"
+    );
+    let ignores: Vec<&str> = advisories
+        .lines()
+        .filter(|l| l.contains("id = \""))
+        .collect();
+    assert_eq!(
+        ignores.len(),
+        DENY_IGNORED_ADVISORIES.len(),
+        "exactly the documented ignored advisories: {ignores:?}"
+    );
+    for (ignore, (id, needles)) in ignores.iter().zip(DENY_IGNORED_ADVISORIES) {
+        assert!(
+            ignore.contains(&format!("{{ id = \"{id}\", reason = \"")),
+            "the ignored advisories are, in order, {:?}, each with a reason: `{ignore}`",
+            DENY_IGNORED_ADVISORIES.map(|(id, _)| id)
+        );
+        for needle in needles {
+            assert!(
+                ignore.contains(needle),
+                "the {id} ignore's reason must mention `{needle}`: `{ignore}`"
+            );
+        }
+        let reason = ignore.split("reason = \"").nth(1).unwrap_or_default();
+        assert!(
+            reason.contains("unmaintained") && reason.contains("SHA-"),
+            "the {id} reason must say it is unmaintained and cite a SHA ticket: `{ignore}`"
+        );
+    }
+    let bans = toml_table(&deny, "[bans]");
+    for needle in [
+        "multiple-versions = \"warn\"",
+        "wildcards = \"deny\"",
+        "allow-wildcard-paths = true",
+    ] {
+        assert!(bans.contains(needle), "[bans] must set `{needle}`");
+    }
+    let sources = toml_table(&deny, "[sources]");
+    for needle in [
+        "unknown-registry = \"deny\"",
+        "unknown-git = \"deny\"",
+        "allow-registry = [\"https://github.com/rust-lang/crates.io-index\"]",
+        "allow-git = []",
+    ] {
+        assert!(sources.contains(needle), "[sources] must set `{needle}`");
+    }
+
+    let ci = read(".github/workflows/ci.yml");
+    let job = ci_job(&ci, "ci");
+    let install = format!(
+        "uses: taiki-e/install-action@v2\n        with:\n          tool: cargo-deny@{CARGO_DENY_PIN}\n"
+    );
+    assert!(
+        job.contains(&install),
+        "the ci job must install cargo-deny {CARGO_DENY_PIN} with taiki-e/install-action"
+    );
+    let run = "run: cargo deny --locked check\n";
+    assert!(
+        job.contains(run),
+        "the ci job must run `cargo deny --locked check`"
+    );
+    assert!(
+        job.find(&install) < job.find(run),
+        "cargo-deny must be installed before it runs"
+    );
+
+    let setup = read("docs/setup.md");
+    let pin = format!("cargo install cargo-deny --version {CARGO_DENY_PIN} --locked");
+    assert!(setup.contains(&pin), "docs/setup.md must pin `{pin}`");
+}
+
+/// SHA-47 TP2: `cargo deny --locked check` passes on the root workspace. Ignored: it needs
+/// cargo-deny 0.20.2 on `PATH` and fetches the RustSec advisory database.
+#[test]
+#[ignore = "needs cargo-deny 0.20.2 and the network (advisory database); CI's ci job runs it"]
+fn cargo_deny_check_is_clean() {
+    let root = workspace_root();
+    let version = std::process::Command::new("cargo")
+        .args(["deny", "--version"])
+        .output()
+        .expect("run `cargo deny --version` (install cargo-deny 0.20.2)");
+    assert!(version.status.success(), "cargo-deny must be installed");
+    let version = String::from_utf8_lossy(&version.stdout);
+    assert_eq!(
+        version.trim(),
+        format!("cargo-deny {CARGO_DENY_PIN}"),
+        "the pinned cargo-deny version"
+    );
+    // `--show-stats` prints one `<check> ok|FAILED` line per check on stdout (the
+    // one-line summary is only printed to a terminal).
+    let out = std::process::Command::new("cargo")
+        .current_dir(&root)
+        .args([
+            "deny",
+            "--color",
+            "never",
+            "--locked",
+            "check",
+            "--show-stats",
+        ])
+        .output()
+        .expect("run `cargo deny --locked check`");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "cargo deny --locked check failed:\n{stdout}\n{stderr}"
+    );
+    for check in ["advisories", "bans", "licenses", "sources"] {
+        assert!(
+            stdout.contains(&format!("{check} ok: 0 errors")),
+            "cargo-deny's {check} check must pass:\n{stdout}"
+        );
     }
 }
