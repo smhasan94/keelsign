@@ -44,8 +44,23 @@ jobs:
       - name: cargo clippy (keelsign-verify alone, ml-dsa)
         run: cargo clippy -p keelsign-verify --all-targets --locked --features ml-dsa -- -D warnings
 
+      # SHA-60: keelsign-ffi/include/keelsign.h is cbindgen 0.29.4 output, never edited by
+      # hand; fail if the sources or cbindgen.toml changed without regenerating it.
+      - uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cbindgen@0.29.4
+
+      - name: keelsign.h drift (cbindgen 0.29.4)
+        run: cbindgen --config keelsign-ffi/cbindgen.toml --crate keelsign-ffi --output keelsign-ffi/include/keelsign.h keelsign-ffi --verify
+
       - name: cargo test
         run: cargo test --workspace --locked
+
+      # SHA-60: the C99 harness linked against libkeelsign.a (default and ed25519,ml-dsa
+      # builds) under AddressSanitizer + UBSan: the policy matrix, digests, tampered and
+      # wrong-key images, NULL and malformed arguments (repo_checks::ffi).
+      - name: C harness (libkeelsign, ASan+UBSan)
+        run: cargo test -p repo-checks --locked --test ffi
 
       # keelsign-verify alone, so no workspace member's features are unified in: both
       # features off (ClassicalOnly / Hybrid fail closed with Ed25519(NotEnabled)).
@@ -103,9 +118,26 @@ jobs:
       - name: publish dry-run keelsign-verify + keelsign
         run: cargo publish --dry-run --locked -p keelsign-verify -p keelsign
 
+      # SHA-60: keelsign-ffi's pointer-contract unit tests under Miri on the pinned nightly
+      # (docs/ffi.md#miri), in both feature states. Last in the job: the toolchain action
+      # makes the nightly the default. sha2's portable backend is the one Cortex-M runs.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-09-29
+          components: miri, rust-src
+
+      - name: miri (keelsign-ffi)
+        env:
+          RUSTFLAGS: --cfg sha2_backend="soft"
+          MIRIFLAGS: -Zmiri-symbolic-alignment-check
+        run: |
+          cargo +nightly-2026-09-29 miri setup
+          cargo +nightly-2026-09-29 miri test -p keelsign-ffi --locked
+          cargo +nightly-2026-09-29 miri test -p keelsign-ffi --locked --features ed25519,ml-dsa
+
   # keelsign-verify (no_std, no heap) for both Cortex-M targets, with the `ml-dsa` and
   # `ed25519` features off and on; SHA-55: keelsign-embassy too, with the same features
-  # and its board module (`embassy_features`).
+  # and its board module (`embassy_features`); SHA-60: keelsign-ffi's libkeelsign.a.
   verify-cross:
     name: keelsign-verify ${{ matrix.target }} (features "${{ matrix.features }}")
     runs-on: ubuntu-latest
@@ -160,6 +192,18 @@ jobs:
 
       - name: cargo build (keelsign-embassy)
         run: cargo build -p keelsign-embassy --lib --release --locked --target ${{ matrix.target }} --features "${{ matrix.features }}" --features "${{ matrix.embassy_features }}"
+
+      # SHA-60: libkeelsign.a (keelsign-ffi) for the same target and feature state, and
+      # its symbol rules: exports exactly keelsign_verify / keelsign_digest, no formatting
+      # code, no panic strings, only the allowlisted trap funnels (docs/ffi.md#nm-check).
+      - name: cargo clippy (keelsign-ffi)
+        run: cargo clippy -p keelsign-ffi --lib --locked --target ${{ matrix.target }} --features "${{ matrix.features }}" -- -D warnings
+
+      - name: cargo build (keelsign-ffi, profile ffi)
+        run: cargo build -p keelsign-ffi --profile ffi --locked --target ${{ matrix.target }} --features "${{ matrix.features }}"
+
+      - name: libkeelsign symbols (no fmt, no panic strings)
+        run: python3 scripts/staticlib_sizes.py --check --features "${{ matrix.features }}" target/${{ matrix.target }}/ffi/libkeelsign.a
 
   cross-build:
     name: cross-build ${{ matrix.project }} (${{ matrix.target }})

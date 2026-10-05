@@ -12,6 +12,7 @@
 //! |---|---|---|
 //! | `NoStd` | `keelsign-verify`, `keelsign-embassy`, `lms-kat`, `policy-kat`, `mldsa-kat` | `panic!`, `.unwrap()`, `.expect()`, slice indexing, `unsafe` (forbid level) |
 //! | `NoStdException` | `stack-paint` | the four clippy probes, `unsafe` (deny level) |
+//! | `Ffi` | `keelsign-ffi` | the four clippy probes, `unsafe` (deny level) |
 //! | `Host` | `keelsign`, `repo-checks` | `unsafe` (forbid level) |
 //!
 //! Every crate also gets a control probe that must compile cleanly, so a broken probe
@@ -85,6 +86,9 @@ enum Class {
     NoStd,
     /// The measurement-only `stack-paint` crate: four clippy denies, unsafe at deny.
     NoStdException,
+    /// The C ABI crate `keelsign-ffi` (SHA-60): four clippy denies, unsafe at deny (its
+    /// one `abi` module allows it). `no_std` in its shipped (`panic = "abort"`) builds.
+    Ffi,
     /// Host crate: forbid unsafe only.
     Host,
 }
@@ -134,6 +138,12 @@ const STACK_PAINT: Crate = Crate {
     class: Class::NoStdException,
 };
 
+const KEELSIGN_FFI: Crate = Crate {
+    package: "keelsign-ffi",
+    dir: "keelsign-ffi",
+    class: Class::Ffi,
+};
+
 const KEELSIGN: Crate = Crate {
     package: "keelsign",
     dir: "keelsign",
@@ -147,8 +157,9 @@ const REPO_CHECKS: Crate = Crate {
 };
 
 /// Every workspace member, classified.
-const CRATES: [Crate; 8] = [
+const CRATES: [Crate; 9] = [
     KEELSIGN_VERIFY,
+    KEELSIGN_FFI,
     KEELSIGN_EMBASSY,
     LMS_KAT,
     POLICY_KAT,
@@ -735,7 +746,7 @@ fn run_case(case: &str, krate: &Crate, probes: &[Probe], edit: Edit) -> Outcome 
 fn check_case(case: &str, krate: &Crate, probe: Probe) {
     let applicable = match krate.class {
         Class::NoStd => true,
-        Class::NoStdException => probe != Probe::UnsafeUnderAllow,
+        Class::NoStdException | Class::Ffi => probe != Probe::UnsafeUnderAllow,
         Class::Host => matches!(
             probe,
             Probe::Control | Probe::Unsafe | Probe::UnsafeUnderAllow
@@ -821,6 +832,16 @@ probe_cases! { STACK_PAINT;
     stack_paint_rejects_unsafe => Unsafe,
 }
 
+// `keelsign-ffi` denies (not forbids) unsafe_code so its one `abi` module can allow it.
+probe_cases! { KEELSIGN_FFI;
+    keelsign_ffi_probe_control_is_clean => Control,
+    keelsign_ffi_rejects_panic => Panic,
+    keelsign_ffi_rejects_unwrap => Unwrap,
+    keelsign_ffi_rejects_expect => Expect,
+    keelsign_ffi_rejects_slice_indexing => SliceIndexing,
+    keelsign_ffi_rejects_unsafe => Unsafe,
+}
+
 probe_cases! { KEELSIGN;
     keelsign_probe_control_is_clean => Control,
     keelsign_rejects_unsafe => Unsafe,
@@ -834,7 +855,8 @@ probe_cases! { REPO_CHECKS;
 }
 
 /// Every workspace member has a class (so it gets probed), and every `no_std` member is
-/// probed as `NoStd` or is the single `stack-paint` exception.
+/// probed as `NoStd` or is one of the two `unsafe` exceptions, `stack-paint` and
+/// `keelsign-ffi` (CLAUDE.md).
 #[test]
 fn every_workspace_member_is_classified() {
     let root = workspace_root();
@@ -856,13 +878,14 @@ fn every_workspace_member_is_classified() {
 
     let exceptions: Vec<&str> = CRATES
         .iter()
-        .filter(|c| c.class == Class::NoStdException)
+        .filter(|c| matches!(c.class, Class::NoStdException | Class::Ffi))
         .map(|c| c.dir)
         .collect();
     assert_eq!(
         exceptions,
-        ["benches/stack-paint"],
-        "stack-paint is the only no_std crate allowed to deny rather than forbid unsafe_code"
+        ["keelsign-ffi", "benches/stack-paint"],
+        "keelsign-ffi and stack-paint are the only crates allowed to deny rather than \
+         forbid unsafe_code"
     );
 
     for krate in &CRATES {
@@ -872,7 +895,11 @@ fn every_workspace_member_is_classified() {
             .iter()
             .any(|a| a.names("no_std"));
         assert!(
-            !is_no_std || matches!(krate.class, Class::NoStd | Class::NoStdException),
+            !is_no_std
+                || matches!(
+                    krate.class,
+                    Class::NoStd | Class::NoStdException | Class::Ffi
+                ),
             "{} is `#![no_std]` but classified {:?}; classify it NoStd so the no_std lint \
              probes run against it",
             krate.dir,

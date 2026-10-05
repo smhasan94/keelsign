@@ -2,6 +2,7 @@
 members = [
     "keelsign",
     "keelsign-verify",
+    "keelsign-ffi",
     "keelsign-embassy",
     "tools/repo-checks",
     "benches/mldsa-kat",
@@ -38,3 +39,16 @@ opt-level = 3
 # SHA-67: the LMS/HSS signer hashes millions of blocks per tree; keep test builds usable.
 [profile.dev.package.sha2]
 opt-level = 3
+
+# SHA-60: the C static library `libkeelsign.a` (keelsign-ffi). Build it alone:
+# `cargo build -p keelsign-ffi --profile ffi --locked [--target <triple>] [--features ...]`
+# (docs/ffi.md). Size-optimised, one LTO unit, abort on panic; `panic` and `lto` cannot
+# be set per package, hence a workspace profile.
+[profile.ffi]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
+strip = "debuginfo"

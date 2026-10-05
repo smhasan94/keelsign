@@ -11,7 +11,9 @@ unstable. The host CLI has `keygen` and `pubkey` ([docs/keys.md](docs/keys.md)),
 ([docs/verify.md](docs/verify.md)), for ML-DSA-44/65 and stateful LMS/HSS keys
 (optionally hybrid with Ed25519). The embassy-boot adapter `keelsign-embassy`
 verifies the DFU slot before marking it for swap
-([docs/embassy.md](docs/embassy.md)); the MCUboot C bindings are not written yet.
+([docs/embassy.md](docs/embassy.md)). The C static library `libkeelsign.a` and its header
+([docs/ffi.md](docs/ffi.md)) are pre-release and unpublished; the MCUboot glue around them
+is not written yet.
 
 ## Quickstart
 
@@ -81,7 +83,7 @@ need the boards.
 | `keelsign` | host CLI (pre-release) | `keygen` / `pubkey` / `sign` / `inspect` / `verify` MCUboot-format images |
 | `keelsign-verify` | `no_std`, no heap | Parses the header and TLV area, hashes the image in chunks, verifies LMS/HSS, Ed25519 and ML-DSA-44/65 under a policy; typed errors |
 | `keelsign-embassy` (pre-release) | `no_std`, no heap | Adapter for embassy-boot: verifies the DFU image, then marks it for swap; blocking and async updaters, nRF and RP board modules |
-| `keelsign-ffi` (planned) | staticlib | C ABI and cbindgen header for MCUboot's `MCUBOOT_USE_CUSTOM_CRYPTO` hook (`libkeelsign`) |
+| `keelsign-ffi` (pre-release, unpublished) | staticlib | C ABI and cbindgen header for MCUboot's `MCUBOOT_USE_CUSTOM_CRYPTO` hook (`libkeelsign`) |
 
 ## Boards
 
@@ -105,6 +107,8 @@ A Raspberry Pi Debug Probe drives the Pico 2 W. See [docs/hardware.md](docs/hard
 - [docs/signing.md](docs/signing.md) and [docs/verify.md](docs/verify.md):
   `keelsign sign`, `inspect` and `verify`, the policies `verify` checks, public key
   files and the final exit-code table.
+- [docs/ffi.md](docs/ffi.md): the C static library `libkeelsign.a`: build, header, the
+  pointer contract, status codes and the C harness.
 - [docs/benchmarks.md](docs/benchmarks.md): on-target known-answer tests, stack and flash
   per algorithm, and the toolchains every figure was measured with.
 - [docs/embassy.md](docs/embassy.md): `keelsign-embassy` with embassy-boot. Partition

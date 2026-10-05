@@ -8,3 +8,7 @@ license.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[dev-dependencies]
+# SHA-60: the policy matrix (KSPM v2) the C harness test runs through libkeelsign.a.
+policy-kat = { path = "../../benches/policy-kat" }

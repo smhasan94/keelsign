@@ -1,0 +1,46 @@
+[package]
+name = "keelsign-ffi"
+description = "C ABI static library (libkeelsign.a) and cbindgen header for keelsign-verify (not published yet)."
+# Not published until SHA-281; MCUboot users build it from the repository (docs/ffi.md).
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# `libkeelsign.a`. Build it with `cargo build -p keelsign-ffi --profile ffi --locked`
+# (the root `[profile.ffi]`); always `-p keelsign-ffi` alone, so no other workspace
+# member unifies a keelsign-verify feature in.
+name = "keelsign"
+crate-type = ["staticlib"]
+
+[features]
+# LMS/HSS only by default (PqOnly). `ed25519` adds ClassicalOnly and Hybrid; `ml-dsa`
+# adds ML-DSA-44/65 (about 98 / 158 KB of stack on stable, docs/benchmarks.md).
+default = []
+ed25519 = ["keelsign-verify/ed25519"]
+ml-dsa = ["keelsign-verify/ml-dsa"]
+
+[dependencies]
+keelsign-verify = { path = "../keelsign-verify", version = "=0.0.1" }
+
+[dev-dependencies]
+# The SHA-46 policy matrix (KSPM v2) and its embedded images, for the unit tests that run
+# every case through the C ABI. Enables keelsign-verify/ed25519 in test builds; the tests
+# pick expectations by `keelsign_verify::ed25519::is_enabled()` at run time.
+policy-kat = { path = "../benches/policy-kat" }
+
+# Not `[lints] workspace = true`: the workspace forbids unsafe_code, and `forbid` cannot be
+# relaxed by the one allowed `abi` module (CLAUDE.md: no `unsafe` outside keelsign-ffi).
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+# No panic paths in no_std code (CLAUDE.md), and every unsafe block needs a SAFETY comment.
+[lints.clippy]
+panic = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+undocumented_unsafe_blocks = "deny"

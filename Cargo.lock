@@ -1272,6 +1272,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "keelsign-ffi"
+version = "0.0.1"
+dependencies = [
+ "keelsign-verify",
+ "policy-kat",
+]
+
+[[package]]
 name = "keelsign-verify"
 version = "0.0.1"
 dependencies = [
@@ -1958,6 +1966,9 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "repo-checks"
 version = "0.0.1"
+dependencies = [
+ "policy-kat",
+]
 
 [[package]]
 name = "rgb"

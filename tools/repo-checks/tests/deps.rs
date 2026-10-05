@@ -457,8 +457,12 @@ fn lints_inherit_workspace(manifest: &str) -> bool {
     false
 }
 
+/// The two `unsafe` exceptions of CLAUDE.md: `keelsign-ffi` (SHA-60) and the
+/// measurement-only `stack-paint`, which no shipped crate depends on. Each denies (rather
+/// than forbids) `unsafe_code` and allows it in exactly one module, with a `// SAFETY:`
+/// comment on every `unsafe` block; every other manifest forbids it.
 #[test]
-fn stack_paint_is_only_unsafe_exception_and_not_shipped() {
+fn unsafe_exceptions_are_stack_paint_and_keelsign_ffi() {
     assert!(lints_inherit_workspace(
         "[package]\n[lints]\nworkspace = true\n"
     ));
@@ -471,30 +475,47 @@ fn stack_paint_is_only_unsafe_exception_and_not_shipped() {
     assert!(!all.is_empty());
 
     // Every manifest sets `unsafe_code` (or inherits the workspace lints), and only
-    // stack-paint relaxes it from "forbid".
+    // stack-paint and keelsign-ffi relax it from "forbid".
+    let exceptions = [
+        Path::new("benches/stack-paint/Cargo.toml"),
+        Path::new("keelsign-ffi/Cargo.toml"),
+    ];
+    let mut seen = 0;
     for manifest in &all {
         let rel = manifest.strip_prefix(&root).expect("inside the repo");
         let text = fs::read_to_string(manifest).expect("read manifest");
-        let is_stack_paint = rel == Path::new("benches/stack-paint/Cargo.toml");
+        let is_exception = exceptions.contains(&rel);
+        seen += usize::from(is_exception);
         assert!(
-            (lints_inherit_workspace(&text) && !is_stack_paint)
+            (lints_inherit_workspace(&text) && !is_exception)
                 || text.lines().any(|l| l.starts_with("unsafe_code")),
             "{}: set `[lints] workspace = true` or an explicit `unsafe_code = \"forbid\"`",
             rel.display()
         );
         for line in text.lines().filter(|l| l.starts_with("unsafe_code")) {
-            if is_stack_paint {
-                assert_eq!(line, "unsafe_code = \"deny\"", "stack-paint: {line}");
+            if is_exception {
+                assert_eq!(line, "unsafe_code = \"deny\"", "{}: {line}", rel.display());
+                assert!(
+                    !lints_inherit_workspace(&text),
+                    "{}: must not inherit the workspace's forbid",
+                    rel.display()
+                );
+                assert!(
+                    text.contains("undocumented_unsafe_blocks = \"deny\""),
+                    "{}: every unsafe block needs a SAFETY comment",
+                    rel.display()
+                );
             } else {
                 assert_eq!(
                     line,
                     "unsafe_code = \"forbid\"",
-                    "{}: only benches/stack-paint may relax unsafe_code",
+                    "{}: only benches/stack-paint and keelsign-ffi may relax unsafe_code",
                     rel.display()
                 );
             }
         }
     }
+    assert_eq!(seen, exceptions.len(), "both exception manifests exist");
     let stack_paint = read("benches/stack-paint/src/lib.rs");
     assert!(stack_paint.contains("#![deny(unsafe_code)]"));
     assert_eq!(
@@ -511,6 +532,68 @@ fn stack_paint_is_only_unsafe_exception_and_not_shipped() {
         stack_paint.matches("// SAFETY:").count(),
         "every unsafe block in stack-paint carries a SAFETY comment"
     );
+
+    // keelsign-ffi: `unsafe` only in `src/abi.rs`, the one module the crate root allows
+    // it in; `unsafe_op_in_unsafe_fn` keeps every unsafe operation in a commented block.
+    let ffi_manifest = read("keelsign-ffi/Cargo.toml");
+    assert!(ffi_manifest.contains("unsafe_op_in_unsafe_fn = \"deny\""));
+    let ffi_root = read("keelsign-ffi/src/lib.rs");
+    assert!(ffi_root.contains("#![deny(unsafe_code)]"));
+    assert_eq!(
+        ffi_root.matches("#[allow(unsafe_code)]").count(),
+        1,
+        "keelsign-ffi has exactly one allowed unsafe module"
+    );
+    assert!(
+        ffi_root.contains("#[allow(unsafe_code)]\nmod abi;"),
+        "the allowed module is `abi`"
+    );
+    let ffi_src = root.join("keelsign-ffi/src");
+    let mut sources: Vec<PathBuf> = fs::read_dir(&ffi_src)
+        .expect("list keelsign-ffi/src")
+        .map(|e| e.expect("dir entry").path())
+        .collect();
+    sources.sort();
+    assert!(
+        sources.iter().all(|p| p.is_file()),
+        "keelsign-ffi/src is flat"
+    );
+    for path in &sources {
+        let text = fs::read_to_string(path).expect("read source");
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        let code: String = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        if name == "abi.rs" {
+            assert!(code.contains("unsafe {"), "abi.rs holds the unsafe code");
+            assert_eq!(
+                code.matches("unsafe {").count() + code.matches("unsafe extern \"C\" {").count(),
+                text.lines()
+                    .filter(|l| l.trim_start().starts_with("// SAFETY:"))
+                    .count(),
+                "every unsafe block and extern block in keelsign-ffi/src/abi.rs carries a SAFETY comment"
+            );
+        } else {
+            for keyword in [
+                "unsafe {",
+                "unsafe fn",
+                "unsafe extern",
+                "unsafe impl",
+                "unsafe trait",
+                "unsafe(",
+            ] {
+                assert!(
+                    !code.contains(keyword),
+                    "keelsign-ffi/src/{name}: `{keyword}` belongs in abi.rs"
+                );
+            }
+        }
+    }
 
     // No shipped crate depends on stack-paint, directly or through the lockfile.
     for krate in SHIPPED_CRATES {
