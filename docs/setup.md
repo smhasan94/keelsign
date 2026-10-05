@@ -81,6 +81,20 @@ rustup component add --toolchain nightly-2026-09-29 miri rust-src
   itself when it is unset). AddressSanitizer hangs on macOS, so the repo-check uses UBSan
   alone there and ASan + UBSan on Linux; `KEELSIGN_FFI_SANITIZE` overrides it.
 
+### Dependency audit (cargo-deny, SHA-47)
+
+CI checks the root workspace's `Cargo.lock` against `deny.toml` (licences, RustSec
+advisories, bans, sources) with a pinned cargo-deny:
+
+```sh
+cargo install cargo-deny --version 0.20.2 --locked
+cargo deny --locked check
+```
+
+The one ignored advisory and its reason are in `deny.toml`. The standalone projects
+under `benches/` and `examples/` and `fuzz/` have their own lockfiles and are not
+checked yet (follow-up SHA-324).
+
 ## Probe permissions
 
 - **Linux**: install the probe-rs udev rules so a normal user can open the probes, then
@@ -257,7 +271,9 @@ The exact commands, the measurement method and the results are in
   KATs in `benches/mldsa-kat`), the packaging repo-checks (`--test packaging -- --ignored`)
   and the publish dry runs. Since SHA-60 also the `keelsign.h` drift check (cbindgen
   0.29.4), the C harness against `libkeelsign.a` under ASan + UBSan and Miri on
-  `keelsign-ffi` (nightly-2026-09-29).
+  `keelsign-ffi` (nightly-2026-09-29). Since SHA-47 also `cargo deny --locked check`
+  (cargo-deny 0.20.2, `deny.toml`), which fails on any new RustSec advisory until it is
+  fixed or ignored with a reason.
 - `verify-cross`: `keelsign-verify`, (SHA-55) `keelsign-embassy` with its board module,
   and (SHA-60) `keelsign-ffi`'s `libkeelsign.a` with the `staticlib_sizes.py --check`
   symbol rules, for both targets with every feature state.
