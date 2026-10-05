@@ -72,9 +72,9 @@ fn suite_doc_lists_every_test_and_command() {
         .iter()
         .flat_map(|(_, tests, _)| tests.iter().copied())
         .collect();
-    assert_eq!(listed.len(), 12, "the suite has 12 tests");
-    assert_eq!(suite_tests(false).len(), 11);
-    assert_eq!(suite_tests(true).len(), 12);
+    assert_eq!(listed.len(), 13, "the suite has 13 tests");
+    assert_eq!(suite_tests(false).len(), 12);
+    assert_eq!(suite_tests(true).len(), 13);
 
     for bench in &BENCHES {
         let dir = format!("benches/{}", bench.name);
@@ -186,9 +186,12 @@ fn suite_doc_lists_every_test_and_command() {
         "## P2: peak stack and cycles (NEEDS-HARDWARE)",
         "cargo test -p repo-checks --locked --test on_target -- --ignored three_suite_runs_identical_per_board",
         "python3 scripts/bench_summarize.py",
-        "`POLICY board=… passed=156/156`",
+        "`POLICY board=… passed=171/171`",
         "`MLDSA board=… passed=5/5`",
-        "pending (SHA-69)",
+        // SHA-69: the hybrid verify measurement and where its figures go.
+        "`hybrid_verify_bench`",
+        "`BENCH board=… set=Hybrid-",
+        "benchmarks.md#hybrid-per-image-results",
         "E8.1",
     ] {
         assert!(doc.contains(needle), "{SUITE_DOC} must contain `{needle}`");

@@ -153,8 +153,9 @@ pub const POLICY_BENCH_FILES: [&str; 3] = [
     "src/bin/size_verify.rs",
 ];
 
-/// The on-target policy-matrix test in `tests/policy.rs` named in the SHA-46 plan.
-pub const POLICY_ON_TARGET_TESTS: [&str; 1] = ["policy_matrix_from_flash"];
+/// The on-target tests in `tests/policy.rs`: the policy matrix named in the SHA-46 plan
+/// and the hybrid Ed25519 + LMS/HSS verify measurement of SHA-69.
+pub const POLICY_ON_TARGET_TESTS: [&str; 2] = ["policy_matrix_from_flash", "hybrid_verify_bench"];
 
 /// The hybrid verify flash-footprint bins (baseline first).
 pub const POLICY_SIZE_BINS: [&str; 2] = ["size_verify_baseline", "size_verify"];

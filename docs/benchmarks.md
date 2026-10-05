@@ -611,27 +611,41 @@ The policies and the matrix are specified in [docs/policy.md](policy.md).
   are own-frame sizes without a call graph, so the chain is an estimate, far under the
   32,768 B limit of the LMS tests.
 - **On target** (`tests/policy.rs`, needs the board): `policy_matrix_from_flash` runs
-  every case of `policy-matrix.bin` (52 images since SHA-44, every one in
+  every case of `policy-matrix.bin` (57 images since SHA-69, every one in
   `tests/fixtures/images/` but the 200 KB image) under every policy through `policy_kat::run_fixture`, each image read
   through `NorFlashReader` over `&mut` the board flash at its `.rodata` address (nRF52840:
   the address; RP2350: the address minus the XIP base `0x1000_0000`), with
   `DefaultBackend::new()`, a 4 KiB TLV buffer and a 256 B chunk. It logs
-  `POLICY board=… case=… policy=… expect=… got=… result=ok` for each of the 156 cells and
-  `POLICY board=nrf52840 passed=156/156` (or `board=rp2350`), and fails on any mismatch.
+  `POLICY board=… case=… policy=… expect=… got=… result=ok` for each of the 171 cells and
+  `POLICY board=nrf52840 passed=171/171` (or `board=rp2350`), and fails on any mismatch.
   With the bench `ml-dsa` feature the ML-DSA cells verify; without it they expect the
   `ml-dsa`-off verdicts (`policy-matrix.bin` KSPM v2 carries both), so both builds give
-  `passed=156/156`.
+  `passed=171/171`.
+- **Cycles and peak stack** (`tests/policy.rs`, needs the board; SHA-69):
+  `hybrid_verify_bench` verifies the two hybrid Ed25519 + LMS/HSS images,
+  `keelsign-hybrid-ed25519-lms.bin` (HSS L=1) and `keelsign-hybrid-ed25519-hss2.bin`
+  (HSS L=2, both levels M32_H5), under `Policy::Hybrid` from flash, with the image's LMS
+  key and the Ed25519 test key trusted (`policy_kat::trusted_keys`). Each verify runs in
+  an `#[inline(never)]` frame holding the 4 KiB TLV buffer and the 256 B chunk, timed
+  with the DWT cycle counter (`CYCCNT`) after the stack is painted (`stack_paint`), as in
+  `tests/mldsa_verify.rs`. It logs one line per image for `scripts/bench_summarize.py`,
+  `BENCH board=nrf52840 set=Hybrid-Ed25519+LMS-M32_H5-L1 src=policy tc=1 msg_len=32
+  sig_len=1360 expect_valid=true ok=true result=Ok cycles=… us=… peak_stack=…
+  saturated=false` and `set=Hybrid-Ed25519+HSS-M32_H5x2-L2 … tc=2 … sig_len=2708 …`, and
+  fails on a verdict other than `Ok`, a saturated paint or a peak stack over 32,768 B.
 
 ### Hybrid results
 
-Cycles and the measured peak stack of a hybrid verify are SHA-69; flash and static frames
-are measured without the boards ([stable Rust 1.91.1, nightly
+Cycles and the measured peak stack of a hybrid verify need the boards
+(`hybrid_verify_bench`, [on-target-tests.md, P2](on-target-tests.md#p2-peak-stack-and-cycles-needs-hardware));
+this table is the HSS L=1 image, [Hybrid per-image results](#hybrid-per-image-results)
+has both. Flash and static frames are measured without the boards ([stable Rust 1.91.1, nightly
 `rustc 1.101.0-nightly (c1070d693 2026-09-28)`](#measurement-toolchains) for the frames).
 
 | Board | Flash Δ release | Flash Δ size | Static frame (compiled, deepest chain) | Cycles | Peak stack |
 |---|---|---|---|---|---|
-| nrf52840 | 74,736 B | 59,380 B | 12,760 B | pending (SHA-69) | pending (SHA-69) |
-| rp2350 | 74,656 B | 59,372 B | 12,760 B | pending (SHA-69) | pending (SHA-69) |
+| nrf52840 | 74,736 B | 59,380 B | 12,760 B | pending (hardware) | pending (hardware) |
+| rp2350 | 74,656 B | 59,372 B | 12,760 B | pending (hardware) | pending (hardware) |
 
 Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
 
@@ -657,6 +671,25 @@ alignment; no `mldsa`/`ml_dsa` symbol is in the feature-off ELFs. Both absolute 
 by about 30 KB, nearly all of it `policy-matrix.bin` (+30,338 B), which cancels out of the
 delta. The `verify_hybrid` frame grew by 8 B.
 
+### Hybrid per-image results
+
+Both hybrid images of the policy matrix (SHA-69). The signature bytes are the 64-byte
+Ed25519 signature plus the HSS signature (`signature_lens` in `MANIFEST.json`). The flash
+Δ is the code of `verify` and is the same for both images: one verifier serves every
+LMS/HSS key, and `size_verify` builds it once
+([Hybrid results](#hybrid-results), copied here). Cycles and peak stack are the `BENCH`
+lines of `hybrid_verify_bench`.
+
+| Board | Image | PQ half | Signature bytes (Ed25519 + PQ) | Flash Δ release | Flash Δ size | Cycles | Peak stack |
+|---|---|---|---|---|---|---|---|
+| nrf52840 | `keelsign-hybrid-ed25519-lms.bin` | HSS L=1, LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 1,360 B | 74,736 B | 59,380 B | pending (hardware) | pending (hardware) |
+| nrf52840 | `keelsign-hybrid-ed25519-hss2.bin` | HSS L=2, both levels LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 2,708 B | 74,736 B | 59,380 B | pending (hardware) | pending (hardware) |
+| rp2350 | `keelsign-hybrid-ed25519-lms.bin` | HSS L=1, LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 1,360 B | 74,656 B | 59,372 B | pending (hardware) | pending (hardware) |
+| rp2350 | `keelsign-hybrid-ed25519-hss2.bin` | HSS L=2, both levels LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 2,708 B | 74,656 B | 59,372 B | pending (hardware) | pending (hardware) |
+
+Fill the cycles and peak stack from the `BENCH` lines (`cycles=`, `peak_stack=`) of the
+board run, and copy the L=1 row into [Hybrid results](#hybrid-results).
+
 ### Hybrid reproduce
 
 Every command block starts from the repository root. For the Pico 2 W use
@@ -676,8 +709,19 @@ cd benches/nrf52840-mldsa
 cargo test --release --locked --test policy -- policy_matrix_from_flash
 ```
 
-Expect `POLICY board=nrf52840 passed=156/156` and no `result=FAIL` line, with and without
+Expect `POLICY board=nrf52840 passed=171/171` and no `result=FAIL` line, with and without
 `--features ml-dsa`.
+
+Hybrid cycles and peak stack (manual procedure, needs the board; three runs for the
+[Three-run consistency](#three-run-consistency) check):
+
+```sh
+cd benches/nrf52840-mldsa
+cargo test --release --locked --test policy -- hybrid_verify_bench 2>&1 | tee ../../docs/bench-logs/nrf52840-hybrid-run1.txt
+python3 ../../scripts/bench_summarize.py ../../docs/bench-logs/nrf52840-hybrid-run1.txt
+```
+
+Expect two `BENCH board=nrf52840 set=Hybrid-… ok=true result=Ok … saturated=false` lines.
 
 Flash footprint (no board):
 
@@ -812,7 +856,7 @@ cargo test --release --locked --test policy -- policy_matrix_from_flash
 ```
 
 Expect five `MLDSA … result=Ok … saturated=false` lines and `MLDSA board=nrf52840
-passed=5/5`, then `POLICY board=nrf52840 passed=156/156` from both policy runs. Copy each
+passed=5/5`, then `POLICY board=nrf52840 passed=171/171` from both policy runs. Copy each
 set's largest `peak_stack=` and its `cycles=` into the results table.
 
 Flash footprint (no board):
@@ -917,7 +961,8 @@ a re-measurement updates the source table and this one together.
   97,544 B / 158,192 B ([Stack the feature needs](#stack-the-feature-needs)).
 - **Peak stack (measured)** and **Cycles** need the boards: the on-target suite logs
   them ([on-target-tests.md, P2](on-target-tests.md#p2-peak-stack-and-cycles-needs-hardware)).
-  No test measures a hybrid verify yet, so that row is `pending (SHA-69)`.
+  The hybrid row is the HSS L=1 image of `hybrid_verify_bench` (SHA-69); both hybrid
+  images are in [Hybrid per-image results](#hybrid-per-image-results).
 - The ML-DSA flash Δ is the bench `ml-dsa` feature on top of the hybrid `size_verify`,
   one figure for both sets (one build carries both arms).
 
@@ -926,13 +971,13 @@ a re-measurement updates the source table and this one together.
 | nrf52840 | Image digest (200 KB, 256 B chunk) | 10,368 B | 10,168 B | 520 B | pending (hardware) | pending (hardware) | [Digest results](#digest-results) |
 | nrf52840 | LMS SHA-256 M32/W8 | 7,216 B | 5,384 B | 1,512 B | pending (hardware) | pending (hardware) | [LMS results](#lms-results) |
 | nrf52840 | LMS SHA-256/192 M24/W8 | 7,216 B | 5,384 B | 1,512 B | pending (hardware) | pending (hardware) | [LMS results](#lms-results) |
-| nrf52840 | Hybrid Ed25519 + LMS | 74,736 B | 59,380 B | 12,760 B | pending (SHA-69) | pending (SHA-69) | [Hybrid results](#hybrid-results) |
+| nrf52840 | Hybrid Ed25519 + LMS | 74,736 B | 59,380 B | 12,760 B | pending (hardware) | pending (hardware) | [Hybrid results](#hybrid-results) |
 | nrf52840 | ML-DSA-44 | 55,232 B | 13,832 B | 93,456 B | pending (hardware) | pending (hardware) | [ML-DSA verify results](#ml-dsa-verify-results) |
 | nrf52840 | ML-DSA-65 | 55,232 B | 13,832 B | 153,080 B | pending (hardware) | pending (hardware) | [ML-DSA verify results](#ml-dsa-verify-results) |
 | rp2350 | Image digest (200 KB, 256 B chunk) | 10,400 B | 10,204 B | 520 B | pending (hardware) | pending (hardware) | [Digest results](#digest-results) |
 | rp2350 | LMS SHA-256 M32/W8 | 7,224 B | 5,384 B | 1,512 B | pending (hardware) | pending (hardware) | [LMS results](#lms-results) |
 | rp2350 | LMS SHA-256/192 M24/W8 | 7,224 B | 5,384 B | 1,512 B | pending (hardware) | pending (hardware) | [LMS results](#lms-results) |
-| rp2350 | Hybrid Ed25519 + LMS | 74,656 B | 59,372 B | 12,760 B | pending (SHA-69) | pending (SHA-69) | [Hybrid results](#hybrid-results) |
+| rp2350 | Hybrid Ed25519 + LMS | 74,656 B | 59,372 B | 12,760 B | pending (hardware) | pending (hardware) | [Hybrid results](#hybrid-results) |
 | rp2350 | ML-DSA-44 | 55,176 B | 13,828 B | 93,456 B | pending (hardware) | pending (hardware) | [ML-DSA verify results](#ml-dsa-verify-results) |
 | rp2350 | ML-DSA-65 | 55,176 B | 13,828 B | 153,080 B | pending (hardware) | pending (hardware) | [ML-DSA verify results](#ml-dsa-verify-results) |
 
@@ -1023,7 +1068,7 @@ These are not rebuilt by any command here and are not checked:
   changed between tickets; their deltas are not recorded figures and no command here
   rebuilds them.
 
-Hardware cells (`pending (hardware)`, `pending (SHA-69)`) are not recorded figures.
+Hardware cells (`pending (hardware)`) are not recorded figures.
 
 ### Static frame detail
 
