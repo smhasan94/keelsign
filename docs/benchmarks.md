@@ -644,19 +644,19 @@ has both. Flash and static frames are measured without the boards ([stable Rust 
 
 | Board | Flash Δ release | Flash Δ size | Static frame (compiled, deepest chain) | Cycles | Peak stack |
 |---|---|---|---|---|---|
-| nrf52840 | 74,736 B | 59,380 B | 12,760 B | pending (hardware) | pending (hardware) |
-| rp2350 | 74,656 B | 59,372 B | 12,760 B | pending (hardware) | pending (hardware) |
+| nrf52840 | 74,740 B | 59,384 B | 12,760 B | pending (hardware) | pending (hardware) |
+| rp2350 | 74,660 B | 59,376 B | 12,760 B | pending (hardware) | pending (hardware) |
 
 Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every row):
 
 | Board / profile | `size_verify_baseline` flash | `size_verify` flash | Δ verify |
 |---|---|---|---|
-| nrf52840 / release | 45,372 | 120,108 | 74,736 |
-| nrf52840 / size | 44,572 | 103,952 | 59,380 |
-| rp2350 / release | 46,532 | 121,188 | 74,656 |
-| rp2350 / size | 45,232 | 104,604 | 59,372 |
+| nrf52840 / release | 45,896 | 120,636 | 74,740 |
+| nrf52840 / size | 45,096 | 104,480 | 59,384 |
+| rp2350 / release | 47,056 | 121,716 | 74,660 |
+| rp2350 / size | 45,756 | 105,132 | 59,376 |
 
-Both baselines include the 3,512-byte image and the 37,633-byte `policy-matrix.bin` (KSPM
+Both baselines include the 3,512-byte image and the 38,155-byte `policy-matrix.bin` (KSPM
 v2, SHA-44) in `.rodata`. The delta is roughly the digest (about 10.4 KB, above), the
 LMS/HSS verifier (see [LMS results](#lms-results)) and Ed25519, which a historical
 planning measurement (SHA-46) put at 43 KB (`opt-level = "s"`) to 57 KB
@@ -671,6 +671,12 @@ alignment; no `mldsa`/`ml_dsa` symbol is in the feature-off ELFs. Both absolute 
 by about 30 KB, nearly all of it `policy-matrix.bin` (+30,338 B), which cancels out of the
 delta. The `verify_hybrid` frame grew by 8 B.
 
+Re-measured for SHA-69. The five HSS L=2 hybrid images grew `policy-matrix.bin` by 522 B
+(57 cases), so both absolute sizes grew in every build: the baselines by 524 B and
+`size_verify` by 528 B, which moves the delta by 4 B (layout and alignment of the larger
+`.rodata`; `keelsign-verify`'s source is unchanged). The ML-DSA feature Δ and every
+static frame are unchanged.
+
 ### Hybrid per-image results
 
 Both hybrid images of the policy matrix (SHA-69). The signature bytes are the 64-byte
@@ -682,10 +688,10 @@ lines of `hybrid_verify_bench`.
 
 | Board | Image | PQ half | Signature bytes (Ed25519 + PQ) | Flash Δ release | Flash Δ size | Cycles | Peak stack |
 |---|---|---|---|---|---|---|---|
-| nrf52840 | `keelsign-hybrid-ed25519-lms.bin` | HSS L=1, LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 1,360 B | 74,736 B | 59,380 B | pending (hardware) | pending (hardware) |
-| nrf52840 | `keelsign-hybrid-ed25519-hss2.bin` | HSS L=2, both levels LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 2,708 B | 74,736 B | 59,380 B | pending (hardware) | pending (hardware) |
-| rp2350 | `keelsign-hybrid-ed25519-lms.bin` | HSS L=1, LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 1,360 B | 74,656 B | 59,372 B | pending (hardware) | pending (hardware) |
-| rp2350 | `keelsign-hybrid-ed25519-hss2.bin` | HSS L=2, both levels LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 2,708 B | 74,656 B | 59,372 B | pending (hardware) | pending (hardware) |
+| nrf52840 | `keelsign-hybrid-ed25519-lms.bin` | HSS L=1, LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 1,360 B | 74,740 B | 59,384 B | pending (hardware) | pending (hardware) |
+| nrf52840 | `keelsign-hybrid-ed25519-hss2.bin` | HSS L=2, both levels LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 2,708 B | 74,740 B | 59,384 B | pending (hardware) | pending (hardware) |
+| rp2350 | `keelsign-hybrid-ed25519-lms.bin` | HSS L=1, LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 1,360 B | 74,660 B | 59,376 B | pending (hardware) | pending (hardware) |
+| rp2350 | `keelsign-hybrid-ed25519-hss2.bin` | HSS L=2, both levels LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 2,708 B | 74,660 B | 59,376 B | pending (hardware) | pending (hardware) |
 
 Fill the cycles and peak stack from the `BENCH` lines (`cycles=`, `peak_stack=`) of the
 board run, and copy the L=1 row into [Hybrid results](#hybrid-results).
@@ -825,10 +831,10 @@ both arms. Flash detail (`elf_sizes.py`, bytes; static RAM delta is 0 in every r
 
 | Board / profile | `size_verify` flash (ml-dsa off) | `size_verify` flash (ml-dsa on) | Δ ml-dsa |
 |---|---|---|---|
-| nrf52840 / release | 120,108 | 175,340 | 55,232 |
-| nrf52840 / size | 103,952 | 117,784 | 13,832 |
-| rp2350 / release | 121,188 | 176,364 | 55,176 |
-| rp2350 / size | 104,604 | 118,432 | 13,828 |
+| nrf52840 / release | 120,636 | 175,868 | 55,232 |
+| nrf52840 / size | 104,480 | 118,312 | 13,832 |
+| rp2350 / release | 121,716 | 176,892 | 55,176 |
+| rp2350 / size | 105,132 | 118,960 | 13,828 |
 
 The `ml-dsa off` column is the same `size_verify` build as in
 [Hybrid results](#hybrid-results); a repo-check keeps the two equal.
@@ -971,13 +977,13 @@ a re-measurement updates the source table and this one together.
 | nrf52840 | Image digest (200 KB, 256 B chunk) | 10,368 B | 10,168 B | 520 B | pending (hardware) | pending (hardware) | [Digest results](#digest-results) |
 | nrf52840 | LMS SHA-256 M32/W8 | 7,216 B | 5,384 B | 1,512 B | pending (hardware) | pending (hardware) | [LMS results](#lms-results) |
 | nrf52840 | LMS SHA-256/192 M24/W8 | 7,216 B | 5,384 B | 1,512 B | pending (hardware) | pending (hardware) | [LMS results](#lms-results) |
-| nrf52840 | Hybrid Ed25519 + LMS | 74,736 B | 59,380 B | 12,760 B | pending (hardware) | pending (hardware) | [Hybrid results](#hybrid-results) |
+| nrf52840 | Hybrid Ed25519 + LMS | 74,740 B | 59,384 B | 12,760 B | pending (hardware) | pending (hardware) | [Hybrid results](#hybrid-results) |
 | nrf52840 | ML-DSA-44 | 55,232 B | 13,832 B | 93,456 B | pending (hardware) | pending (hardware) | [ML-DSA verify results](#ml-dsa-verify-results) |
 | nrf52840 | ML-DSA-65 | 55,232 B | 13,832 B | 153,080 B | pending (hardware) | pending (hardware) | [ML-DSA verify results](#ml-dsa-verify-results) |
 | rp2350 | Image digest (200 KB, 256 B chunk) | 10,400 B | 10,204 B | 520 B | pending (hardware) | pending (hardware) | [Digest results](#digest-results) |
 | rp2350 | LMS SHA-256 M32/W8 | 7,224 B | 5,384 B | 1,512 B | pending (hardware) | pending (hardware) | [LMS results](#lms-results) |
 | rp2350 | LMS SHA-256/192 M24/W8 | 7,224 B | 5,384 B | 1,512 B | pending (hardware) | pending (hardware) | [LMS results](#lms-results) |
-| rp2350 | Hybrid Ed25519 + LMS | 74,656 B | 59,372 B | 12,760 B | pending (hardware) | pending (hardware) | [Hybrid results](#hybrid-results) |
+| rp2350 | Hybrid Ed25519 + LMS | 74,660 B | 59,376 B | 12,760 B | pending (hardware) | pending (hardware) | [Hybrid results](#hybrid-results) |
 | rp2350 | ML-DSA-44 | 55,176 B | 13,828 B | 93,456 B | pending (hardware) | pending (hardware) | [ML-DSA verify results](#ml-dsa-verify-results) |
 | rp2350 | ML-DSA-65 | 55,176 B | 13,828 B | 153,080 B | pending (hardware) | pending (hardware) | [ML-DSA verify results](#ml-dsa-verify-results) |
 
