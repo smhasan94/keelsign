@@ -55,9 +55,11 @@ image fits.
 With two levels (HSS L=2, `--hss-levels 2`) a top-level leaf signs the public key of a
 bottom tree, and the bottom tree's leaves sign images. keelsign derives bottom tree
 number *i* deterministically from the key, so a crash and a retry make the same bottom
-tree and the same top-level signature: no harm. A restored copy of the key that builds a
-*different* bottom tree number *i* under the same top-level leaf is the same break one
-level up: the top-level leaf has then signed two different messages.
+tree and the same top-level signature: no harm. For the same reason a restored copy
+rebuilds the same bottom tree, so a restore does its damage at the bottom level, as
+above: bottom-tree leaves sign twice. A signer that built bottom trees from fresh
+randomness would in addition make the top-level leaf sign two different bottom-tree
+keys: the same break one level up.
 
 ## One tree, one L
 
@@ -67,9 +69,12 @@ over the bottom tree's public key `pub[1]`. By construction that part is also a 
 L=1 signature over those same bytes under the key `u32str(1) || pub[0]`.
 
 That L=1 key has a different key ID from the L=2 key `u32str(2) || pub[0]`, so a device
-that trusts only the L=2 key is not affected. It becomes exploitable only if someone
-provisions both forms of the same tree on a device: then every top-level signature the
-signer ever published is also a valid L=1 image signature over attacker-visible bytes.
+that trusts only the L=2 key is not affected. keelsign's image signatures are over a
+32-byte image digest and `pub[1]` is 56 bytes, so with keelsign's verifier that top-level
+signature does not pass as an image signature by itself. The rule still stands: a
+verifier that accepts other message shapes, a future image format or a mistake in a device
+key list must not turn every published top-level signature into a usable L=1 signature,
+and there is never a reason to trust both forms.
 
 The rule: **never trust the same LMS tree at two different L values.** keelsign helps:
 `keelsign keygen` fixes L when it creates a key (it is part of the public key, and every
@@ -135,11 +140,14 @@ developer can skip it.
   cryptographic modules validated to FIPS 140-2 or FIPS 140-3 Level 3 or higher, so
   that the private seed and the leaf counter never leave the module. keelsign's
   file-based keys are for development and for teams that accept that gap knowingly.
-- **Hand out subtrees, not copies.** With HSS (SP 800-208, section 7.1) the top tree,
-  kept offline or in a hardware module, signs the public keys of bottom trees. Give each
-  signer its own bottom tree (or a range of leaves no other signer uses), so that no two
-  signers can ever reach the same leaf. Track how many leaves each subtree has left and
-  rotate each one before it runs out.
+- **Hand out subtrees, not copies.** SP 800-208, section 7 (Distributed Multi-Tree
+  Hash-Based Signatures, and section 7.1 for HSS), describes this: the top tree, kept
+  offline or in a hardware module, signs the public keys of bottom trees, each bottom
+  tree lives in its own module, and all bottom trees are best made up front in one key
+  ceremony, because the top tree's module is a single point of failure. Give each signer
+  its own bottom tree (or a range of leaves no other signer uses), so that no two signers
+  can ever reach the same leaf. Track how many leaves each subtree has left and rotate
+  each one before it runs out.
 - **Audit and alert.** Log every reservation and every signature with the leaf it used.
   Alert on a rejected or duplicated reservation, on a counter that goes down and on a
   key nearing exhaustion.

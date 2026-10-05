@@ -151,7 +151,9 @@ fn every_policy_matrix_case_marks_iff_the_verdict_is_ok() {
 /// SHA-69 AC1 / TP1 on the host (the mock-flash mirror of docs/embassy.md P5): under
 /// `Policy::Hybrid`, with the image's LMS/HSS key and the Ed25519 test key trusted, both
 /// updaters mark the good HSS L=1 and L=2 hybrid images for swap and reject every image
-/// with either half tampered or missing, naming the half, without writing anything.
+/// with either half tampered or missing, naming the half, without writing anything. Each
+/// image is checked twice: with its own LMS/HSS key trusted, and with the boot apps'
+/// `hybrid` configuration (both hybrid fixture keys, `Config<'static, 2, 1>`).
 #[test]
 fn hybrid_lms_cases_mark_iff_both_halves_verify() {
     use keelsign_verify::Ed25519Error;
@@ -196,28 +198,50 @@ fn hybrid_lms_cases_mark_iff_both_halves_verify() {
             Some(keelsign_verify::Error::Ed25519(Ed25519Error::Missing)),
         ),
     ];
+    // The boot apps' `hybrid` configuration: HYBRID_LMS_KEY_L1, HYBRID_LMS_KEY_L2 and
+    // ED25519_TEST_KEY (repo-checks pins those statics to these fixture keys).
+    let l1 = pq_key(&fixture.case("keelsign-hybrid-ed25519-lms.bin").unwrap()).unwrap();
+    let l2 = pq_key(&fixture.case("keelsign-hybrid-ed25519-hss2.bin").unwrap()).unwrap();
+    assert_eq!(&l1.public_key[..4], &[0, 0, 0, 1], "HSS L=1");
+    assert_eq!(&l2.public_key[..4], &[0, 0, 0, 2], "HSS L=2");
+    let device = Config::new(Policy::Hybrid, [l1, l2], ed25519_keys());
     for (name, expected) in cases {
         let key = pq_key(&fixture.case(name).unwrap()).unwrap();
-        let config = Config::new(Policy::Hybrid, [key], ed25519_keys());
-        let (blocking, b_flash) = mark_blocking(flash_with(image(name)), &config);
-        let (asynchronous, a_flash) = mark_async(flash_with(image(name)), &config);
-        assert_eq!(asynchronous, blocking, "{name}: async == blocking");
-        assert_eq!(a_flash.mem, b_flash.mem, "{name}: the same flash contents");
-        match expected {
-            None => {
-                let verified = blocking.unwrap_or_else(|e| panic!("{name}: {e:?}"));
-                assert_eq!(verified.policy, Policy::Hybrid, "{name}");
-                assert_eq!(verified.pq_key, Some(key), "{name}");
-                assert_eq!(
-                    verified.ed25519_key,
-                    Some(ed25519_keys()[0]),
-                    "{name}: the Ed25519 test key"
-                );
-                assert_eq!(state_word(&b_flash), [SWAP_MAGIC; 4], "{name}: marked");
-                assert!(mutations_only_in_state(&b_flash.ops), "{name}");
-            }
-            Some(error) => assert_rejected_and_not_marked(blocking, &b_flash, error),
+        let own = Config::new(Policy::Hybrid, [key], ed25519_keys());
+        check_hybrid_case(name, name, &own, expected, key);
+        let label = format!("{name} (device config)");
+        check_hybrid_case(name, &label, &device, expected, key);
+    }
+}
+
+/// One hybrid case (the image `name`, reported as `label`) through both updaters from the
+/// same flash: the same result and contents; `Ok` marks `Swap` with `expected_key` and the
+/// Ed25519 test key, a reject is `expected` with nothing written.
+fn check_hybrid_case<const N: usize>(
+    name: &str,
+    label: &str,
+    config: &Config<'static, N, 1>,
+    expected: Option<keelsign_verify::Error>,
+    expected_key: TrustedKey<'static>,
+) {
+    let (blocking, b_flash) = mark_blocking(flash_with(image(name)), config);
+    let (asynchronous, a_flash) = mark_async(flash_with(image(name)), config);
+    assert_eq!(asynchronous, blocking, "{label}: async == blocking");
+    assert_eq!(a_flash.mem, b_flash.mem, "{label}: the same flash contents");
+    match expected {
+        None => {
+            let verified = blocking.unwrap_or_else(|e| panic!("{label}: {e:?}"));
+            assert_eq!(verified.policy, Policy::Hybrid, "{label}");
+            assert_eq!(verified.pq_key, Some(expected_key), "{label}");
+            assert_eq!(
+                verified.ed25519_key,
+                Some(ed25519_keys()[0]),
+                "{label}: the Ed25519 test key"
+            );
+            assert_eq!(state_word(&b_flash), [SWAP_MAGIC; 4], "{label}: marked");
+            assert!(mutations_only_in_state(&b_flash.ops), "{label}");
         }
+        Some(error) => assert_rejected_and_not_marked(blocking, &b_flash, error),
     }
 }
 

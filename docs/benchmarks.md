@@ -693,8 +693,9 @@ lines of `hybrid_verify_bench`.
 | rp2350 | `keelsign-hybrid-ed25519-lms.bin` | HSS L=1, LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 1,360 B | 74,660 B | 59,376 B | pending (hardware) | pending (hardware) |
 | rp2350 | `keelsign-hybrid-ed25519-hss2.bin` | HSS L=2, both levels LMS_SHA256_M32_H5 / LMOTS_SHA256_N32_W8 | 2,708 B | 74,660 B | 59,376 B | pending (hardware) | pending (hardware) |
 
-Fill the cycles and peak stack from the `BENCH` lines (`cycles=`, `peak_stack=`) of the
-board run, and copy the L=1 row into [Hybrid results](#hybrid-results).
+Fill the cycles and peak stack from the `BENCH` lines (`cycles=`, `peak_stack=`) of
+`docs/bench-logs/<board>-suite-run1.txt` (on-target-tests.md P2), and copy the L=1 row
+into [Hybrid results](#hybrid-results).
 
 ### Hybrid reproduce
 
@@ -718,13 +719,20 @@ cargo test --release --locked --test policy -- policy_matrix_from_flash
 Expect `POLICY board=nrf52840 passed=171/171` and no `result=FAIL` line, with and without
 `--features ml-dsa`.
 
-Hybrid cycles and peak stack (manual procedure, needs the board; three runs for the
-[Three-run consistency](#three-run-consistency) check):
+Hybrid cycles and peak stack (manual procedure, needs the board). The recorded source is
+the suite log of [on-target-tests.md, P1](on-target-tests.md#p1-three-identical-runs-per-board-needs-hardware),
+`docs/bench-logs/<board>-suite-run1.txt`, which includes `hybrid_verify_bench`; its
+`BENCH` lines are summarised with:
+
+```sh
+python3 scripts/bench_summarize.py docs/bench-logs/nrf52840-suite-run1.txt
+```
+
+To run only the hybrid measurement (a quick look, not a recorded figure):
 
 ```sh
 cd benches/nrf52840-mldsa
-cargo test --release --locked --test policy -- hybrid_verify_bench 2>&1 | tee ../../docs/bench-logs/nrf52840-hybrid-run1.txt
-python3 ../../scripts/bench_summarize.py ../../docs/bench-logs/nrf52840-hybrid-run1.txt
+cargo test --release --locked --test policy -- hybrid_verify_bench
 ```
 
 Expect two `BENCH board=nrf52840 set=Hybrid-… ok=true result=Ok … saturated=false` lines.

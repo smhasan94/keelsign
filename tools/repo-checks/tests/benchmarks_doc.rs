@@ -817,8 +817,9 @@ fn hybrid_verify_section_records_flash_delta() {
         "size_verify_baseline target/thumbv7em-none-eabihf/size/size_verify",
         "cargo +nightly rustc --release --locked --bin size_verify --target-dir target/nightly -- -Z emit-stack-sizes",
         "cargo test -p keelsign-verify --locked --features ed25519 --test policy_matrix",
-        "cargo test --release --locked --test policy -- hybrid_verify_bench 2>&1 | tee ../../docs/bench-logs/nrf52840-hybrid-run1.txt",
-        "python3 ../../scripts/bench_summarize.py ../../docs/bench-logs/nrf52840-hybrid-run1.txt",
+        // SHA-69: the suite log is the one recorded source of the hybrid figures.
+        "python3 scripts/bench_summarize.py docs/bench-logs/nrf52840-suite-run1.txt",
+        "cargo test --release --locked --test policy -- hybrid_verify_bench\n",
     ] {
         assert!(
             reproduce.contains(command),
