@@ -219,7 +219,73 @@ RUSTFLAGS='--cfg sha2_backend="soft"' MIRIFLAGS="-Zmiri-symbolic-alignment-check
 sha2's aarch64 backend reads through a NEON intrinsic that Miri's Stacked Borrows check
 rejects. The full policy matrix, the digest sweep and the key-rotation test are
 `cfg_attr(miri, ignore)` (too slow under Miri); `miri_subset_of_policy_matrix` covers LMS,
-Ed25519 and (with `ml-dsa`) ML-DSA-44 cells. CI step: `miri (keelsign-ffi)`.
+Ed25519 and (with `ml-dsa`) ML-DSA-44 cells.
+
+CI runs the two commands in `.github/workflows/miri.yml` (SHA-327), jobs
+`miri keelsign-ffi (features "")` and `miri keelsign-ffi (features "ed25519,ml-dsa")`
+(step `miri (keelsign-ffi)`), in parallel with the `ci` job:
+
+- on a pull request only when it changes `keelsign-ffi/**` or the workflow itself
+  (otherwise both jobs finish green in seconds with a notice; the gate is a step
+  condition, so the jobs always report a conclusion);
+- on every push to `main`;
+- nightly (`cron: "47 3 * * *"`);
+- on `workflow_dispatch` (`gh workflow run miri.yml --ref main`).
+
+Each job has `timeout-minutes: 30` (a pass takes about 5 minutes). A failure is a red
+Miri run with GitHub's standard failed-workflow notification, the same as the fuzz
+nightly. Scheduled runs pause after 60 days without repository activity.
+
+### Verifying the Miri cadence (SHA-327)
+
+Needs `gh` authenticated for `smhasan94/keelsign` and pushed runs; none of it runs
+locally. The static part (commands, triggers, gate, this section) is
+`cargo test -p repo-checks --locked --test miri`.
+
+1. AC1, the `ci` job is shorter on a pull request that does not touch `keelsign-ffi`.
+   Read the `ci` job's start and end times for a baseline run on `main` from before
+   SHA-327 (run 37350742328 at df76277; earlier runs 37249498567 took 13m18s and
+   37268700122 took 15m41s) and for the pull request's run:
+
+   ```sh
+   gh api repos/smhasan94/keelsign/actions/runs/<run>/jobs \
+     --jq '.jobs[] | select(.name=="fmt, clippy, test, publish dry-run") | "\(.started_at) \(.completed_at)"'
+   ```
+
+   Pass: the pull request's `ci` job is at least 6 minutes shorter than the baseline
+   (expected about 5 to 6 minutes, against 13 to 16 before).
+
+2. TP2 and AC2, two pull requests: one changing `keelsign-ffi/**` (for example a
+   throwaway draft PR with a one-line comment change in `keelsign-ffi/src/abi.rs`,
+   closed without merging) and one that does not. For each, find the Miri run and read
+   its jobs:
+
+   ```sh
+   gh run list --workflow miri.yml --event pull_request --branch <branch> --limit 1
+   gh run view <run> --json jobs \
+     --jq '.jobs[] | {name, conclusion, startedAt, completedAt, miri: (.steps[] | select(.name=="miri (keelsign-ffi)") | .conclusion)}'
+   ```
+
+   and the `ci` job's duration with the step 1 command. Pass: both `ci` jobs take about
+   the same time (5 to 6 minutes); on the `keelsign-ffi` pull request both
+   `miri keelsign-ffi (…)` jobs are `success` with step `miri (keelsign-ffi)` `success`
+   (about 6 minutes each); on the other one both jobs are `success` in seconds with step
+   `miri (keelsign-ffi)` `skipped` and the "keelsign-ffi unchanged" notice in the log.
+   Record both in the pull request's verification table.
+
+3. TP3 and AC3, after the workflow is on `main`:
+
+   ```sh
+   gh workflow run miri.yml --ref main
+   gh run list --workflow miri.yml --event workflow_dispatch --limit 1
+   gh run view <run> --json jobs \
+     --jq '.jobs[] | {name, conclusion, miri: (.steps[] | select(.name=="miri (keelsign-ffi)") | .conclusion)}'
+   ```
+
+   Pass: both jobs `success`, step `miri (keelsign-ffi)` `success` in each. After the
+   first night, `gh run list --workflow miri.yml --event schedule --limit 1` shows a
+   scheduled run on `main`, and `gh run list --workflow miri.yml --event push --limit 1`
+   shows the run for the latest merge.
 
 ## `nm` check
 
