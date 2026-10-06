@@ -261,9 +261,9 @@ MLDSA_CONTEXT = b"keelsign-mcuboot-image-v1"   (25 bytes)
 Every keelsign ML-DSA signature uses this FIPS 204 context string (at most 255 bytes).
 draft-connolly-cfrg-ml-dsa-security-considerations-02 §2.2.2 recommends a fixed context
 string per protocol use: it separates keelsign image signatures from any other signature
-made with the same ML-DSA key. `keelsign_verify::mldsa` (SHA-44, the `ml-dsa` feature)
-passes it to `verify_with_context`; a new image-format version would get a new context
-string.
+made with the same ML-DSA key. `keelsign_verify::mldsa::verify` (SHA-44, the `ml-dsa`
+feature) passes it as the FIPS 204 context; a new image-format version would get a new
+context string.
 
 ## Accepted LMS parameter sets and CNSA 2.0
 

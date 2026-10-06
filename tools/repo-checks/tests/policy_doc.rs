@@ -383,3 +383,131 @@ fn doc_names_every_error_variant() {
     let src = read("keelsign-verify/src/policy.rs");
     assert!(src.contains("//! # Error precedence"));
 }
+
+/// SHA-318 AC1: `VerifiedImage::image_len` is not covered by the signatures, and the
+/// `VerifiedImage` table row in docs/policy.md, the struct rustdoc and the field rustdoc
+/// all say so.
+#[test]
+fn image_len_row_says_not_signed() {
+    const NEEDLE: &str = "Not covered by the signatures";
+    let doc = doc();
+    let section = section(&doc, "## VerifiedImage and anti-rollback");
+    let row = section
+        .lines()
+        .find(|l| l.starts_with("| `image_len` |"))
+        .expect("docs/policy.md: VerifiedImage table has an `image_len` row");
+    assert!(row.contains(NEEDLE), "image_len row must say `{NEEDLE}`");
+    assert!(row.contains("it_tlv_tot") && row.contains("Do not treat it as authenticated"));
+
+    let src = read("keelsign-verify/src/policy.rs");
+    let start = src
+        .find("/// An image that passed [`verify`]")
+        .expect("VerifiedImage rustdoc");
+    let item = &src[start..];
+    let item = &item[..item.find("\n}\n").expect("end of VerifiedImage")];
+    let (struct_doc, fields) = item
+        .split_once("pub struct VerifiedImage")
+        .expect("pub struct VerifiedImage");
+    // The struct doc no longer claims everything it reports is signed.
+    let struct_doc = struct_doc.replace("\n/// ", " ");
+    assert!(
+        struct_doc
+            .contains("Everything it reports except [`VerifiedImage::image_len`] was covered")
+            && struct_doc.contains("`image_len` is not covered by the signatures"),
+        "VerifiedImage rustdoc must exempt image_len"
+    );
+    // The field doc: the `///` lines directly above `pub image_len: u32,`.
+    let lines: Vec<&str> = fields.lines().map(str::trim).collect();
+    let at = lines
+        .iter()
+        .position(|l| *l == "pub image_len: u32,")
+        .expect("VerifiedImage::image_len");
+    let first = lines[..at]
+        .iter()
+        .rposition(|l| !l.starts_with("///"))
+        .map_or(0, |i| i + 1);
+    let field_doc = lines[first..at].join(" ");
+    assert!(
+        field_doc.contains(NEEDLE) && field_doc.contains("it_tlv_tot"),
+        "VerifiedImage::image_len rustdoc must say `{NEEDLE}`: {field_doc}"
+    );
+}
+
+/// SHA-318 AC2: docs/policy.md describes keelsign's KEYHASH pairing (adjacent to the
+/// ED25519 TLV) as stricter than MCUboot's (armed until the next signature), with the
+/// `image_validate.c` cites, and no longer says MCUboot pairs them the same way.
+#[test]
+fn differences_section_says_keyhash_adjacency_is_stricter_than_mcuboot() {
+    let doc = doc();
+    let flat = doc.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        !flat.contains("pairs them the same way"),
+        "docs/policy.md must not say MCUboot pairs KEYHASH and ED25519 the same way"
+    );
+    let differences = section(&doc, "## Differences from MCUboot");
+    let bullet = differences
+        .split("\n- ")
+        .find(|b| b.starts_with("**KEYHASH adjacency.**"))
+        .expect("## Differences from MCUboot has a **KEYHASH adjacency.** bullet")
+        .replace("\n  ", " ");
+    for needle in [
+        "immediately before the ED25519 TLV",
+        "`Ed25519(Unpaired)`",
+        "`6d3b3d2`",
+        "`image_validate.c:364-394`",
+        "`:400-403`",
+        "`:433`",
+        "strictly stricter",
+        "imgtool images are unaffected",
+    ] {
+        assert!(
+            bullet.contains(needle),
+            "KEYHASH adjacency bullet must mention `{needle}`: {bullet}"
+        );
+    }
+    // The Ed25519 half points at the difference.
+    let rules = section(&doc, "## Image rules").replace("\n  ", " ");
+    assert!(
+        rules.contains("stricter than MCUboot") && rules.contains("KEYHASH adjacency"),
+        "the Ed25519 half must call KEYHASH adjacency stricter than MCUboot"
+    );
+}
+
+/// SHA-318 AC4: the `ml-dsa` section says that without the feature both
+/// `DefaultBackend::new()` and `DefaultBackend::cnsa_2_0()` answer `UnsupportedAlgorithm`
+/// for ML-DSA (the feature state is checked before the policy), and that the strict
+/// backend's `UnsupportedParameterSet` is the feature-on answer. backend.rs checks the
+/// feature first.
+#[test]
+fn ml_dsa_feature_section_says_both_backends_answer_unsupported_algorithm_when_off() {
+    let doc = doc();
+    let section = section(&doc, "## The `ml-dsa` feature")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for needle in [
+        "Called directly, both `DefaultBackend::new()` and `DefaultBackend::cnsa_2_0()` answer \
+         `UnsupportedAlgorithm` for ML-DSA too, whatever their policy",
+        "the feature state is checked before the policy",
+        "**`DefaultBackend::cnsa_2_0()` refuses ML-DSA** with `UnsupportedParameterSet` when \
+         the feature is on",
+        "without the feature both backends answer `UnsupportedAlgorithm`",
+    ] {
+        assert!(
+            section.contains(needle),
+            "## The `ml-dsa` feature must say `{needle}`"
+        );
+    }
+    let backend = read("keelsign-verify/src/backend.rs");
+    let arm = backend
+        .find("Algorithm::MlDsa44 | Algorithm::MlDsa65 => {")
+        .expect("backend.rs: the ML-DSA arm of DefaultBackend::verify");
+    let arm = &backend[arm..];
+    let feature = arm
+        .find("if !mldsa::is_enabled() {")
+        .expect("the ML-DSA arm checks the feature");
+    let policy = arm
+        .find("self.ml_dsa")
+        .expect("the ML-DSA arm checks the policy");
+    assert!(feature < policy, "the feature state must be checked first");
+}

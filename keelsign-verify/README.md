@@ -20,8 +20,10 @@ and the policies in
 ML-DSA-44/65 verifier (FIPS 204, pure ML-DSA with the keelsign context, through
 `ml-dsa` `=0.1.1` with no heap) comes with the `ml-dsa` feature; without it ML-DSA
 signatures fail closed with `UnsupportedAlgorithm`, and the strict
-`DefaultBackend::cnsa_2_0()` refuses ML-DSA in any build. ML-DSA verify needs about
-98 KB (ML-DSA-44) / 158 KB (ML-DSA-65) of stack on stable, far over a 32 KB device budget
+`DefaultBackend::cnsa_2_0()` refuses ML-DSA in any build: with `UnsupportedParameterSet`
+when the `ml-dsa` feature is on and with `UnsupportedAlgorithm` when it is off. ML-DSA
+verify needs about 98 KB (ML-DSA-44) / 158 KB (ML-DSA-65) of stack on stable, far over a
+32 KB device budget
 ([docs/benchmarks.md](https://github.com/smhasan94/keelsign/blob/main/docs/benchmarks.md#ml-dsa-verify-sha-44));
 a low-stack verify is planned. Both features are off by default: `ed25519` (needed for
 `ClassicalOnly` and `Hybrid`, which otherwise fail closed) and `ml-dsa`.

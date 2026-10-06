@@ -337,6 +337,127 @@ fn keelsign_verify_docs_build_without_warnings() {
     }
 }
 
+/// The name SHA-318 keeps out of keelsign-verify's public docs.
+const HIDDEN_FN: &str = "verify_with_context";
+
+/// SHA-318 AC3: `mldsa::verify_with_context` is `#[doc(hidden)]`, no rustdoc line of
+/// keelsign-verify names or links it, and no doc under `docs/` (or a README) names it
+/// (the `ml-dsa` crate's own `VerifyingKey::verify_with_context` in docs/benchmarks.md
+/// is a different function).
+#[test]
+fn verify_with_context_is_doc_hidden_and_unlinked() {
+    let mldsa = read("keelsign-verify/src/mldsa.rs");
+    assert!(
+        mldsa.contains(&format!("#[doc(hidden)]\npub fn {HIDDEN_FN}(")),
+        "mldsa.rs: `#[doc(hidden)]` must sit directly above `pub fn {HIDDEN_FN}`"
+    );
+    for (path, text) in sources() {
+        for (n, line) in text.lines().enumerate() {
+            let line = line.trim_start();
+            if (line.starts_with("///") || line.starts_with("//!")) && line.contains(HIDDEN_FN) {
+                panic!(
+                    "keelsign-verify/src/{path}:{}: rustdoc names `{HIDDEN_FN}`: {line}",
+                    n + 1
+                );
+            }
+        }
+    }
+    let mut docs: Vec<String> = fs::read_dir(workspace_root().join("docs"))
+        .expect("read docs/")
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "md"))
+        .map(|p| format!("docs/{}", p.file_name().unwrap().to_str().unwrap()))
+        .collect();
+    docs.extend([
+        "README.md".to_owned(),
+        "keelsign-verify/README.md".to_owned(),
+    ]);
+    assert!(docs.iter().any(|d| d == "docs/image-format.md"));
+    for doc in docs {
+        let text = read(&doc);
+        for (at, _) in text.match_indices(HIDDEN_FN) {
+            assert!(
+                doc == "docs/benchmarks.md" && text[..at].ends_with("VerifyingKey::"),
+                "{doc} names `{HIDDEN_FN}` (only docs/benchmarks.md's \
+                 `VerifyingKey::{HIDDEN_FN}` of the ml-dsa crate may)"
+            );
+        }
+    }
+}
+
+/// The files of a `cargo doc` output directory, except the source views under `src/`
+/// (which show every function, hidden or not) and rustdoc's static assets.
+fn rendered_doc_files(doc: &Path) -> Vec<std::path::PathBuf> {
+    fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+        let entries = fs::read_dir(dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display()));
+        for path in entries.filter_map(Result::ok).map(|e| e.path()) {
+            if path.is_dir() {
+                walk(&path, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(doc).expect("read doc/").filter_map(Result::ok) {
+        let path = entry.path();
+        let name = entry.file_name();
+        if name == "src" || name == "static.files" {
+            continue;
+        }
+        if path.is_dir() {
+            walk(&path, &mut out);
+        } else {
+            out.push(path);
+        }
+    }
+    out
+}
+
+/// SHA-318 TP3: `cargo doc --no-deps -p keelsign-verify` (feature `ml-dsa` off and on)
+/// renders no page, sidebar or search-index entry that names `verify_with_context`,
+/// while `mldsa::verify` is still documented.
+#[test]
+fn keelsign_verify_docs_do_not_show_verify_with_context() {
+    let root = workspace_root();
+    let scratch = ScratchDir::new("verify_docs_hidden");
+    for features in ["", "ml-dsa"] {
+        let mut cmd = cargo_in(&root, scratch.path());
+        cmd.args(doc_args(features))
+            .env("RUSTDOCFLAGS", "-D warnings")
+            .env_remove("RUSTFLAGS");
+        run_ok(&mut cmd);
+        let doc = scratch.path().join("doc");
+        assert!(
+            doc.join("keelsign_verify/mldsa/fn.verify.html").is_file(),
+            "features \"{features}\": mldsa::verify must still be documented"
+        );
+        let files = rendered_doc_files(&doc);
+        assert!(
+            files
+                .iter()
+                .any(|f| f.starts_with(doc.join("keelsign_verify"))),
+            "features \"{features}\": no rendered keelsign_verify pages"
+        );
+        assert!(
+            files.iter().any(|f| {
+                let name = f.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                name.starts_with("search-index") || f.starts_with(doc.join("search.index"))
+            }),
+            "features \"{features}\": no search index found under doc/"
+        );
+        for file in files {
+            let bytes = fs::read(&file).unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
+            assert!(
+                !String::from_utf8_lossy(&bytes).contains(HIDDEN_FN),
+                "features \"{features}\": {} shows `{HIDDEN_FN}`",
+                file.display()
+            );
+        }
+    }
+}
+
 /// The lines of the first fenced code block in `text` after `heading`, without the
 /// fences. `prefix` is stripped from every line first (`"//!"` for crate docs).
 fn fenced_block(text: &str, heading: &str, prefix: &str) -> Vec<String> {

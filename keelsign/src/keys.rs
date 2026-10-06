@@ -817,9 +817,6 @@ fn check_kdf_limits(kdf: &pkcs8::pkcs5::pbes2::Kdf) -> Result<(), KeyFileError> 
                 "scrypt parallelization p = {p} (1 to 16)"
             )));
         }
-        if u32::from(r).checked_mul(u32::from(p)).is_none() {
-            return Err(out_of_range(format!("scrypt r * p = {r} * {p}")));
-        }
         // N <= 2^20 and r <= 32 here, so this cannot overflow.
         let memory = 128 * u64::from(r) * n;
         if memory > MAX_SCRYPT_MEMORY {
