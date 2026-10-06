@@ -97,18 +97,22 @@ keelsign/scripts/zephyr-setup.sh
 
 It needs git, curl, tar with xz, python3 3.12 or newer, cmake 3.20 or newer and ninja
 (macOS arm64 or Linux x86_64 hosts), takes a few minutes and about 2 GB, and can be
-re-run (each step is skipped when done). Rust needs the soft-float Cortex-M4 target:
+re-run: each step is skipped when its result is there (`west update` too, when Zephyr
+and MCUboot are at their pins and every module is checked out). Rust needs the
+soft-float Cortex-M4 target:
 
 ```sh
 rustup target add thumbv7em-none-eabi
 ```
 
-Then, in each shell, from `keelsign-ws/keelsign` (the script prints the same lines with
-absolute paths; `scripts/zephyr_sample_ci.sh` sets them itself):
+Then, in each shell, from `keelsign-ws` (where the commands above leave you; the script
+prints the same lines with absolute paths, and `scripts/zephyr_sample_ci.sh` sets the
+variables itself):
 
 ```sh
-export ZEPHYR_SDK_INSTALL_DIR="$PWD/../.zephyr-sdk-1.0.1" ZEPHYR_TOOLCHAIN_VARIANT=zephyr
-export PATH="$PWD/../.venv/bin:$PATH"
+export ZEPHYR_SDK_INSTALL_DIR="$PWD/.zephyr-sdk-1.0.1" ZEPHYR_TOOLCHAIN_VARIANT=zephyr
+export PATH="$PWD/.venv/bin:$PATH"
+cd keelsign
 ```
 
 With an existing Zephyr SDK 1.0.1 (with `arm-zephyr-eabi`), set `ZEPHYR_SDK_INSTALL_DIR`

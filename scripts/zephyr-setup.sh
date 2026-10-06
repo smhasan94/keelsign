@@ -18,7 +18,11 @@
 #                       (arm-zephyr-eabi-gcc 14.3.0), each archive SHA256-checked against
 #                       the values below (sdk-ng v1.0.1 sha256.sum)
 #
-# Each step is skipped when its result is already there, so the script can be re-run.
+# Each step is skipped when its result is already there, so the script can be re-run:
+# the venv and west when west is at the pin, `west init` when .west exists, `west update`
+# when zephyr and bootloader/mcuboot are at their pins and every other project of the
+# manifest is checked out, pip's requirements when they are installed (pip checks), the
+# SDK download when the SDK is there.
 # With ZEPHYR_SDK_INSTALL_DIR pointing to an existing SDK 1.0.1 with arm-zephyr-eabi,
 # the SDK is not downloaded; with `west` already on PATH (and no .venv), no venv is
 # created and no Python package is installed (your environment must then have Zephyr's
@@ -121,8 +125,23 @@ if [ ! -d "$topdir/.west" ]; then
 fi
 [ "$(cd "$topdir" && west config manifest.path)" = keelsign ] ||
   die "$topdir/.west belongs to another manifest repository"
-step "west update (Zephyr $ZEPHYR_REV and modules)"
-(cd "$topdir" && west update --narrow -o=--depth=1)
+# The west projects are there when zephyr and MCUboot are at their pins and every
+# project of the manifest (west list, read locally) is a checkout.
+projects_ok() {
+  [ "$(git -C "$topdir/zephyr" rev-parse HEAD 2>/dev/null)" = "$ZEPHYR_REV" ] &&
+    [ "$(git -C "$topdir/bootloader/mcuboot" rev-parse HEAD 2>/dev/null)" = "$MCUBOOT_REV" ] || return 1
+  local paths path
+  paths="$(cd "$topdir" && west list -f '{abspath}' 2>/dev/null)" || return 1
+  while IFS= read -r path; do
+    [ -z "$path" ] || [ "$path" = "$repo" ] || [ -e "$path/.git" ] || return 1
+  done <<<"$paths"
+}
+if projects_ok; then
+  step "west projects already at the pins (Zephyr $ZEPHYR_REV, MCUboot $MCUBOOT_REV); no west update"
+else
+  step "west update (Zephyr $ZEPHYR_REV and modules)"
+  (cd "$topdir" && west update --narrow -o=--depth=1)
+fi
 [ "$(git -C "$topdir/zephyr" rev-parse HEAD)" = "$ZEPHYR_REV" ] || die "zephyr is not at $ZEPHYR_REV"
 [ "$(git -C "$topdir/bootloader/mcuboot" rev-parse HEAD)" = "$MCUBOOT_REV" ] ||
   die "bootloader/mcuboot is not at $MCUBOOT_REV"
@@ -181,3 +200,4 @@ echo "  export ZEPHYR_SDK_INSTALL_DIR=\"$sdk\" ZEPHYR_TOOLCHAIN_VARIANT=zephyr"
 if [ "$manage_venv" = 1 ]; then
   echo "  export PATH=\"$venv/bin:\$PATH\""
 fi
+echo "  cd \"$repo\""

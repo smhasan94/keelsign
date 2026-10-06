@@ -1174,6 +1174,9 @@ fn zephyr_setup_script_is_pinned_and_guarded() {
         &"is inside a git work tree".to_owned(),
         &"the workspace may hold only keelsign and what this script installs".to_owned(),
         &"SHA256 mismatch".to_owned(),
+        // `west update` runs only when the projects are not at the pins (re-runs skip it).
+        &"if projects_ok; then".to_owned(),
+        &"no west update".to_owned(),
     ] {
         assert!(setup.contains(needle.as_str()), "scripts/zephyr-setup.sh lacks `{needle}`");
     }
@@ -1186,6 +1189,40 @@ fn zephyr_setup_script_is_pinned_and_guarded() {
 // ---- docs/mcuboot.md ----------------------------------------------------------------------
 
 /// The lines of every ```sh block of `markdown` (indented blocks too), each line trimmed.
+/// The per-shell lines of docs/mcuboot.md#setup, pasted in `keelsign-ws` where the setup
+/// commands leave the reader, point at what `scripts/zephyr-setup.sh` installs (its
+/// `.zephyr-sdk-<version>` and `.venv` in the workspace) and end in the repository, and
+/// the script prints the same three lines with absolute paths.
+#[test]
+fn doc_shell_exports_match_setup_script_layout() {
+    let doc = read("docs/mcuboot.md");
+    let exports = [
+        format!(
+            "export ZEPHYR_SDK_INSTALL_DIR=\"$PWD/.zephyr-sdk-{}\" ZEPHYR_TOOLCHAIN_VARIANT=zephyr",
+            repo_checks::ZEPHYR_SDK_VERSION
+        ),
+        "export PATH=\"$PWD/.venv/bin:$PATH\"".to_owned(),
+        "cd keelsign".to_owned(),
+    ];
+    assert!(
+        doc_sh_blocks(&doc).iter().any(|b| b == &exports),
+        "docs/mcuboot.md must have the per-shell block {exports:?}"
+    );
+    let setup = read("scripts/zephyr-setup.sh");
+    for needle in [
+        "sdk=\"${ZEPHYR_SDK_INSTALL_DIR:-$topdir/.zephyr-sdk-$SDK_VERSION}\"",
+        "venv=\"$topdir/.venv\"",
+        "echo \"  export ZEPHYR_SDK_INSTALL_DIR=\\\"$sdk\\\" ZEPHYR_TOOLCHAIN_VARIANT=zephyr\"",
+        "echo \"  export PATH=\\\"$venv/bin:\\$PATH\\\"\"",
+        "echo \"  cd \\\"$repo\\\"\"",
+    ] {
+        assert!(
+            setup.contains(needle),
+            "scripts/zephyr-setup.sh lacks `{needle}`"
+        );
+    }
+}
+
 fn doc_sh_blocks(markdown: &str) -> Vec<Vec<String>> {
     let mut blocks = Vec::new();
     let mut current: Option<Vec<String>> = None;
