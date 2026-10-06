@@ -85,6 +85,8 @@ pub fn exit_class(error: &keelsign_verify::Error) -> ExitClass {
         | E::UnsupportedAlgorithm(_)
         | E::UnsupportedParameterSet
         | E::MalformedSignature
+        // Unreachable for keys the CLI loaded since SHA-302 (they are decoded when loaded,
+        // exit 5); kept at 9 because a verifier error is never a reason to accept.
         | E::InvalidPublicKey
         | E::SignatureInvalid
         | E::Ed25519(_)
@@ -124,7 +126,8 @@ pub fn verify_bytes<'k, const N: usize, const E: usize>(
 }
 
 /// Read every `--pub` file, in order: an unreadable file is an I/O error (exit 1), a file
-/// that is not a supported public key a key-file error (exit 5). More than
+/// that is not a supported public key a key-file error (exit 5). Keys are decoded when
+/// loaded (Ed25519 point, LMS parameters), whatever the policy. More than
 /// [`MAX_KEYS_PER_KIND`] keys of a kind, or the same key twice, is a usage error (exit 2).
 pub fn load_public_keys(paths: &[PathBuf]) -> Result<Vec<PublicKey>, Error> {
     let mut keys: Vec<(&Path, PublicKey)> = Vec::with_capacity(paths.len());
