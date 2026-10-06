@@ -666,7 +666,7 @@ fn image_digest_section_records_ram_bound() {
         "108 B",
         "DEFAULT_CHUNK_LEN` = 256 B",
         "BOOT_TMPBUF_SZ",
-        "bootutil_priv.h:86",
+        "bootutil_priv.h:53",
         "Nothing scales with the image",
         "-Z emit-stack-sizes",
         "sha2::sha256::compress256",

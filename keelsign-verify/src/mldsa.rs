@@ -3,9 +3,8 @@
 //! keelsign signs the 32-byte image digest `M` (SHA-256 of header, body and protected TLV
 //! area) as **pure** ML-DSA (`ML-DSA.Sign` / `ML-DSA.Verify`, FIPS 204 Algorithms 2 and
 //! 3) with the context string [`MLDSA_CONTEXT`], never HashML-DSA
-//! ([docs/image-format.md, Signing mode][spec]). [`verify`] is that check, and is what
-//! [`DefaultBackend`](crate::DefaultBackend) calls; [`verify_with_context`] takes any
-//! context, for known-answer tests.
+//! ([docs/image-format.md, Signing mode][spec]). [`verify`] is that check and the API;
+//! it is what [`DefaultBackend`](crate::DefaultBackend) calls.
 //!
 //! Every failure maps to one [`Error`] variant, checked in this order:
 //!
@@ -38,12 +37,14 @@ pub const fn is_enabled() -> bool {
     cfg!(feature = "ml-dsa")
 }
 
-/// FIPS 204 `ML-DSA.Verify`, pure, with the keelsign context [`MLDSA_CONTEXT`]: verify
-/// `signature` over `message` (the image digest `M`) under the raw FIPS 204
-/// `public_key`. This is what [`DefaultBackend`](crate::DefaultBackend) calls.
+/// FIPS 204 `ML-DSA.Verify` (Algorithm 3), pure, with the keelsign context
+/// [`MLDSA_CONTEXT`]: verify `signature` over `message` (the image digest `M`) under the
+/// raw FIPS 204 `public_key`. This is what [`DefaultBackend`](crate::DefaultBackend)
+/// calls.
 ///
-/// It is [`verify_with_context`]`(algorithm, public_key, message, MLDSA_CONTEXT,
-/// signature)`; see the [module docs](self) for the errors.
+/// `algorithm` must be [`Algorithm::MlDsa44`] or [`Algorithm::MlDsa65`]; anything else is
+/// [`Error::UnsupportedAlgorithm`]`(algorithm)`, as is every call without the `ml-dsa`
+/// feature. See the [module docs](self) for the other errors and their order.
 pub fn verify(
     algorithm: Algorithm,
     public_key: &[u8],
@@ -53,12 +54,14 @@ pub fn verify(
     verify_with_context(algorithm, public_key, message, MLDSA_CONTEXT, signature)
 }
 
-/// FIPS 204 `ML-DSA.Verify` (Algorithm 3), pure, with any `context` (known-answer tests;
-/// keelsign images use [`verify`]).
+/// Not part of the API: FIPS 204 `ML-DSA.Verify` (Algorithm 3), pure, with a
+/// caller-chosen `context`, for the known-answer tests in `tests/mldsa_kat.rs`. Images are
+/// verified with [`verify`], which fixes the context to [`MLDSA_CONTEXT`].
 ///
 /// `algorithm` must be [`Algorithm::MlDsa44`] or [`Algorithm::MlDsa65`]; anything else is
 /// [`Error::UnsupportedAlgorithm`]`(algorithm)`, as is every call without the `ml-dsa`
 /// feature. See the [module docs](self) for the other errors and their order.
+#[doc(hidden)]
 pub fn verify_with_context(
     algorithm: Algorithm,
     public_key: &[u8],
@@ -87,7 +90,7 @@ pub fn verify_with_context(
 
 /// One parameter set's verify.
 ///
-/// `#[inline(never)]` is load-bearing: inlined into [`verify_with_context`] (and on into
+/// `#[inline(never)]` is load-bearing: inlined into the ML-DSA dispatch (and on into
 /// `verify_with`), the ML-DSA-65 state (about 158 KB) would become part of the caller's
 /// frame and every verify, LMS/HSS included, would reserve it. Kept out of line, each
 /// parameter set has its own frame (about 98 KB / 158 KB) that only an ML-DSA signature

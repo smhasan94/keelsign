@@ -142,10 +142,11 @@ impl core::error::Error for ImageError {}
 
 /// An image that passed [`verify`] / [`verify_with`] under [`VerifiedImage::policy`].
 ///
-/// Only those two functions produce one. Everything it reports was covered by the
-/// verified signatures: the version comes from the header and the security counter from
-/// the protected TLV area, both hashed from the copy that was parsed. Anti-rollback is the
-/// caller's decision: compare [`VerifiedImage::version`] with
+/// Only those two functions produce one. Everything it reports except
+/// [`VerifiedImage::image_len`] was covered by the verified signatures: the version comes
+/// from the header and the security counter from the protected TLV area, both hashed from
+/// the copy that was parsed. `image_len` is not covered by the signatures (see its field
+/// docs). Anti-rollback is the caller's decision: compare [`VerifiedImage::version`] with
 /// [`ImageVersion::cmp_ignoring_build_num`] (MCUboot's default) or
 /// [`ImageVersion::cmp_with_build_num`], and/or [`VerifiedImage::security_counter`] with
 /// the device's stored counter.
@@ -162,6 +163,13 @@ pub struct VerifiedImage<'k> {
     /// The image digest `M` both signatures are over (also the `SHA256` TLV value).
     pub digest: [u8; 32],
     /// Where the image ends ([`Image::tlv_end`]): header, body and both TLV areas.
+    ///
+    /// Not covered by the signatures: it comes from the unprotected TLV info header
+    /// (`it_tlv_tot`), which is outside the image digest `M` and both signatures, so
+    /// appending or removing unprotected TLVs changes it without failing verification.
+    /// Only the parse bounds hold (the TLV areas fit in the slot and in `u32`, every TLV
+    /// is whole). Do not treat it as authenticated: use it for logging or as a parse
+    /// result only.
     pub image_len: u32,
     /// The trusted post-quantum key that verified the image, when the policy requires
     /// the post-quantum half.
@@ -1254,5 +1262,33 @@ mod tests {
             ok,
             if ed25519::is_enabled() { 4 + 4 + 1 } else { 4 } + ml_dsa
         );
+    }
+
+    #[test]
+    fn image_len_is_not_covered_by_the_signatures() {
+        let (name, data) = fixture!("keelsign-lms-m32-h5.bin");
+        let keys = leak_keys(name);
+        let image = Image::parse(data).unwrap();
+        // The unprotected TLV info header starts where `M` ends; the image ends at the
+        // end of its unprotected area.
+        let info = image.hashed_range().end as usize;
+        let end = image.tlv_end() as usize;
+        assert_eq!(end, data.len(), "the fixture has no trailing bytes");
+
+        // Append one unknown unprotected TLV (type 0x00A0, 4 bytes) and grow `it_tlv_tot`
+        // by its 8 bytes: nothing the signatures cover changes.
+        let mut extended = data.to_vec();
+        extended.extend_from_slice(&[0xA0, 0x00, 0x04, 0x00, 1, 2, 3, 4]);
+        let tot = u16::from_le_bytes([extended[info + 2], extended[info + 3]]);
+        extended[info + 2..info + 4].copy_from_slice(&(tot + 8).to_le_bytes());
+
+        let base = run(&DefaultBackend::new(), data, &keys, Policy::PqOnly).unwrap();
+        let grown = run(&DefaultBackend::new(), &extended, &keys, Policy::PqOnly).unwrap();
+        assert_eq!(grown.digest, base.digest);
+        assert_eq!(grown.version, base.version);
+        assert_eq!(grown.security_counter, base.security_counter);
+        assert_eq!(base.image_len as usize, data.len());
+        assert_eq!(grown.image_len, base.image_len + 8);
+        assert_eq!(grown.image_len as usize, extended.len());
     }
 }

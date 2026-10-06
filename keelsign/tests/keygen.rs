@@ -768,7 +768,7 @@ fn corrupt_key_file_is_a_clear_error() {
             "scrypt cost N = 2097152",
         ),
         (
-            "scrypt-rp-overflow.der",
+            "scrypt-r-over-cap.der",
             scrypt(1 << 14, u16::MAX, u16::MAX),
             true,
             "scrypt block size r = 65535",

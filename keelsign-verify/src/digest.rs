@@ -8,8 +8,8 @@
 //! header nor the protected area is re-read from storage, so the digest covers exactly
 //! the header and protected TLVs that were parsed (the version and the security counter
 //! [`verify`](crate::verify) reports; SHA-46). This is the value
-//! MCUboot stores in the `SHA256` TLV (`bootutil_img_hash`, `image_validate.c` at
-//! `a8ffd2c`) and the message keelsign's post-quantum signatures sign
+//! MCUboot stores in the `SHA256` TLV (`bootutil_img_hash`, `bootutil_img_hash.c:48`
+//! at `6d3b3d2`) and the message keelsign's post-quantum signatures sign
 //! ([docs/image-format.md][spec]).
 //!
 //! # RAM
@@ -27,7 +27,7 @@ use crate::error::Error;
 use crate::image::{IMAGE_HEADER_SIZE, Image};
 use crate::reader::ImageReader;
 
-/// Default chunk size: MCUboot's `BOOT_TMPBUF_SZ` (`bootutil_priv.h:86` at `a8ffd2c`),
+/// Default chunk size: MCUboot's `BOOT_TMPBUF_SZ` (`bootutil_priv.h:53` at `6d3b3d2`),
 /// the buffer MCUboot hashes an image through.
 pub const DEFAULT_CHUNK_LEN: usize = 256;
 

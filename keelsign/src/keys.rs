@@ -641,14 +641,28 @@ impl PublicKey {
             ))
         };
         match oid {
+            // The exact length is the whole precondition of FIPS 204 pkDecode (Alg. 23):
+            // rho is any 32 bytes and every 10-bit t1 coefficient is in range, so
+            // `ml_dsa::VerifyingKey::decode` is total and a key of the right length cannot
+            // be refused later as `InvalidPublicKey`.
             ID_ML_DSA_44 if bits.len() == 1312 => Ok(Self::MlDsa44(bits.to_vec())),
             ID_ML_DSA_44 => Err(wrong_length("1,312")),
             ID_ML_DSA_65 if bits.len() == 1952 => Ok(Self::MlDsa65(bits.to_vec())),
             ID_ML_DSA_65 => Err(wrong_length("1,952")),
-            ID_ED25519 => bits
-                .try_into()
-                .map(Self::Ed25519)
-                .map_err(|_| wrong_length("32")),
+            ID_ED25519 => {
+                let key: [u8; 32] = bits.try_into().map_err(|_| wrong_length("32"))?;
+                // The device's own check (keelsign-verify `ed25519::verify_signature`, the
+                // same ed25519-dalek): refuse here what it would refuse as
+                // `Ed25519Error::InvalidPublicKey`, so a bad key is exit 5, not 9.
+                ed25519_dalek::VerifyingKey::from_bytes(&key).map_err(|_| {
+                    KeyFileError::Corrupt(
+                        "Ed25519 public key is not a point on the curve (the 32 bytes do \
+                         not decompress, RFC 8032 §5.1.3)"
+                            .into(),
+                    )
+                })?;
+                Ok(Self::Ed25519(key))
+            }
             _ => {
                 // RFC 8708 §4: the BIT STRING holds the DER encoding of
                 // `HSS-LMS-HashSig-PublicKey ::= OCTET STRING`.
@@ -802,9 +816,6 @@ fn check_kdf_limits(kdf: &pkcs8::pkcs5::pbes2::Kdf) -> Result<(), KeyFileError> 
             return Err(out_of_range(format!(
                 "scrypt parallelization p = {p} (1 to 16)"
             )));
-        }
-        if u32::from(r).checked_mul(u32::from(p)).is_none() {
-            return Err(out_of_range(format!("scrypt r * p = {r} * {p}")));
         }
         // N <= 2^20 and r <= 32 here, so this cannot overflow.
         let memory = 128 * u64::from(r) * n;
@@ -1161,6 +1172,130 @@ MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
             Err(KeyFileError::Unsupported(reason)) => assert!(reason.contains("CERTIFICATE")),
             other => panic!("expected Unsupported, got {other:?}"),
         }
+    }
+
+    /// SHA-302 AC1 / TP1: an Ed25519 `SubjectPublicKeyInfo` whose 32 bytes are not a curve
+    /// point is refused when read (exit 5), with the device's own predicate.
+    #[test]
+    fn ed25519_public_key_that_is_not_a_curve_point_is_refused() {
+        // y = 2 is not on edwards25519 (keelsign-verify's ed25519 unit test uses it too).
+        let mut not_a_point = [0u8; 32];
+        not_a_point[0] = 2;
+        let der = spki_der(ID_ED25519, None, &not_a_point);
+        let pem = Document::try_from(der.as_slice())
+            .expect("doc")
+            .to_pem(PEM_PUBLIC_KEY, LineEnding::LF)
+            .expect("pem");
+        for bytes in [der.as_slice(), pem.as_bytes()] {
+            match PublicKey::from_bytes(bytes) {
+                Err(KeyFileError::Corrupt(reason)) => {
+                    assert!(reason.contains("not a point"), "{reason}");
+                    assert!(reason.contains("Ed25519"), "{reason}");
+                }
+                other => panic!("expected Corrupt, got {other:?}"),
+            }
+        }
+
+        // Valid keys still load: RFC 8410 §10.1 and a generated key.
+        assert!(PublicKey::from_bytes(RFC8410_PUBLIC_PEM.as_bytes()).is_ok());
+        let generated: [u8; 32] = PrivateKey::generate(KeySpec::Ed25519)
+            .expect("generate")
+            .raw_public_key()
+            .try_into()
+            .expect("32 bytes");
+        assert_eq!(
+            PublicKey::from_bytes(&spki_der(ID_ED25519, None, &generated)),
+            Ok(PublicKey::Ed25519(generated))
+        );
+
+        // The host accepts exactly what the device decodes: the device's verify refuses a
+        // candidate as `InvalidPublicKey` if and only if reading it as `--pub` fails. This
+        // includes the non-canonical encodings (y >= p), which both sides accept.
+        let mut candidates: Vec<[u8; 32]> = (0u8..=63)
+            .map(|first| {
+                let mut key = [0u8; 32];
+                key[0] = first;
+                key
+            })
+            .collect();
+        candidates.extend([[0xff; 32], [0x7f; 32], generated]);
+        let (mut accepted, mut refused) = (0, 0);
+        for key in candidates {
+            let host = PublicKey::from_bytes(&spki_der(ID_ED25519, None, &key)).is_ok();
+            let device = keelsign_verify::ed25519::verify_signature(&key, b"", &[0u8; 64])
+                != Err(keelsign_verify::Ed25519Error::InvalidPublicKey);
+            assert_eq!(host, device, "key {}", hex(&key));
+            if host {
+                accepted += 1;
+            } else {
+                refused += 1;
+            }
+        }
+        assert!(accepted > 0 && refused > 0, "{accepted} / {refused}");
+    }
+
+    /// SHA-302 TP1 (ML-DSA): no ML-DSA key "with a corrupt encoding" can be built. Past the
+    /// exact-length check FIPS 204 pkDecode is total: `ml_dsa::VerifyingKey::decode`
+    /// returns `Self` (this stops compiling if it ever becomes fallible), so any key of
+    /// the right length loads and the device never answers `InvalidPublicKey` for it.
+    #[test]
+    fn mldsa_public_key_decoding_is_total_past_the_length_check() {
+        fn decode<P: ml_dsa::MlDsaParams>(raw: &[u8]) -> ml_dsa::VerifyingKey<P> {
+            let encoded = ml_dsa::EncodedVerifyingKey::<P>::try_from(raw).expect("length");
+            ml_dsa::VerifyingKey::<P>::decode(&encoded)
+        }
+
+        let seed: [u8; 32] = core::array::from_fn(|i| i as u8);
+        for (algorithm, oid, device, len, sig_len) in [
+            (
+                KeyAlgorithm::MlDsa44,
+                ID_ML_DSA_44,
+                keelsign_verify::Algorithm::MlDsa44,
+                1312,
+                2420,
+            ),
+            (
+                KeyAlgorithm::MlDsa65,
+                ID_ML_DSA_65,
+                keelsign_verify::Algorithm::MlDsa65,
+                1952,
+                3309,
+            ),
+        ] {
+            // RFC 9881 C.2: the key of the C.1 seed.
+            let rfc9881 = PrivateKey::from_seed(algorithm, &seed)
+                .expect("seed")
+                .raw_public_key();
+            for raw in [
+                vec![0x00; len],
+                vec![0xff; len],
+                (0..len).map(|i| i as u8).collect(),
+                rfc9881,
+            ] {
+                let public = PublicKey::from_bytes(&spki_der(oid, None, &raw)).expect("loads");
+                assert_eq!(public.raw(), raw.as_slice());
+                match algorithm {
+                    KeyAlgorithm::MlDsa44 => {
+                        let _: ml_dsa::VerifyingKey<MlDsa44> = decode::<MlDsa44>(&raw);
+                    }
+                    _ => {
+                        let _: ml_dsa::VerifyingKey<MlDsa65> = decode::<MlDsa65>(&raw);
+                    }
+                }
+                let verdict =
+                    keelsign_verify::mldsa::verify(device, &raw, b"m", &vec![0u8; sig_len]);
+                assert!(verdict.is_err(), "an all-zero signature verified");
+                assert_ne!(verdict, Err(keelsign_verify::Error::InvalidPublicKey));
+            }
+        }
+
+        // Only the length can be wrong, and that is already refused when read.
+        let corrupt = |bytes: &[u8]| match PublicKey::from_bytes(bytes) {
+            Err(KeyFileError::Corrupt(reason)) => reason,
+            other => panic!("expected Corrupt, got {other:?}"),
+        };
+        assert!(corrupt(&spki_der(ID_ML_DSA_44, None, &[0; 1952])).contains("1,312"));
+        assert!(corrupt(&spki_der(ID_ML_DSA_65, None, &[0; 1312])).contains("1,952"));
     }
 
     #[test]

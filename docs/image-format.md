@@ -7,8 +7,8 @@ document fixes those TLVs, what the PQ signature covers, how keys are identified
 Ed25519 hybrid is laid out, the sizes, and how all of it fits MCUboot's TLV rules.
 
 The constants live in [`keelsign-verify/src/tlv.rs`](../keelsign-verify/src/tlv.rs).
-MCUboot sources are cited as `path:lines` at MCUboot commit `a8ffd2c`
-(`a8ffd2c312910cc648219bcb29e04260f7857492`, v2.5.0-rc1) unless another repository is
+MCUboot sources are cited as `path:lines` at MCUboot commit `6d3b3d2`
+(`6d3b3d2c38ab20c242e5b9abb04d050086383eb2`, v2.4.0) unless another repository is
 named; see [References](#references).
 
 The words MUST, MUST NOT and SHOULD are used as in RFC 2119.
@@ -36,8 +36,7 @@ Rules:
 - **Byte order.** keelsign supports only little-endian images: the image header fields,
   both TLV info headers and every TLV header are little-endian, and a verifier rejects
   anything else. imgtool can write big-endian images (`imgtool sign -e/--endian big`,
-  `scripts/imgtool/main.py:439-440`; the same option in imgtool 2.4.0); keelsign does not
-  support them.
+  `scripts/imgtool/main.py:383-384`); keelsign does not support them.
 - Verifiers MUST ignore TLV types they do not know, in both areas, including the reserved
   `0x4BA4`–`0x4BAF`. A future keelsign TLV with verification meaning gets a new ID from
   the reserved block and a new version of this document.
@@ -65,8 +64,8 @@ M = SHA-256( image header || image body || protected TLV area )
 The protected TLV area is included with its TLV info header (magic `0x6908`) when
 `ih_protect_tlv_size != 0`, and absent otherwise. These are the bytes and the value of
 MCUboot's own `IMAGE_TLV_SHA256` (`0x10`): MCUboot hashes `ih_hdr_size + ih_img_size +
-ih_protect_tlv_size` bytes (sizes at `boot/bootutil/src/bootutil_img_hash.c:122-135`,
-hashing from `bootutil_sha_init` to `bootutil_sha_finish` at `:137-210`;
+ih_protect_tlv_size` bytes (sizes at `boot/bootutil/src/bootutil_img_hash.c:123-128`,
+hashing from `bootutil_sha_init` to `bootutil_sha_finish` at `:114-193`;
 `docs/design.md:159-164` and `:1349-1351`).
 
 The verifier MUST reject, rather than hash anyway, an image whose protected area is
@@ -148,7 +147,7 @@ A PQ signature TLV whose type differs from the selected key's algorithm (for exa
 
 The Ed25519 key of a hybrid image is identified by MCUboot's own `IMAGE_TLV_KEYHASH`
 (`0x01`): SHA-256 of the DER SubjectPublicKeyInfo, which is what imgtool embeds and
-hashes (`scripts/imgtool/keys/ed25519.py:32-36`). MCUboot compares only the first
+hashes (`scripts/imgtool/keys/ed25519.py:30-34`). MCUboot compares only the first
 `keyhash_len` bytes of it (`boot/bootutil/src/bootutil_find_key.c:56-80`); keelsign-verify
 requires all 32. A device trusts an Ed25519 key as `keelsign_verify::Ed25519Key` (the raw
 32-byte key) in the same `TrustedKeys` set as its PQ keys
@@ -250,7 +249,7 @@ page.
 
 The TLV areas count against the slot's usable size, which is the slot minus MCUboot's
 trailer: MCUboot rejects an image whose TLV area ends beyond `bootutil_max_image_size`
-(`boot/bootutil/src/bootutil_misc.c:355`, checked at `image_validate.c:300`). Per-board
+(`boot/bootutil/src/bootutil_misc.c:352`, checked at `image_validate.c:300`). Per-board
 slot and partition numbers are SHA-58.
 
 ## ML-DSA context
@@ -262,9 +261,9 @@ MLDSA_CONTEXT = b"keelsign-mcuboot-image-v1"   (25 bytes)
 Every keelsign ML-DSA signature uses this FIPS 204 context string (at most 255 bytes).
 draft-connolly-cfrg-ml-dsa-security-considerations-02 §2.2.2 recommends a fixed context
 string per protocol use: it separates keelsign image signatures from any other signature
-made with the same ML-DSA key. `keelsign_verify::mldsa` (SHA-44, the `ml-dsa` feature)
-passes it to `verify_with_context`; a new image-format version would get a new context
-string.
+made with the same ML-DSA key. `keelsign_verify::mldsa::verify` (SHA-44, the `ml-dsa`
+feature) passes it as the FIPS 204 context; a new image-format version would get a new
+context string.
 
 ## Accepted LMS parameter sets and CNSA 2.0
 
@@ -349,12 +348,12 @@ outside CNSA 2.0 whatever the policy (ML-DSA-87 is out of scope, see
 - **Unprotected, not protected.** The PQ signature cannot be inside the area it signs,
   and the key ID follows MCUboot's KEYHASH, which is also unprotected. `imgtool sign
   --custom-tlv` accepts vendor types `0x00a0`–`0xfffe` (`scripts/imgtool/image.py:103-104`,
-  `:141-147`) but only places them in the protected area (`docs/imgtool.md:175-180`), so
+  `:141-147`) but only places them in the protected area (`docs/imgtool.md:146-151`), so
   keelsign appends its TLVs to imgtool's output itself.
 - **TLV allow list (SHA-62).** With `MCUBOOT_USE_TLV_ALLOW_LIST`, MCUboot rejects every
   unprotected TLV not in `allowed_unprot_tlvs` (`image_validate.c:164-194`, `:318-338`;
   `docs/design.md:170-176`). Zephyr's `CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST` defaults to `y`
-  (`boot/zephyr/Kconfig:1327-1337`, mapped in
+  (`boot/zephyr/Kconfig:1264-1274`, mapped in
   `boot/zephyr/include/mcuboot_config/mcuboot_config.h:155-156`), and the Mynewt, Mbed,
   Cypress, Espressif and NuttX ports define it unconditionally (NuttX:
   `boot/nuttx/include/mcuboot_config/mcuboot_config.h:138`). A keelsign-enabled MCUboot build
@@ -373,38 +372,38 @@ outside CNSA 2.0 whatever the policy (ML-DSA-87 is out of scope, see
 Each row was checked against the cited source at the stated commit.
 
 - [x] `0x4BA0`–`0x4BAF` are in MCUboot's vendor-reserved space `xxA0`–`xxFF` and are not
-  `IMAGE_TLV_ANY` (`0xffff`): `boot/bootutil/include/bootutil/image.h:137-147` @ `a8ffd2c`.
+  `IMAGE_TLV_ANY` (`0xffff`): `boot/bootutil/include/bootutil/image.h:137-147` @ `6d3b3d2`.
 - [x] No MCUboot-defined TLV type is in `0x4BA0`–`0x4BAF` (every defined type is below
-  `0xA0`): `boot/bootutil/include/bootutil/image.h:99-136` @ `a8ffd2c`.
+  `0xA0`): `boot/bootutil/include/bootutil/image.h:99-136` @ `6d3b3d2`.
 - [x] imgtool accepts `0x4BA0`–`0x4BAF` as custom TLVs (range `0x00a0`–`0xfffe`), in the
   protected area only: `scripts/imgtool/image.py:103-104`, `:141-147` and
-  `docs/imgtool.md:175-180` @ `a8ffd2c`.
+  `docs/imgtool.md:146-151` @ `6d3b3d2`.
 - [x] TLV info magics are `0x6907` (unprotected) and `0x6908` (protected), and a TLV is
-  `u16 type, u16 len`: `scripts/imgtool/image.py:98-101`, `:148` @ `a8ffd2c`.
+  `u16 type, u16 len`: `scripts/imgtool/image.py:98-101`, `:148` @ `6d3b3d2`.
 - [x] Unknown TLV types are skipped during validation (the `switch` has no `default`):
-  `boot/bootutil/src/image_validate.c:306-551` @ `a8ffd2c`.
+  `boot/bootutil/src/image_validate.c:306-551` @ `6d3b3d2`.
 - [x] With `MCUBOOT_USE_TLV_ALLOW_LIST`, unknown unprotected TLVs fail validation:
-  `boot/bootutil/src/image_validate.c:164-194`, `:318-338` @ `a8ffd2c`.
-- [x] Zephyr enables the allow list by default: `boot/zephyr/Kconfig:1327-1337` and
-  `boot/zephyr/include/mcuboot_config/mcuboot_config.h:155-156` @ `a8ffd2c`.
+  `boot/bootutil/src/image_validate.c:164-194`, `:318-338` @ `6d3b3d2`.
+- [x] Zephyr enables the allow list by default: `boot/zephyr/Kconfig:1264-1274` and
+  `boot/zephyr/include/mcuboot_config/mcuboot_config.h:155-156` @ `6d3b3d2`.
 - [x] The image hash covers header, body and the protected TLV area with its info header:
-  `boot/bootutil/src/bootutil_img_hash.c:122-135`, `:137-210` and `docs/design.md:159-164`,
-  `:1349-1351` @ `a8ffd2c`.
+  `boot/bootutil/src/bootutil_img_hash.c:123-128`, `:114-193` and `docs/design.md:159-164`,
+  `:1349-1351` @ `6d3b3d2`.
 - [x] The SHA256 TLV must be present and equal to the computed hash:
-  `boot/bootutil/src/image_validate.c:341-362`, `:553-557` @ `a8ffd2c`.
+  `boot/bootutil/src/image_validate.c:341-362`, `:553-557` @ `6d3b3d2`.
 - [x] Signatures are verified over the 32-byte hash, and Ed25519 requires `mlen == 32`
   outside pure mode: `boot/bootutil/src/image_validate.c:413-414` and
-  `boot/bootutil/src/image_ed25519.c:100-106` @ `a8ffd2c`.
+  `boot/bootutil/src/image_ed25519.c:100-106` @ `6d3b3d2`.
 - [x] The KEYHASH TLV must precede its signature TLV; the key is reset after each
-  signature: `boot/bootutil/src/image_validate.c:364-403`, `:433` @ `a8ffd2c`.
+  signature: `boot/bootutil/src/image_validate.c:364-403`, `:433` @ `6d3b3d2`.
 - [x] KEYHASH is SHA-256 of the DER SubjectPublicKeyInfo and is compared over
-  `keyhash_len` bytes: `scripts/imgtool/keys/ed25519.py:32-36` and
-  `boot/bootutil/src/bootutil_find_key.c:56-80` @ `a8ffd2c`.
+  `keyhash_len` bytes: `scripts/imgtool/keys/ed25519.py:30-34` and
+  `boot/bootutil/src/bootutil_find_key.c:56-80` @ `6d3b3d2`.
 - [x] An Ed25519 signature TLV is exactly 64 bytes:
-  `boot/bootutil/src/image_validate.c:87-90` @ `a8ffd2c`.
+  `boot/bootutil/src/image_validate.c:87-90` @ `6d3b3d2`.
 - [x] `IMAGE_TLV_SIG_PURE` (`0x25`) marks a signature over the image instead of the hash:
   `boot/bootutil/include/bootutil/image.h:109-111` and
-  `boot/bootutil/src/image_validate.c:273-284`, `:425-431` @ `a8ffd2c`.
+  `boot/bootutil/src/image_validate.c:273-284`, `:425-431` @ `6d3b3d2`.
 - [x] nRF Connect SDK uses `0x00A0` and `0x00A1`, which ruled out keelsign's first IDs:
   nrfconnect/sdk-mcuboot `boot/zephyr/firmware_loader_bm.c:23` @ `2b21b8b`, and
   nrfconnect/sdk-nrf `sysbuild/Kconfig.mcuboot:364-367`, `modules/mcuboot/Kconfig:155-157`
@@ -517,8 +516,9 @@ TLV listing of `imgtool dumpinfo` with `MANIFEST.json` for each little-endian go
 
 ## References
 
-- MCUboot, commit `a8ffd2c312910cc648219bcb29e04260f7857492` (v2.5.0-rc1),
-  <https://github.com/mcu-tools/mcuboot/tree/a8ffd2c312910cc648219bcb29e04260f7857492>.
+- MCUboot, tag `v2.4.0`, commit `6d3b3d2c38ab20c242e5b9abb04d050086383eb2` (the MCUboot that
+  Zephyr v4.4.2 pins, `west.yml:337-341`; the source of imgtool 2.4.0),
+  <https://github.com/mcu-tools/mcuboot/tree/6d3b3d2c38ab20c242e5b9abb04d050086383eb2>.
 - MCUboot PR #2707 (native LMS, `IMAGE_TLV_LMS` `0x26`),
   <https://github.com/mcu-tools/mcuboot/pull/2707>.
 - imgtool 2.4.0 (PyPI), <https://pypi.org/project/imgtool/2.4.0/>.

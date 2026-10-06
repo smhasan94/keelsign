@@ -54,7 +54,9 @@ undefined: the C library the bootloader links (newlib, picolibc, its own) provid
 Rustdoc: `keelsign-ffi`'s library target is named `keelsign`, like the CLI's, so
 `cargo doc --workspace` stops with a "document output filename collision". Document the
 workspace with `cargo doc --workspace --exclude keelsign-ffi` and this crate on its own
-with `cargo doc -p keelsign-ffi`.
+with `cargo doc -p keelsign-ffi`. CI's `cargo doc (workspace, -D warnings)` step runs
+these two commands (with `--no-deps --locked`) under `RUSTDOCFLAGS=-D warnings` (SHA-303);
+the `--exclude` goes when SHA-313 lands.
 
 ## Header
 

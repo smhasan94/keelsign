@@ -89,8 +89,11 @@ build is running.
 
 - **Without the feature**, the dispatcher answers `UnsupportedAlgorithm(MlDsa44)` or
   `UnsupportedAlgorithm(MlDsa65)` after the key lookup and before any backend runs, under
-  every backend. Only the cells whose post-quantum half reaches the ML-DSA backend change;
-  image rules, the Ed25519 half and the key lookup (`KeyNotTrusted`) still come first.
+  every backend. Called directly, both `DefaultBackend::new()` and
+  `DefaultBackend::cnsa_2_0()` answer `UnsupportedAlgorithm` for ML-DSA too, whatever
+  their policy: the feature state is checked before the policy. Only the cells whose
+  post-quantum half reaches the ML-DSA backend change; image rules, the Ed25519 half and
+  the key lookup (`KeyNotTrusted`) still come first.
   These are the cells without the feature (the manifest's `policy_without_ml_dsa`; every
   other cell is as in the [Policy matrix](#policy-matrix)):
 
@@ -116,9 +119,10 @@ build is running.
 
 - **`DefaultBackend::new()`** verifies ML-DSA-44/65 (`DefaultBackend::allows_ml_dsa()` is
   `true`). **`DefaultBackend::cnsa_2_0()` refuses ML-DSA** with `UnsupportedParameterSet`
-  (`allows_ml_dsa()` is `false`): ML-DSA-44 and ML-DSA-65 are never CNSA 2.0 algorithms
-  ([docs/image-format.md](image-format.md)), so the strict backend accepts single-tree LMS
-  only.
+  when the feature is on (`allows_ml_dsa()` is `false`; without the feature both backends
+  answer `UnsupportedAlgorithm`, see above): ML-DSA-44 and ML-DSA-65 are never CNSA 2.0
+  algorithms ([docs/image-format.md](image-format.md)), so the strict backend accepts
+  single-tree LMS only.
 - **Error mapping** of the ML-DSA backend (the backend slot of step 10 in
   [Error precedence](#error-precedence)):
 
@@ -144,7 +148,7 @@ build is running.
 ## Image rules
 
 These rules hold under every policy (`Error::Image(ImageError::…)`). MCUboot sources are
-cited at commit `a8ffd2c`.
+cited at commit `6d3b3d2` (MCUboot v2.4.0).
 
 - **Flags.** `IMAGE_F_ENCRYPTED_AES128` / `IMAGE_F_ENCRYPTED_AES256` is `Encrypted` and
   any `IMAGE_F_COMPRESSED_*` flag is `Compressed` (MCUboot's `IS_ENCRYPTED` /
@@ -174,9 +178,12 @@ The halves:
 
 - **Ed25519 (classical) half**, over the unprotected area: exactly one ED25519 TLV
   (`Ed25519(Missing)`, `Ed25519(Multiple)`), at most one KEYHASH TLV
-  (`Ed25519(Multiple)`), KEYHASH immediately before ED25519 (`Ed25519(Unpaired)`;
-  MCUboot pairs them the same way, `image_validate.c:364-403`, resetting the key after
-  each signature at `:433`), a 32-byte KEYHASH (`Ed25519(InvalidKeyHash)`), a 64-byte
+  (`Ed25519(Multiple)`), KEYHASH immediately before ED25519 (`Ed25519(Unpaired)`; this
+  is stricter than MCUboot, whose KEYHASH stays armed across other TLVs until the next
+  signature, `image_validate.c:364-403`, resetting the key after each signature at
+  `:433`; see "KEYHASH adjacency" under
+  [Differences from MCUboot](#differences-from-mcuboot)), a 32-byte KEYHASH
+  (`Ed25519(InvalidKeyHash)`), a 64-byte
   signature (`Ed25519(InvalidSignatureLength)`, `image_validate.c:87-90`), a trusted key
   with that KEYHASH (`Ed25519(KeyNotTrusted)`), a public key that decodes
   (`Ed25519(InvalidPublicKey)`), and a signature over `M` that passes `verify_strict`
@@ -306,7 +313,7 @@ make one):
 | `version` | `ImageVersion` from the header, `major.minor.revision+build_num` |
 | `security_counter` | the protected `SEC_CNT` value, `None` without one (an unprotected one is ignored) |
 | `digest` | `M`, 32 bytes (for logging or attestation) |
-| `image_len` | header, body and both TLV areas (`Image::tlv_end`) |
+| `image_len` | header, body and both TLV areas (`Image::tlv_end`). Not covered by the signatures: it comes from the unprotected TLV info header's `it_tlv_tot`, outside `M`, so appending or removing unprotected TLVs changes it without failing verification; only the parse bounds hold. Do not treat it as authenticated (logging or parse result only) |
 | `pq_key` | the trusted PQ key that verified it, when the policy checks the PQ half |
 | `ed25519_key` | the trusted Ed25519 key that verified it, when the policy checks the Ed25519 half |
 
@@ -340,6 +347,14 @@ the bootloader's concern).
   key and lets the last result win, and skips a signature no KEYHASH precedes;
   `verify` requires exactly one KEYHASH + ED25519 pair and rejects an unpaired ED25519 TLV
   (`Ed25519(Multiple)`, `Ed25519(Unpaired)`).
+- **KEYHASH adjacency.** keelsign requires the KEYHASH TLV to be the TLV immediately
+  before the ED25519 TLV (otherwise `Ed25519(Unpaired)`). MCUboot does not: at MCUboot
+  `6d3b3d2` (v2.4.0) a KEYHASH TLV arms `key_id` (`image_validate.c:364-394`), every
+  other non-signature TLV (SHA256, SEC_CNT, vendor TLVs) leaves it armed, a signature
+  TLV with no key armed is skipped (`:400-403`), and `key_id` is reset only after a
+  signature (`:433`). So MCUboot accepts a KEYHASH separated from its signature by other
+  TLVs, and keelsign rejects that image: keelsign is strictly stricter. imgtool always
+  writes the pair adjacent, so imgtool images are unaffected.
 - **`verify_strict`.** `ed25519-dalek`'s `verify_strict` also rejects small-order keys and
   non-canonical `R`, which MCUboot's cofactorless verifier accepts. It only ever rejects
   more than MCUboot; imgtool's signatures are canonical (both sample Ed25519 images pass).

@@ -222,6 +222,11 @@ typedef struct keelsign_result_t {
   // The security counter (0 when `has_security_counter` is 0).
   uint32_t security_counter;
   // Bytes from the start of the image to the end of its TLV areas.
+  // Not covered by the signatures: it comes from the unprotected TLV info header
+  // (`it_tlv_tot`), which is outside the image digest `M`, so appending or removing
+  // unprotected TLVs changes it without failing verification. Only the parse bounds
+  // hold (the areas fit in `len` for `keelsign_verify` / `reader->len` for
+  // `keelsign_verify_cb`, every TLV is whole). Do not treat it as authenticated.
   uint32_t image_len;
   // The image digest `M` (SHA-256 of header, body and protected TLVs).
   uint8_t digest[32];

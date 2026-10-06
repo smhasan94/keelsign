@@ -324,6 +324,43 @@ fn cbindgen_version_is_pinned_everywhere() {
     }
 }
 
+/// SHA-318 AC1 / TP2: `keelsign_result_t.image_len` says, in the Rust field doc and in
+/// the cbindgen header generated from it, that it is not covered by the signatures.
+#[test]
+fn header_says_image_len_is_not_covered_by_the_signatures() {
+    const NEEDLE: &str = "Not covered by the signatures";
+    for (path, field) in [
+        ("keelsign-ffi/src/lib.rs", "pub image_len: u32,"),
+        ("keelsign-ffi/include/keelsign.h", "uint32_t image_len;"),
+    ] {
+        let text = read(path);
+        let start = text
+            .find("struct keelsign_result_t")
+            .unwrap_or_else(|| panic!("{path} must define keelsign_result_t"));
+        let body = &text[start..];
+        let body = &body[..body.find("\n}").expect("end of keelsign_result_t")];
+        let lines: Vec<&str> = body.lines().map(str::trim).collect();
+        let at = lines
+            .iter()
+            .position(|l| *l == field)
+            .unwrap_or_else(|| panic!("{path}: keelsign_result_t must have `{field}`"));
+        // The comment block directly above the field (the doc comment cbindgen copies).
+        let first = lines[..at]
+            .iter()
+            .rposition(|l| !l.starts_with("//"))
+            .map_or(0, |i| i + 1);
+        let doc = lines[first..at].join(" ");
+        assert!(
+            doc.contains(NEEDLE),
+            "{path}: the image_len doc must say `{NEEDLE}`"
+        );
+        assert!(
+            doc.contains("it_tlv_tot") && doc.contains("Do not treat it as"),
+            "{path}: the image_len doc must name it_tlv_tot and the caveat"
+        );
+    }
+}
+
 /// AC1 / TP2 / AC4: the `ci` job installs the pinned cbindgen and verifies the header.
 #[test]
 fn ci_verifies_the_header_and_runs_the_ffi_steps() {
