@@ -5,7 +5,7 @@
 //! (`0x01`, SHA-256 of the signer's DER SubjectPublicKeyInfo, RFC 8410) immediately
 //! followed by a 64-byte ED25519 TLV (`0x24`): an Ed25519 signature (RFC 8032, pure
 //! Ed25519) over the 32-byte image digest `M`, the value of the `SHA256` TLV
-//! (MCUboot `image_validate.c` at `a8ffd2c`: `:87-90` the 64-byte signature, `:364-403`
+//! (MCUboot `image_validate.c` at `6d3b3d2`: `:87-90` the 64-byte signature, `:364-403`
 //! and `:433` the KEYHASH lookup and pairing). keelsign's hybrid images keep exactly that
 //! pair ([docs/image-format.md, Hybrid layout][spec]).
 //!

@@ -486,8 +486,8 @@ slot-relative offsets.
 - **RAM bound**: peak RAM of one digest is `chunk.len()` + the SHA-256 state (about
   108 B: 32 B chaining value, 64 B block buffer, block count and buffer position) + the
   frame of `image_digest`. Nothing scales with the image. The default chunk is
-  `DEFAULT_CHUNK_LEN` = 256 B, MCUboot's `BOOT_TMPBUF_SZ` (`bootutil_priv.h:86` at
-  `a8ffd2c`). With it, the compiled bound is 256 + 520 = 776 B (static frames below).
+  `DEFAULT_CHUNK_LEN` = 256 B, MCUboot's `BOOT_TMPBUF_SZ` (`bootutil_priv.h:53` at
+  `6d3b3d2`). With it, the compiled bound is 256 + 520 = 776 B (static frames below).
 - **Static frame**: nightly `-Z emit-stack-sizes` own-frame sizes of `size_digest`, in
   which `image_digest` and `Image::read_from` each sit alone in an `#[inline(never)]`
   wrapper: `size_digest::digest<NorFlashReader<…>>` 344 B (`image_digest` with the

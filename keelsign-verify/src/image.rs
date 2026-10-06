@@ -3,7 +3,7 @@
 //! Parses an MCUboot image as `imgtool` writes it (and as keelsign extends it,
 //! [docs/image-format.md][spec]): the 32-byte image header, the image body, the optional
 //! protected TLV area and the unprotected TLV area. Layout and constants are MCUboot's,
-//! cited at commit `a8ffd2c` (`boot/bootutil/include/bootutil/image.h`):
+//! cited at commit `6d3b3d2` (MCUboot v2.4.0, `boot/bootutil/include/bootutil/image.h`):
 //!
 //! ```text
 //! 0                 hdr_size          tlv_offset         hashed_len                 tlv_end
@@ -55,12 +55,16 @@
 //!   - the protected TLVs must tile the protected area exactly, ending at `prot_end`
 //!     (`hdr_size + img_size + protect_tlv_size`): a protected TLV whose header or value
 //!     runs past `prot_end`, or 1–3 bytes left over before it, is
-//!     [`ParseError::LengthMismatch`]. MCUboot `a8ffd2c`'s `bootutil_tlv_iter_next` bounds
-//!     each TLV by `end = it->prot ? it->prot_end : it->tlv_end` (`tlv.c:151`, checked at
-//!     `:163-164` and `:179`), and `bootutil_img_validate` walks with `IMAGE_TLV_ANY` and
-//!     `prot = false` (`image_validate.c:285`), so there protected TLVs are bounded only by
-//!     `tlv_end`; the unprotected info header is skipped only when a TLV ends exactly at
-//!     `prot_end` (`tlv.c:133-142`). Such an image can be accepted by MCUboot.
+//!     [`ParseError::LengthMismatch`]. In MCUboot main at `a8ffd2c`, after v2.4.0,
+//!     `bootutil_tlv_iter_next` bounds each TLV by `end = it->prot ? it->prot_end :
+//!     it->tlv_end` (`tlv.c:151`, checked at `:163-164` and `:179`), and
+//!     `bootutil_img_validate` walks with `IMAGE_TLV_ANY` and `prot = false`
+//!     (`image_validate.c:286`), so there protected TLVs are bounded only by `tlv_end`; the
+//!     unprotected info header is skipped only when a TLV ends exactly at `prot_end`
+//!     (`tlv.c:133-142`). At v2.4.0 (`6d3b3d2`, the version keelsign targets)
+//!     `bootutil_tlv_iter_next` (`tlv.c:107-158`) reads `tlv.it_len` unchecked and bounds
+//!     no TLV against `prot_end` or `tlv_end` (it only ends a protected walk once `tlv_off`
+//!     reaches `prot_end`, `:135-138`). Such an image can be accepted by MCUboot.
 //! - A post-quantum signature TLV (`0x4BA1..=0x4BA3`) longer than
 //!   [`MAX_PQ_SIGNATURE_LEN`] is [`ParseError::PqSignatureTooLong`], in either area.
 //! - Bytes after the unprotected TLV area (a padded slot's trailer) are allowed;
@@ -360,7 +364,7 @@ impl Header {
     }
 
     /// Offset of the first TLV area: `hdr_size + img_size` (MCUboot's `BOOT_TLV_OFF`,
-    /// `bootutil_priv.h:479`), or [`ParseError::SizeOverflow`].
+    /// `bootutil_priv.h:441`), or [`ParseError::SizeOverflow`].
     pub fn tlv_offset(&self) -> Result<u32, ParseError> {
         u32::from(self.hdr_size)
             .checked_add(self.img_size)
@@ -1899,7 +1903,7 @@ mod tests {
                 None => assert_eq!(kind, TlvKind::Unknown(t)),
             }
         }
-        // The MCUboot values (image.h:99-121 at a8ffd2c).
+        // The MCUboot values (image.h:99-121 at 6d3b3d2).
         assert_eq!(
             named.map(|(t, _)| t)[..13],
             [
@@ -2400,7 +2404,7 @@ mod tests {
             Image::parse(&d).unwrap().header().flags,
             ImageFlags(u32::MAX)
         );
-        // Constants from image.h at a8ffd2c.
+        // Constants from image.h at 6d3b3d2.
         assert_eq!(IMAGE_MAGIC, 0x96f3_b83d);
         assert_eq!((TLV_INFO_MAGIC, TLV_PROT_INFO_MAGIC), (0x6907, 0x6908));
         assert_eq!(
