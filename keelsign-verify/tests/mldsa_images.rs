@@ -384,9 +384,19 @@ fn assert_negatives(want: fn(Algorithm, Error) -> Error) -> Vec<String> {
             Err(want(alg, on)),
             "{name}"
         );
-        bases.push(field(&entry, "derived_from").unwrap());
+        // The base is another manifest output of the same parameter set, not a negative.
+        let base = field(&entry, "derived_from").unwrap();
+        assert_eq!(
+            field(&object(&outputs, &base), "algorithm").map(|a| algorithm(&a)),
+            Some(alg),
+            "{name}: base {base}"
+        );
+        assert!(
+            NEGATIVES.iter().all(|(n, ..)| *n != base),
+            "{name}: base {base} is itself a negative"
+        );
+        bases.push(base);
     }
-    assert_eq!(bases.len(), 15);
     // Each class is present: body, protected TLV, unprotected TLV, other image.
     for needle in ["bad-body", "bad-protected", "bad-sig", "foreign-sig"] {
         assert!(

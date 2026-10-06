@@ -91,8 +91,9 @@ build is running.
   `UnsupportedAlgorithm(MlDsa65)` after the key lookup and before any backend runs, under
   every backend. Called directly, both `DefaultBackend::new()` and
   `DefaultBackend::cnsa_2_0()` answer `UnsupportedAlgorithm` for ML-DSA too, whatever
-  their policy: the feature state is checked before the policy. Only the cells whose post-quantum half reaches the ML-DSA backend change;
-  image rules, the Ed25519 half and the key lookup (`KeyNotTrusted`) still come first.
+  their policy: the feature state is checked before the policy. Only the cells whose
+  post-quantum half reaches the ML-DSA backend change; image rules, the Ed25519 half and
+  the key lookup (`KeyNotTrusted`) still come first.
   These are the cells without the feature (the manifest's `policy_without_ml_dsa`; every
   other cell is as in the [Policy matrix](#policy-matrix)):
 
@@ -348,9 +349,9 @@ the bootloader's concern).
   (`Ed25519(Multiple)`, `Ed25519(Unpaired)`).
 - **KEYHASH adjacency.** keelsign requires the KEYHASH TLV to be the TLV immediately
   before the ED25519 TLV (otherwise `Ed25519(Unpaired)`). MCUboot does not: at MCUboot
-  `6d3b3d2` (v2.4.0) a KEYHASH TLV arms `key_id` (`image_validate.c:364-395`), every
+  `6d3b3d2` (v2.4.0) a KEYHASH TLV arms `key_id` (`image_validate.c:364-394`), every
   other non-signature TLV (SHA256, SEC_CNT, vendor TLVs) leaves it armed, a signature
-  TLV with no key armed is skipped (`:401-404`), and `key_id` is reset only after a
+  TLV with no key armed is skipped (`:400-403`), and `key_id` is reset only after a
   signature (`:433`). So MCUboot accepts a KEYHASH separated from its signature by other
   TLVs, and keelsign rejects that image: keelsign is strictly stricter. imgtool always
   writes the pair adjacent, so imgtool images are unaffected.

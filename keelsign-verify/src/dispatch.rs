@@ -23,7 +23,9 @@ pub trait Backend {
     /// Return `Ok(())` if it verifies, [`Error::SignatureInvalid`] if it does not,
     /// [`Error::UnsupportedParameterSet`] if the key or signature uses a parameter set
     /// the backend cannot handle (for
-    /// [`DefaultBackend::cnsa_2_0`](crate::DefaultBackend::cnsa_2_0), any ML-DSA signature),
+    /// [`DefaultBackend::cnsa_2_0`](crate::DefaultBackend::cnsa_2_0), any ML-DSA signature
+    /// when the `ml-dsa` feature is on; with it off, both `DefaultBackend`s answer
+    /// [`Error::UnsupportedAlgorithm`] for ML-DSA instead),
     /// [`Error::MalformedSignature`] or [`Error::InvalidPublicKey`] for a signature or key
     /// that does not decode, and [`Error::UnsupportedAlgorithm`]`(algorithm)` if the backend
     /// does not implement `algorithm`.
