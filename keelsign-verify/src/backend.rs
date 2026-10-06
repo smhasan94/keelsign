@@ -24,10 +24,11 @@ use crate::trusted_keys::{TrustedKey, TrustedKeys};
 ///   FIPS 204 `ML-DSA.Verify` with [`MLDSA_CONTEXT`](crate::tlv::MLDSA_CONTEXT), under
 ///   [`DefaultBackend::new`] only ([`DefaultBackend::allows_ml_dsa`]).
 ///   [`DefaultBackend::cnsa_2_0`] refuses them with [`Error::UnsupportedParameterSet`]:
-///   ML-DSA-44 and ML-DSA-65 are never CNSA 2.0 algorithms (docs/image-format.md). Without
-///   the `ml-dsa` feature [`verify_pq_with`] answers [`Error::UnsupportedAlgorithm`] before
-///   any backend is called, and [`mldsa::verify`] gives the same answer if the backend is
-///   called directly.
+///   ML-DSA-44 and ML-DSA-65 are never CNSA 2.0 algorithms (docs/image-format.md). That
+///   policy refusal only exists when the algorithm is compiled in: without the `ml-dsa`
+///   feature both backends answer [`Error::UnsupportedAlgorithm`] for ML-DSA, whatever
+///   their policy. [`verify_pq_with`] gives that answer before any backend is called, and
+///   [`Backend::verify`] gives the same one when either backend is called directly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DefaultBackend {
     lms_policy: ParameterPolicy,
@@ -48,7 +49,9 @@ impl DefaultBackend {
     /// National Security Systems deployments:
     /// [`verify_pq_with`]`(&DefaultBackend::cnsa_2_0(), keys, tlvs, message)`. An HSS key
     /// with `L >= 2` is [`Error::UnsupportedParameterSet`], and so is every ML-DSA-44/65
-    /// signature: they are never CNSA 2.0 algorithms (docs/image-format.md).
+    /// signature with the `ml-dsa` feature: they are never CNSA 2.0 algorithms
+    /// (docs/image-format.md). Without the feature ML-DSA is
+    /// [`Error::UnsupportedAlgorithm`], as under [`DefaultBackend::new`].
     pub const fn cnsa_2_0() -> Self {
         Self {
             lms_policy: ParameterPolicy::cnsa_2_0(),
@@ -61,10 +64,11 @@ impl DefaultBackend {
         self.lms_policy
     }
 
-    /// Whether this backend verifies ML-DSA-44/65 signatures: `true` for
+    /// Whether this backend's policy allows ML-DSA-44/65 signatures: `true` for
     /// [`DefaultBackend::new`], `false` for [`DefaultBackend::cnsa_2_0`] (which answers
-    /// them with [`Error::UnsupportedParameterSet`]). Independent of the `ml-dsa` feature,
-    /// which [`Algorithm::is_enabled`] reports.
+    /// them with [`Error::UnsupportedParameterSet`] when the `ml-dsa` feature is on).
+    /// Independent of the `ml-dsa` feature, which [`Algorithm::is_enabled`] reports:
+    /// without it both backends answer [`Error::UnsupportedAlgorithm`] for ML-DSA.
     pub const fn allows_ml_dsa(&self) -> bool {
         self.ml_dsa
     }
@@ -90,7 +94,11 @@ impl Backend for DefaultBackend {
                 lms::verify_with_policy(&self.lms_policy, public_key, message, signature)
             }
             Algorithm::MlDsa44 | Algorithm::MlDsa65 => {
-                if self.ml_dsa {
+                // The feature state comes before the policy: without `ml-dsa` both
+                // backends give the same answer.
+                if !mldsa::is_enabled() {
+                    Err(Error::UnsupportedAlgorithm(algorithm))
+                } else if self.ml_dsa {
                     mldsa::verify(algorithm, public_key, message, signature)
                 } else {
                     Err(Error::UnsupportedParameterSet)
@@ -134,6 +142,10 @@ mod tests {
     use crate::tlv::{TLV_KEELSIGN_KEY_ID, TLV_LMS_HSS_SIG};
     use crate::trusted_keys::key_id_of;
 
+    /// With the `ml-dsa` feature: `new()` verifies ML-DSA, `cnsa_2_0()` refuses it by
+    /// policy (`UnsupportedParameterSet`). Without the feature see
+    /// `feature_off_both_backends_answer_unsupported_algorithm`.
+    #[cfg(feature = "ml-dsa")]
     #[test]
     fn default_backend_verifies_ml_dsa_and_cnsa_2_0_refuses_it() {
         assert!(DefaultBackend::new().allows_ml_dsa());
@@ -151,63 +163,104 @@ mod tests {
                 (TLV_KEELSIGN_KEY_ID, id.as_slice()),
                 (algorithm.tlv_type(), sig.as_slice()),
             ];
-            if cfg!(feature = "ml-dsa") {
-                // The backend alone.
+            // The backend alone.
+            assert_eq!(
+                DefaultBackend::new().verify(algorithm, &pk, MSG, &sig),
+                Ok(()),
+                "{algorithm:?}"
+            );
+            assert_eq!(
+                DefaultBackend::new().verify(algorithm, &pk, b"other", &sig),
+                Err(Error::SignatureInvalid),
+                "{algorithm:?}"
+            );
+            // Through verify_pq / verify_pq_with.
+            assert_eq!(
+                verify_pq(&keys, tlvs, MSG).map(|k| k.public_key),
+                Ok(pk.as_slice()),
+                "{algorithm:?}"
+            );
+            assert_eq!(
+                verify_pq_with(&DefaultBackend::new(), &keys, tlvs, MSG).map(|_| ()),
+                Ok(()),
+                "{algorithm:?}"
+            );
+            // The strict backend refuses ML-DSA whatever the signature.
+            for s in [sig.as_slice(), b"sig".as_slice(), &[]] {
                 assert_eq!(
-                    DefaultBackend::new().verify(algorithm, &pk, MSG, &sig),
-                    Ok(()),
+                    DefaultBackend::cnsa_2_0().verify(algorithm, &pk, MSG, s),
+                    Err(Error::UnsupportedParameterSet),
                     "{algorithm:?}"
                 );
-                assert_eq!(
-                    DefaultBackend::new().verify(algorithm, &pk, b"other", &sig),
-                    Err(Error::SignatureInvalid),
-                    "{algorithm:?}"
-                );
-                // Through verify_pq / verify_pq_with.
-                assert_eq!(
-                    verify_pq(&keys, tlvs, MSG).map(|k| k.public_key),
-                    Ok(pk.as_slice()),
-                    "{algorithm:?}"
-                );
-                assert_eq!(
-                    verify_pq_with(&DefaultBackend::new(), &keys, tlvs, MSG).map(|_| ()),
-                    Ok(()),
-                    "{algorithm:?}"
-                );
-                // The strict backend refuses ML-DSA whatever the signature.
-                for s in [sig.as_slice(), b"sig".as_slice(), &[]] {
+            }
+            assert_eq!(
+                verify_pq_with(&DefaultBackend::cnsa_2_0(), &keys, tlvs, MSG),
+                Err(Error::UnsupportedParameterSet),
+                "{algorithm:?}"
+            );
+        }
+    }
+
+    /// SHA-318 TP1 / AC4: without the `ml-dsa` feature `DefaultBackend::new()` and
+    /// `DefaultBackend::cnsa_2_0()` give the same answer for ML-DSA,
+    /// `UnsupportedAlgorithm`, called directly and through `verify_pq` /
+    /// `verify_pq_with`, with a right-length signature and with junk. `allows_ml_dsa()`
+    /// still reports the policy.
+    #[cfg(not(feature = "ml-dsa"))]
+    #[test]
+    fn feature_off_both_backends_answer_unsupported_algorithm() {
+        assert!(DefaultBackend::new().allows_ml_dsa());
+        assert!(DefaultBackend::default().allows_ml_dsa());
+        assert!(!DefaultBackend::cnsa_2_0().allows_ml_dsa());
+        let backends = [
+            DefaultBackend::new(),
+            DefaultBackend::default(),
+            DefaultBackend::cnsa_2_0(),
+        ];
+        for algorithm in [Algorithm::MlDsa44, Algorithm::MlDsa65] {
+            // Right-length placeholder key and signature (never verified).
+            let pk = std::vec![0x44u8; algorithm.public_key_len().unwrap()];
+            let sig_len = if algorithm == Algorithm::MlDsa44 {
+                2420
+            } else {
+                3309
+            };
+            let sig = std::vec![0u8; sig_len];
+            let keys = TrustedKeys::<1>::new(&[TrustedKey {
+                algorithm,
+                public_key: &pk,
+            }])
+            .unwrap();
+            let id = key_id_of(&pk);
+            for s in [sig.as_slice(), b"sig".as_slice(), &[]] {
+                let want = Err(Error::UnsupportedAlgorithm(algorithm));
+                for backend in &backends {
+                    // The backend alone.
                     assert_eq!(
-                        DefaultBackend::cnsa_2_0().verify(algorithm, &pk, MSG, s),
-                        Err(Error::UnsupportedParameterSet),
-                        "{algorithm:?}"
+                        backend.verify(algorithm, &pk, MSG, s),
+                        want,
+                        "{algorithm:?} {backend:?} sig len {}",
+                        s.len()
+                    );
+                    // Through verify_pq_with.
+                    let tlvs = [
+                        (TLV_KEELSIGN_KEY_ID, id.as_slice()),
+                        (algorithm.tlv_type(), s),
+                    ];
+                    assert_eq!(
+                        verify_pq_with(backend, &keys, tlvs, MSG).map(|_| ()),
+                        want,
+                        "{algorithm:?} {backend:?} sig len {}",
+                        s.len()
                     );
                 }
+                let tlvs = [
+                    (TLV_KEELSIGN_KEY_ID, id.as_slice()),
+                    (algorithm.tlv_type(), s),
+                ];
                 assert_eq!(
-                    verify_pq_with(&DefaultBackend::cnsa_2_0(), &keys, tlvs, MSG),
-                    Err(Error::UnsupportedParameterSet),
-                    "{algorithm:?}"
-                );
-            } else {
-                // Feature off: the dispatcher refuses before any backend runs, under both.
-                assert_eq!(
-                    verify_pq(&keys, tlvs, MSG),
-                    Err(Error::UnsupportedAlgorithm(algorithm)),
-                    "{algorithm:?}"
-                );
-                assert_eq!(
-                    verify_pq_with(&DefaultBackend::cnsa_2_0(), &keys, tlvs, MSG),
-                    Err(Error::UnsupportedAlgorithm(algorithm)),
-                    "{algorithm:?}"
-                );
-                // Called directly, DefaultBackend::new() gives the same answer.
-                assert_eq!(
-                    DefaultBackend::new().verify(algorithm, &pk, MSG, &sig),
-                    Err(Error::UnsupportedAlgorithm(algorithm)),
-                    "{algorithm:?}"
-                );
-                assert_eq!(
-                    DefaultBackend::cnsa_2_0().verify(algorithm, &pk, MSG, &sig),
-                    Err(Error::UnsupportedParameterSet),
+                    verify_pq(&keys, tlvs, MSG).map(|_| ()),
+                    want,
                     "{algorithm:?}"
                 );
             }
@@ -216,39 +269,25 @@ mod tests {
 
     const MSG: &[u8] = &[0xC3; 32];
 
-    /// An ML-DSA public key and a signature over `msg` with the keelsign context. Without
-    /// the `ml-dsa` feature, right-length placeholder bytes (never verified).
+    /// An ML-DSA public key and a signature over `msg` with the keelsign context.
+    #[cfg(feature = "ml-dsa")]
     fn ml_dsa_signed(algorithm: Algorithm, msg: &[u8]) -> (Vec<u8>, Vec<u8>) {
-        #[cfg(feature = "ml-dsa")]
-        {
-            use ml_dsa::{MlDsa44, MlDsa65, MlDsaParams, Seed, SigningKey};
-            fn sign<P: MlDsaParams>(msg: &[u8]) -> (Vec<u8>, Vec<u8>) {
-                let sk = SigningKey::<P>::from_seed(&Seed::try_from(&[7u8; 32][..]).unwrap());
-                let sig = sk
-                    .expanded_key()
-                    .sign_deterministic(msg, crate::tlv::MLDSA_CONTEXT)
-                    .unwrap()
-                    .encode();
-                (
-                    sk.expanded_key().verifying_key().encode().to_vec(),
-                    sig.to_vec(),
-                )
-            }
-            match algorithm {
-                Algorithm::MlDsa44 => sign::<MlDsa44>(msg),
-                _ => sign::<MlDsa65>(msg),
-            }
+        use ml_dsa::{MlDsa44, MlDsa65, MlDsaParams, Seed, SigningKey};
+        fn sign<P: MlDsaParams>(msg: &[u8]) -> (Vec<u8>, Vec<u8>) {
+            let sk = SigningKey::<P>::from_seed(&Seed::try_from(&[7u8; 32][..]).unwrap());
+            let sig = sk
+                .expanded_key()
+                .sign_deterministic(msg, crate::tlv::MLDSA_CONTEXT)
+                .unwrap()
+                .encode();
+            (
+                sk.expanded_key().verifying_key().encode().to_vec(),
+                sig.to_vec(),
+            )
         }
-        #[cfg(not(feature = "ml-dsa"))]
-        {
-            let _ = msg;
-            let pk = std::vec![0x44u8; algorithm.public_key_len().unwrap()];
-            let sig_len = if algorithm == Algorithm::MlDsa44 {
-                2420
-            } else {
-                3309
-            };
-            (pk, std::vec![0u8; sig_len])
+        match algorithm {
+            Algorithm::MlDsa44 => sign::<MlDsa44>(msg),
+            _ => sign::<MlDsa65>(msg),
         }
     }
 

@@ -472,3 +472,42 @@ fn differences_section_says_keyhash_adjacency_is_stricter_than_mcuboot() {
         "the Ed25519 half must call KEYHASH adjacency stricter than MCUboot"
     );
 }
+
+/// SHA-318 AC4: the `ml-dsa` section says that without the feature both
+/// `DefaultBackend::new()` and `DefaultBackend::cnsa_2_0()` answer `UnsupportedAlgorithm`
+/// for ML-DSA (the feature state is checked before the policy), and that the strict
+/// backend's `UnsupportedParameterSet` is the feature-on answer. backend.rs checks the
+/// feature first.
+#[test]
+fn ml_dsa_feature_section_says_both_backends_answer_unsupported_algorithm_when_off() {
+    let doc = doc();
+    let section = section(&doc, "## The `ml-dsa` feature")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for needle in [
+        "Called directly, both `DefaultBackend::new()` and `DefaultBackend::cnsa_2_0()` answer \
+         `UnsupportedAlgorithm` for ML-DSA too, whatever their policy",
+        "the feature state is checked before the policy",
+        "**`DefaultBackend::cnsa_2_0()` refuses ML-DSA** with `UnsupportedParameterSet` when \
+         the feature is on",
+        "without the feature both backends answer `UnsupportedAlgorithm`",
+    ] {
+        assert!(
+            section.contains(needle),
+            "## The `ml-dsa` feature must say `{needle}`"
+        );
+    }
+    let backend = read("keelsign-verify/src/backend.rs");
+    let arm = backend
+        .find("Algorithm::MlDsa44 | Algorithm::MlDsa65 => {")
+        .expect("backend.rs: the ML-DSA arm of DefaultBackend::verify");
+    let arm = &backend[arm..];
+    let feature = arm
+        .find("if !mldsa::is_enabled() {")
+        .expect("the ML-DSA arm checks the feature");
+    let policy = arm
+        .find("self.ml_dsa")
+        .expect("the ML-DSA arm checks the policy");
+    assert!(feature < policy, "the feature state must be checked first");
+}

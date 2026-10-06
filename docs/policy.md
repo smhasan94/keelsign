@@ -89,7 +89,9 @@ build is running.
 
 - **Without the feature**, the dispatcher answers `UnsupportedAlgorithm(MlDsa44)` or
   `UnsupportedAlgorithm(MlDsa65)` after the key lookup and before any backend runs, under
-  every backend. Only the cells whose post-quantum half reaches the ML-DSA backend change;
+  every backend. Called directly, both `DefaultBackend::new()` and
+  `DefaultBackend::cnsa_2_0()` answer `UnsupportedAlgorithm` for ML-DSA too, whatever
+  their policy: the feature state is checked before the policy. Only the cells whose post-quantum half reaches the ML-DSA backend change;
   image rules, the Ed25519 half and the key lookup (`KeyNotTrusted`) still come first.
   These are the cells without the feature (the manifest's `policy_without_ml_dsa`; every
   other cell is as in the [Policy matrix](#policy-matrix)):
@@ -116,9 +118,10 @@ build is running.
 
 - **`DefaultBackend::new()`** verifies ML-DSA-44/65 (`DefaultBackend::allows_ml_dsa()` is
   `true`). **`DefaultBackend::cnsa_2_0()` refuses ML-DSA** with `UnsupportedParameterSet`
-  (`allows_ml_dsa()` is `false`): ML-DSA-44 and ML-DSA-65 are never CNSA 2.0 algorithms
-  ([docs/image-format.md](image-format.md)), so the strict backend accepts single-tree LMS
-  only.
+  when the feature is on (`allows_ml_dsa()` is `false`; without the feature both backends
+  answer `UnsupportedAlgorithm`, see above): ML-DSA-44 and ML-DSA-65 are never CNSA 2.0
+  algorithms ([docs/image-format.md](image-format.md)), so the strict backend accepts
+  single-tree LMS only.
 - **Error mapping** of the ML-DSA backend (the backend slot of step 10 in
   [Error precedence](#error-precedence)):
 
