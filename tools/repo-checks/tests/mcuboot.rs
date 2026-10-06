@@ -455,6 +455,25 @@ fn hook_harness_swap_offset_secondary_image_at_sector_offset_returns_regular() {
         logs,
         ["INF keelsign: image 0 slot 1 verified (pq key 0, ed25519 key 4294967295)"]
     );
+    // MCUboot's REVERT case: `swap_offset.c` records secondary offset 0 there (the
+    // reverted image sits at the start of slot 1), and the stub reports `--slot-offset`
+    // as MCUboot's recorded state does, so the glue reads slot 1 from offset 0.
+    let (logs, verdict, status) = harness.run(
+        &image_path(image),
+        &[
+            "--slot",
+            "1",
+            "--slot-offset",
+            "0",
+            "--slot-size",
+            "0x76000",
+        ],
+    );
+    assert_eq!((verdict.as_str(), status), ("REGULAR", 0), "logs: {logs:?}");
+    assert_eq!(
+        logs,
+        ["INF keelsign: image 0 slot 1 verified (pq key 0, ed25519 key 4294967295)"]
+    );
     let (logs, verdict, status) = harness.run(&image_path(image), &["--slot-size", "0x76000"]);
     assert_eq!((verdict.as_str(), status), ("REGULAR", 0), "logs: {logs:?}");
     assert_eq!(
@@ -1175,6 +1194,9 @@ fn zephyr_setup_script_is_pinned_and_guarded() {
         // `west update` runs only when the projects are not at the pins (re-runs skip it).
         &"if projects_ok; then".to_owned(),
         &"no west update".to_owned(),
+        // ... which is when every project's HEAD is its manifest revision (resolved locally).
+        &"west list -f '{name} {revision} {abspath}'".to_owned(),
+        &"rev-parse --verify --quiet \"$rev^{commit}\"".to_owned(),
     ] {
         assert!(setup.contains(needle.as_str()), "scripts/zephyr-setup.sh lacks `{needle}`");
     }

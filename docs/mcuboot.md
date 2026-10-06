@@ -97,9 +97,9 @@ keelsign/scripts/zephyr-setup.sh
 
 It needs git, curl, tar with xz, python3 3.12 or newer, cmake 3.20 or newer and ninja
 (macOS arm64 or Linux x86_64 hosts), takes a few minutes and about 2 GB, and can be
-re-run: each step is skipped when its result is there (`west update` too, when Zephyr
-and MCUboot are at their pins and every module is checked out). Rust needs the
-soft-float Cortex-M4 target:
+re-run: each step is skipped when its result is there (`west update` too, when every
+project of `west.yml`, Zephyr, MCUboot and the modules, is checked out at its pinned
+commit). Rust needs the soft-float Cortex-M4 target:
 
 ```sh
 rustup target add thumbv7em-none-eabi

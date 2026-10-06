@@ -21,8 +21,8 @@
 # Each step is skipped when its result is already there, so the script can be re-run:
 # the venv and west when west is at the pin, `west init` when .west exists, `west update`
 # when zephyr and bootloader/mcuboot are at their pins and every other project of the
-# manifest is checked out, pip's requirements when they are installed (pip checks), the
-# SDK download when the SDK is there.
+# manifest has its HEAD at its manifest revision, pip's requirements when they are
+# installed (pip checks), the SDK download when the SDK is there.
 # With ZEPHYR_SDK_INSTALL_DIR pointing to an existing SDK 1.0.1 with arm-zephyr-eabi,
 # the SDK is not downloaded; with `west` already on PATH (and no .venv), no venv is
 # created and no Python package is installed (your environment must then have Zephyr's
@@ -126,15 +126,20 @@ fi
 [ "$(cd "$topdir" && west config manifest.path)" = keelsign ] ||
   die "$topdir/.west belongs to another manifest repository"
 # The west projects are there when zephyr and MCUboot are at their pins and every
-# project of the manifest (west list, read locally) is a checkout.
+# project of the manifest (west list, read locally, no network) has its HEAD at the
+# manifest's revision for it (west.yml pins commits). A revision that does not resolve to
+# a commit in the project's checkout (not fetched, or no checkout) is not there either.
 projects_ok() {
   [ "$(git -C "$topdir/zephyr" rev-parse HEAD 2>/dev/null)" = "$ZEPHYR_REV" ] &&
     [ "$(git -C "$topdir/bootloader/mcuboot" rev-parse HEAD 2>/dev/null)" = "$MCUBOOT_REV" ] || return 1
-  local paths path
-  paths="$(cd "$topdir" && west list -f '{abspath}' 2>/dev/null)" || return 1
-  while IFS= read -r path; do
-    [ -z "$path" ] || [ "$path" = "$repo" ] || [ -e "$path/.git" ] || return 1
-  done <<<"$paths"
+  local projects name rev path want
+  projects="$(cd "$topdir" && west list -f '{name} {revision} {abspath}' 2>/dev/null)" || return 1
+  while read -r name rev path; do
+    [ -n "$name" ] || continue
+    [ "$name" != manifest ] && [ "$path" != "$repo" ] || continue
+    want="$(git -C "$path" rev-parse --verify --quiet "$rev^{commit}" 2>/dev/null)" || return 1
+    [ -n "$want" ] && [ "$(git -C "$path" rev-parse HEAD 2>/dev/null)" = "$want" ] || return 1
+  done <<<"$projects"
 }
 if projects_ok; then
   step "west projects already at the pins (Zephyr $ZEPHYR_REV, MCUboot $MCUBOOT_REV); no west update"
