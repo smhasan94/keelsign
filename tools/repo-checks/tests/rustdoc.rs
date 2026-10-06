@@ -25,6 +25,17 @@ const COMMANDS: [&[&str]; 2] = [
     ],
     &["doc", "--no-deps", "-p", "keelsign-ffi", "--locked"],
 ];
+/// The pages each of [`COMMANDS`] must write, checked right after it runs: the second
+/// command overwrites `doc/keelsign/` (both lib targets are named `keelsign`), so the
+/// CLI's pages are checked after the first and a keelsign-ffi-only page after the second.
+const OUTPUTS: [&[&str]; 2] = [
+    &[
+        "doc/stack_paint/index.html",
+        "doc/keelsign_verify/index.html",
+        "doc/keelsign/index.html",
+    ],
+    &["doc/keelsign/fn.keelsign_verify.html"],
+];
 
 fn read(rel: &str) -> String {
     let path = workspace_root().join(rel);
@@ -68,7 +79,7 @@ fn ci_builds_workspace_docs_without_warnings() {
 fn workspace_docs_build_without_warnings() {
     let root = workspace_root();
     let scratch = ScratchDir::new("workspace_docs");
-    for args in COMMANDS {
+    for (args, outputs) in COMMANDS.into_iter().zip(OUTPUTS) {
         let mut cmd = cargo_in(&root, scratch.path());
         cmd.args(args)
             .env("RUSTDOCFLAGS", "-D warnings")
@@ -81,14 +92,11 @@ fn workspace_docs_build_without_warnings() {
             !stderr.contains("warning"),
             "cargo {command} warned:\n{stderr}"
         );
-    }
-    for krate in ["stack_paint", "keelsign_verify", "keelsign"] {
-        assert!(
-            scratch
-                .path()
-                .join(format!("doc/{krate}/index.html"))
-                .is_file(),
-            "cargo doc must write doc/{krate}/index.html"
-        );
+        for page in outputs {
+            assert!(
+                scratch.path().join(page).is_file(),
+                "cargo {command} must write {page}"
+            );
+        }
     }
 }
