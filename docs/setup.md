@@ -279,7 +279,9 @@ three-identical-runs procedure are in [on-target-tests.md](on-target-tests.md) (
   also `cargo deny --locked check` (cargo-deny 0.20.2, `deny.toml`, all features), which
   fails on any new RustSec advisory until it is fixed or ignored with a reason, and
   `cargo doc --no-deps -p keelsign-verify` with `RUSTDOCFLAGS=-D warnings` in all four
-  feature states (none, `ml-dsa`, `ed25519`, `ed25519,ml-dsa`).
+  feature states (none, `ml-dsa`, `ed25519`, `ed25519,ml-dsa`). Since SHA-303 also
+  `cargo doc --workspace --no-deps --exclude keelsign-ffi` plus `cargo doc -p keelsign-ffi`,
+  both with `RUSTDOCFLAGS=-D warnings`.
 - `verify-cross`: `keelsign-verify`, (SHA-55) `keelsign-embassy` with its board module,
   and (SHA-60) `keelsign-ffi`'s `libkeelsign.a` with the `staticlib_sizes.py --check`
   symbol rules, for both targets with every feature state.
