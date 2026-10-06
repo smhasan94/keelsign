@@ -978,13 +978,13 @@ memory report (`scripts/mcuboot_sizes.py`, from the ELFs' load segments):
 | MCUboot image | Flash | Static RAM | MAIN_STACK_SIZE | Compiler |
 |---|---|---|---|---|
 | stock | 29,568 B | 22,464 B | 16384 | GCC: (Zephyr SDK 1.0.1) 14.3.0 |
-| with keelsign | 48,564 B | 22,464 B | 16384 | GCC: (Zephyr SDK 1.0.1) 14.3.0 |
-| Δ | +18,996 B | +0 B | | |
+| with keelsign | 48,484 B | 22,464 B | 16384 | GCC: (Zephyr SDK 1.0.1) 14.3.0 |
+| Δ | +18,916 B | +0 B | | |
 
-- **Flash +18,996 B**: the LMS/HSS verifier, image parser and SHA256 code of
+- **Flash +18,916 B**: the LMS/HSS verifier, image parser and SHA256 code of
   `libkeelsign.a` (the linker keeps what `keelsign_verify_cb` reaches), the hook glue and
-  the 60-byte key table. The keelsign MCUboot (48,564 B) would fit the board's default
-  48 KB (49,152 B) boot partition with 588 B to spare; the sample's 64 KB partition
+  the 60-byte key table. The keelsign MCUboot (48,484 B) would fit the board's default
+  48 KB (49,152 B) boot partition with 668 B to spare; the sample's 64 KB partition
   leaves room for more keys, debug logging and MCUboot updates.
 - **Static RAM +0 B**: keelsign keeps all its state on the stack. The stack itself grows:
   the sample raises MCUboot's main stack from the `CONFIG_MAIN_STACK_SIZE=10240` of
@@ -992,11 +992,11 @@ memory report (`scripts/mcuboot_sizes.py`, from the ELFs' load segments):
   LMS/HSS ([mcuboot.md](mcuboot.md#stack)); both builds above use 16,384 B so the
   table isolates keelsign's code. Measured on-target stack and cycles are SHA-315.
 - **Ed25519 + PQ_ONLY** (MCUboot's own Ed25519 signature instead of ECDSA P-256,
-  keelsign's default policy, `ed25519-build`): the MCUboot image is 61,184 B (the
-  linker's `FLASH` use) and links into the 64 KB boot partition with 4,352 B to spare.
+  keelsign's default policy, `ed25519-build`): the MCUboot image is 61,104 B (the
+  linker's `FLASH` use) and links into the 64 KB boot partition with 4,432 B to spare.
 - **Hybrid** (`KEELSIGN_POLICY_HYBRID` with MCUboot's own Ed25519 signature,
-  `hybrid-build`): the MCUboot image needs 102,616 B and does not link into the 64 KB
-  boot partition (the linker reports `FLASH` overflowed by 37,080 bytes): MCUboot's own
+  `hybrid-build`): the MCUboot image needs 102,536 B and does not link into the 64 KB
+  boot partition (the linker reports `FLASH` overflowed by 37,000 bytes): MCUboot's own
   Ed25519 code instead of ECDSA, plus keelsign's `ed25519` feature (58,408 B of
   `libkeelsign.a` for `thumbv7em-none-eabi`). The sample therefore only compiles the
   hybrid hook and library in CI; a hybrid bootloader needs a boot partition of at

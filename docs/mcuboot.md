@@ -250,7 +250,7 @@ sysbuild options (`sysbuild/Kconfig`, in the application's `sysbuild.conf`):
   LMS/HSS signature by a trusted key. It works with any MCUboot signature type
   (`SB_CONFIG_BOOT_SIGNATURE_TYPE_*`, including none), and MCUboot keeps checking its
   own. The sample uses ECDSA P-256 + `PQ_ONLY`, so classical signing is unchanged.
-  With MCUboot's Ed25519 signature instead (`ed25519-build`), MCUboot is 61,184 B and
+  With MCUboot's Ed25519 signature instead (`ed25519-build`), MCUboot is 61,104 B and
   fits the sample's 64 KB boot partition
   ([benchmarks.md](benchmarks.md#mcuboot-with-keelsign-sha-62)):
 
@@ -314,7 +314,7 @@ when the application relinks, and each run uses one LMS/HSS leaf.
 
 ## Partitions
 
-MCUboot plus keelsign's LMS/HSS verifier is 48,564 B, which leaves 588 B in the board's
+MCUboot plus keelsign's LMS/HSS verifier is 48,484 B, which leaves 668 B in the board's
 default 48 KB boot partition. The sample's `boards/nrf52840dk_nrf52840.overlay` makes it
 64 KB:
 
@@ -341,7 +341,7 @@ Measured on-target stack and cycles of the C entry points are SHA-315.
 ## Sizes
 
 [benchmarks.md](benchmarks.md#mcuboot-with-keelsign-sha-62) records MCUboot's flash and
-static RAM with and without keelsign (+18,996 B flash, +0 B static RAM). The stock build
+static RAM with and without keelsign (+18,916 B flash, +0 B static RAM). The stock build
 is the same sample with keelsign off (`stock-build`):
 
 ```sh
