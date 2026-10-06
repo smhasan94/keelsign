@@ -426,3 +426,200 @@ fn ci_runs_the_mcuboot_hook_harness() {
         assert!(job.contains(needle), "ci job must have `{needle}`");
     }
 }
+
+// ---- Zephyr module, west manifest and sample (text level, not ignored) -------------------
+
+/// D4: with SB_CONFIG_KEELSIGN, sysbuild turns MCUboot's image-access hooks on and its TLV
+/// allow list off (keelsign TLVs are not on it), and the module refuses to configure an
+/// MCUboot image where the allow list is on or the hooks are off, so a misconfiguration
+/// never builds (the toolchain check is `zephyr_build_with_allow_list_enabled_is_refused`).
+#[test]
+fn sysbuild_forces_allow_list_off_and_hooks_on() {
+    let sysbuild = read("sysbuild/CMakeLists.txt");
+    for needle in [
+        "function(${SYSBUILD_CURRENT_MODULE_NAME}_pre_cmake)",
+        "set_config_bool(mcuboot CONFIG_KEELSIGN y)",
+        "set_config_bool(mcuboot CONFIG_BOOT_IMAGE_ACCESS_HOOKS y)",
+        "set_config_bool(mcuboot CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST n)",
+        "set_config_string(mcuboot CONFIG_KEELSIGN_PUBLIC_KEY_FILE",
+        "set_config_bool(${DEFAULT_IMAGE} CONFIG_KEELSIGN_SIGN_IMAGE y)",
+        "pubkey --key ${key} --out ${pub} --force",
+    ] {
+        assert!(
+            sysbuild.contains(needle),
+            "sysbuild/CMakeLists.txt lacks `{needle}`"
+        );
+    }
+    let module = read("zephyr/CMakeLists.txt");
+    for needle in [
+        "if(CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST)",
+        "message(FATAL_ERROR \"keelsign: CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST=y rejects keelsign TLVs 0x4BA0-0x4BA3 (image_validate.c allowed_unprot_tlvs); set it to n\")",
+        "if(NOT CONFIG_BOOT_IMAGE_ACCESS_HOOKS)",
+        "if(NOT CONFIG_MCUBOOT)",
+        "zephyr_library_link_libraries(MCUBOOT_BOOTUTIL)",
+        "mcuboot/keelsign_mcuboot_hooks.c",
+        "scripts/keelsign_embed_keys.py",
+        "build -p keelsign-ffi --profile ffi --locked",
+        "PROPERTY SIGNING_SCRIPT ${KEELSIGN_DIR}/cmake/keelsign_signing.cmake",
+    ] {
+        assert!(
+            module.contains(needle),
+            "zephyr/CMakeLists.txt lacks `{needle}`"
+        );
+    }
+    let kconfig = read("sysbuild/Kconfig");
+    assert!(kconfig.contains("config KEELSIGN_POLICY_HYBRID"));
+    assert!(
+        kconfig.contains("depends on BOOT_SIGNATURE_TYPE_ED25519"),
+        "D11: the hybrid policy needs MCUboot's Ed25519 signature"
+    );
+    assert!(
+        !kconfig.contains("CLASSICAL_ONLY") && !read("zephyr/Kconfig").contains("CLASSICAL_ONLY"),
+        "D11: no classical-only policy in the bootloader"
+    );
+}
+
+/// §0.9: the module's Kconfig is read by every image, and MCUboot's own symbols exist only
+/// in the MCUboot image (an undefined symbol is an error in the application image), so
+/// zephyr/Kconfig never refers to them; the app-side options depend on Zephyr's
+/// BOOTLOADER_MCUBOOT. D9: no ML-DSA option.
+#[test]
+fn module_kconfig_refers_to_no_mcuboot_only_symbol() {
+    let kconfig = read("zephyr/Kconfig");
+    for line in kconfig.lines().map(str::trim) {
+        if let Some(rest) = line
+            .strip_prefix("depends on ")
+            .or_else(|| line.strip_prefix("select "))
+            .or_else(|| line.strip_prefix("default ").filter(|r| r.contains(" if ")))
+        {
+            for symbol in rest
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .filter(|w| {
+                    w.chars()
+                        .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
+                })
+                .filter(|w| w.len() > 1)
+            {
+                assert!(
+                    !(symbol == "MCUBOOT"
+                        || symbol.starts_with("BOOT_")
+                        || symbol.starts_with("MCUBOOT_")),
+                    "zephyr/Kconfig refers to MCUboot-only symbol {symbol}: `{line}`"
+                );
+            }
+        }
+    }
+    for symbol in [
+        "menuconfig KEELSIGN\n",
+        "config KEELSIGN_POLICY_PQ_ONLY\n",
+        "config KEELSIGN_POLICY_HYBRID\n",
+        "config KEELSIGN_PUBLIC_KEY_FILE\n",
+        "config KEELSIGN_LIBRARY\n",
+        "config KEELSIGN_RUST_TARGET\n",
+        "config KEELSIGN_MIN_MAIN_STACK\n",
+        "config KEELSIGN_SIGN_IMAGE\n\tbool \"Sign the application with keelsign after imgtool\"\n\tdepends on BOOTLOADER_MCUBOOT\n",
+        "config KEELSIGN_SIGNATURE_KEY_FILE\n",
+        "config KEELSIGN_CLI\n",
+    ] {
+        assert!(kconfig.contains(symbol), "zephyr/Kconfig lacks `{symbol}`");
+    }
+    assert!(!kconfig.to_lowercase().contains("ml-dsa") && !kconfig.contains("MLDSA"));
+    let module = read("zephyr/module.yml");
+    for needle in [
+        "name: keelsign\n",
+        "  cmake: zephyr\n",
+        "  kconfig: zephyr/Kconfig\n",
+        "  sysbuild-cmake: sysbuild\n",
+        "  sysbuild-kconfig: sysbuild/Kconfig\n",
+    ] {
+        assert!(
+            module.contains(needle),
+            "zephyr/module.yml lacks `{needle}`"
+        );
+    }
+}
+
+/// D3: west.yml pins Zephyr v4.4.2 by commit (which pins MCUboot v2.4.0), imports only
+/// the modules the sample needs, and expects the repository at `keelsign`.
+#[test]
+fn west_manifest_pins_zephyr_v4_4_2() {
+    let west = read("west.yml");
+    assert!(
+        west.contains(&format!("revision: {}", repo_checks::ZEPHYR_PIN)),
+        "west.yml must pin Zephyr {}",
+        repo_checks::ZEPHYR_PIN
+    );
+    assert!(west.contains("      # v4.4.2\n"));
+    assert!(west.contains("  self:\n    path: keelsign\n"));
+    let allowlist: Vec<&str> = west
+        .split("name-allowlist:\n")
+        .nth(1)
+        .expect("name-allowlist")
+        .lines()
+        .take_while(|l| l.trim_start().starts_with("- "))
+        .map(|l| l.trim().trim_start_matches("- "))
+        .collect();
+    assert_eq!(
+        allowlist,
+        [
+            "cmsis",
+            "cmsis_6",
+            "hal_nordic",
+            "mbedtls",
+            "tf-psa-crypto",
+            "mcuboot"
+        ]
+    );
+    assert!(west.contains(repo_checks::MCUBOOT_PIN));
+}
+
+/// D12: both images of the sample use one partition table with a 64 KB boot partition:
+/// the MCUboot image's sysbuild overlay includes the application's board overlay and
+/// links MCUboot into the boot partition (a sysbuild `<image>.overlay` replaces MCUboot's
+/// own app.overlay, which does only that).
+#[test]
+fn sample_partitions_are_shared_by_both_images() {
+    let board = read("samples/keelsign_hello/boards/nrf52840dk_nrf52840.overlay");
+    for needle in [
+        "boot_partition: partition@0 {",
+        "reg = <0x00000000 0x00010000>;",
+        "slot0_partition: partition@10000 {",
+        "reg = <0x00010000 0x00074000>;",
+        "slot1_partition: partition@84000 {",
+        "reg = <0x00084000 0x00074000>;",
+    ] {
+        assert!(board.contains(needle), "board overlay lacks `{needle}`");
+    }
+    // 0x84000 + 0x74000 is the board's storage partition at 0xf8000, unchanged.
+    assert_eq!(0x84000 + 0x74000, 0xf8000);
+    let mcuboot = read("samples/keelsign_hello/sysbuild/mcuboot.overlay");
+    assert!(mcuboot.contains("#include \"../boards/nrf52840dk_nrf52840.overlay\"\n"));
+    assert!(mcuboot.contains("zephyr,code-partition = &boot_partition;"));
+    assert!(
+        !mcuboot.contains("reg = <"),
+        "the partition table lives only in the board overlay"
+    );
+    let conf = read("samples/keelsign_hello/sysbuild/mcuboot.conf");
+    assert!(conf.contains("CONFIG_MAIN_STACK_SIZE=16384\n"));
+    assert!(conf.contains("CONFIG_MCUBOOT_LOG_LEVEL_INF=y\n"));
+    let sysbuild = read("samples/keelsign_hello/sysbuild.conf");
+    for needle in [
+        "SB_CONFIG_BOOTLOADER_MCUBOOT=y\n",
+        "SB_CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y\n",
+        "SB_CONFIG_KEELSIGN=y\n",
+        "SB_CONFIG_KEELSIGN_SIGNATURE_KEY_FILE=\"keelsign-dev.pem\"\n",
+        "SB_CONFIG_KEELSIGN_POLICY_PQ_ONLY=y\n",
+    ] {
+        assert!(sysbuild.contains(needle), "sysbuild.conf lacks `{needle}`");
+    }
+    // D8: no committed signing key.
+    let ignore = read(".gitignore");
+    for needle in [
+        "samples/**/*.pem\n",
+        "*.pem.state\n",
+        "*.pem.journal\n",
+        "build*/\n",
+    ] {
+        assert!(ignore.contains(needle), ".gitignore lacks `{needle}`");
+    }
+}

@@ -1,0 +1,12 @@
+# keelsign as a Zephyr module (SHA-62, docs/mcuboot.md): the MCUboot image-check hook
+# backed by libkeelsign.a (zephyr/CMakeLists.txt, zephyr/Kconfig), the sysbuild glue that
+# turns it on for the mcuboot image and signs the application (sysbuild/), and the
+# nRF52840 sample.
+name: keelsign
+build:
+  cmake: zephyr
+  kconfig: zephyr/Kconfig
+  sysbuild-cmake: sysbuild
+  sysbuild-kconfig: sysbuild/Kconfig
+samples:
+  - samples/keelsign_hello

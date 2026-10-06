@@ -275,6 +275,34 @@ pub const MCUBOOT_PIN: &str = "6d3b3d2c38ab20c242e5b9abb04d050086383eb2";
 /// release's headers.
 pub const MCUBOOT_RC1_PIN: &str = "bcb0fe5a66c6b795817fa3280ce991bfc128af72";
 
+/// SHA-62: Zephyr v4.4.2, the west.yml pin of the MCUboot sample (it pins MCUboot v2.4.0).
+pub const ZEPHYR_PIN: &str = "dccb09599635bdff17633fa7e9dab014b91dce90";
+
+/// SHA-62: the Zephyr SDK of Zephyr v4.4.2 (`zephyr/SDK_VERSION`; arm-zephyr-eabi-gcc
+/// 14.3.0), installed by `scripts/zephyr-setup.sh`.
+pub const ZEPHYR_SDK_VERSION: &str = "1.0.1";
+
+/// SHA-62: the west release `scripts/zephyr-setup.sh` installs.
+pub const WEST_VERSION: &str = "1.5.0";
+
+/// Whether the Zephyr sample can be built here: `west` on `PATH` and
+/// `ZEPHYR_SDK_INSTALL_DIR` naming a Zephyr SDK of [`ZEPHYR_SDK_VERSION`] (the environment
+/// `scripts/zephyr-setup.sh` prints), with the repository inside a west workspace.
+pub fn west_available() -> bool {
+    let west = Command::new("west")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    let sdk = std::env::var_os("ZEPHYR_SDK_INSTALL_DIR").is_some_and(|dir| {
+        std::fs::read_to_string(Path::new(&dir).join("sdk_version"))
+            .is_ok_and(|v| v.trim() == ZEPHYR_SDK_VERSION)
+    });
+    let workspace = workspace_root()
+        .parent()
+        .is_some_and(|topdir| topdir.join(".west").is_dir());
+    west && sdk && workspace
+}
+
 /// A pinned MCUboot source tree from `scripts/fetch_mcuboot.py` (`rc1`: v2.5.0-rc1, else
 /// v2.4.0, which honours `KEELSIGN_MCUBOOT_DIR`). Clones over the network on first use;
 /// calls are serialised so two tests never clone into the same directory at once.

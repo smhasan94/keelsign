@@ -1,0 +1,105 @@
+# keelsign Zephyr module (SHA-62, docs/mcuboot.md#kconfig-reference).
+#
+# KEELSIGN* configures the MCUboot image: the boot_image_check_hook glue and
+# libkeelsign.a. KEELSIGN_SIGN_IMAGE* configures the application image: sign it with
+# keelsign after imgtool. With sysbuild, SB_CONFIG_KEELSIGN sets both (sysbuild/).
+#
+# MCUboot's own symbols (MCUBOOT, BOOT_*) exist only in the MCUboot image, and an
+# undefined symbol is an error in the application image, so nothing here depends on
+# them: zephyr/CMakeLists.txt stops the build if KEELSIGN is set outside MCUboot.
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+menuconfig KEELSIGN
+	bool "keelsign post-quantum image check in MCUboot"
+	help
+	  Verify keelsign's post-quantum signature TLVs (LMS/HSS, optionally hybrid with
+	  Ed25519) of every image MCUboot validates, through MCUboot's
+	  boot_image_check_hook (CONFIG_BOOT_IMAGE_ACCESS_HOOKS) and libkeelsign.a.
+	  MCUboot's own checks (SHA256, its classical signature, security counter) still
+	  run after keelsign accepts an image. For the MCUboot image only; needs
+	  CONFIG_BOOT_IMAGE_ACCESS_HOOKS=y and CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST=n.
+
+if KEELSIGN
+
+choice KEELSIGN_POLICY
+	prompt "keelsign verification policy"
+	default KEELSIGN_POLICY_PQ_ONLY
+
+config KEELSIGN_POLICY_PQ_ONLY
+	bool "Post-quantum only (LMS/HSS key ID + signature)"
+	help
+	  KEELSIGN_POLICY_PQ_ONLY: the image must carry a keelsign LMS/HSS signature by
+	  one of the trusted keys. Works with any MCUboot signature type, including none.
+
+config KEELSIGN_POLICY_HYBRID
+	bool "Hybrid (Ed25519 and LMS/HSS over the same digest)"
+	help
+	  KEELSIGN_POLICY_HYBRID: the image must carry both MCUboot's Ed25519 pair (KEYHASH
+	  + ED25519, imgtool) and keelsign's LMS/HSS signature, each by a trusted key. For
+	  MCUboot built with BOOT_SIGNATURE_TYPE_ED25519; builds libkeelsign.a with the
+	  ed25519 feature (about 41 KB more flash).
+
+endchoice
+
+config KEELSIGN_PUBLIC_KEY_FILE
+	string "Trusted public key file(s)"
+	help
+	  Public key files as `keelsign pubkey` writes them (SubjectPublicKeyInfo PEM or
+	  DER), separated by spaces: 1 to 8 LMS/HSS keys (key rotation) and, for the
+	  hybrid policy, 1 to 8 Ed25519 keys. Relative paths are relative to the
+	  application configuration directory. scripts/keelsign_embed_keys.py turns them
+	  into the hook's key table at build time.
+
+config KEELSIGN_LIBRARY
+	string "Prebuilt libkeelsign.a (empty: build it with cargo)"
+	help
+	  Path of a libkeelsign.a built for this CPU with
+	  `cargo build -p keelsign-ffi --profile ffi --locked --target <triple>` (plus
+	  `--features ed25519` for the hybrid policy). Empty: the build runs that cargo
+	  command in the keelsign module directory.
+
+config KEELSIGN_RUST_TARGET
+	string "Rust target triple of libkeelsign.a (empty: from the CPU)"
+	help
+	  Empty: thumbv6m-none-eabi (Cortex-M0/M0+), thumbv7m-none-eabi (M3),
+	  thumbv7em-none-eabi[hf] (M4/M7), thumbv8m.base-none-eabi (M23) or
+	  thumbv8m.main-none-eabi[hf] (M33/M55), with `hf` exactly when the image uses
+	  the hard-float ABI (CONFIG_FP_HARDABI). MCUboot builds soft-float by default.
+
+config KEELSIGN_MIN_MAIN_STACK
+	int "Smallest CONFIG_MAIN_STACK_SIZE without a build warning"
+	default 16384 if KEELSIGN_POLICY_HYBRID
+	default 12288
+	help
+	  keelsign verifies on MCUboot's main thread: about 5 KB of buffers and key tables
+	  plus about 1.5 KB for LMS/HSS (5 KB more for Ed25519) on top of MCUboot's own
+	  use. The build warns when CONFIG_MAIN_STACK_SIZE is below this value.
+
+endif # KEELSIGN
+
+config KEELSIGN_SIGN_IMAGE
+	bool "Sign the application with keelsign after imgtool"
+	depends on BOOTLOADER_MCUBOOT
+	help
+	  After imgtool writes zephyr.signed.bin, add keelsign's LMS/HSS signature with
+	  `keelsign sign`, writing zephyr.signed.keelsign.bin and .hex, which become the
+	  files `west flash` programs. Every build that relinks the application uses up one
+	  leaf of the stateful LMS/HSS key (docs/lms.md).
+
+if KEELSIGN_SIGN_IMAGE
+
+config KEELSIGN_SIGNATURE_KEY_FILE
+	string "keelsign LMS/HSS private key file"
+	help
+	  The private key made with `keelsign keygen --alg lms-sha256-m32-h10`; its .state
+	  and .journal files must sit next to it. Relative paths are relative to the
+	  application configuration directory.
+
+config KEELSIGN_CLI
+	string "keelsign CLI (empty: build it with cargo)"
+	help
+	  Path of the keelsign host CLI. Empty: `cargo build -p keelsign --release
+	  --locked` in the keelsign module directory at configure time.
+
+endif # KEELSIGN_SIGN_IMAGE

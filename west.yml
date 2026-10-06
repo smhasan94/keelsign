@@ -1,0 +1,31 @@
+# keelsign as a west manifest repository (SHA-62, docs/mcuboot.md): a workspace with
+# Zephyr v4.4.2 and only the modules the nRF52840 sample needs, including MCUboot v2.4.0
+# (6d3b3d2c38ab20c242e5b9abb04d050086383eb2, pinned by Zephyr's own west.yml).
+#
+#   mkdir keelsign-ws && cd keelsign-ws
+#   git clone https://github.com/smhasan94/keelsign
+#   keelsign/scripts/zephyr-setup.sh
+#
+# The repository must be checked out as `keelsign` directly inside the workspace
+# directory (`self: path`); keelsign itself is the Zephyr module (zephyr/module.yml).
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      # v4.4.2
+      revision: dccb09599635bdff17633fa7e9dab014b91dce90
+      import:
+        name-allowlist:
+          - cmsis
+          - cmsis_6
+          - hal_nordic
+          - mbedtls
+          - tf-psa-crypto
+          - mcuboot
+
+  self:
+    path: keelsign
