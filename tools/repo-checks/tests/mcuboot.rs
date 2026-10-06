@@ -358,10 +358,21 @@ fn hook_harness_good_pq_image_returns_regular_never_success() {
     let mcuboot = mcuboot_checkout(false);
     let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join("mcuboot-hooktest/fih");
     fs::create_dir_all(&scratch).expect("create fih dir");
-    for profile in ["MCUBOOT_FIH_PROFILE_LOW", "MCUBOOT_FIH_PROFILE_MEDIUM"] {
+    // MEDIUM enables FIH_ENABLE_DOUBLE_VARS, which makes `fih_ret` `volatile int`: every
+    // function returning it (MCUboot's own headers and the hook) then trips GCC's
+    // -Wignored-qualifiers under -Wextra. clang does not warn, and MCUboot's Zephyr build
+    // does not use -Wextra.
+    for (profile, extra) in [
+        ("MCUBOOT_FIH_PROFILE_LOW", &[][..]),
+        (
+            "MCUBOOT_FIH_PROFILE_MEDIUM",
+            &["-Wno-ignored-qualifiers"][..],
+        ),
+    ] {
         run_ok(
             c_compiler()
                 .args(["-std=c99", "-Wall", "-Wextra", "-Werror", "-c"])
+                .args(extra)
                 .arg(format!("-D{profile}"))
                 .args(glue_args(&mcuboot))
                 .arg(workspace_root().join("mcuboot/keelsign_mcuboot_hooks.c"))
