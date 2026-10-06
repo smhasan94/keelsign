@@ -126,10 +126,6 @@ fn run_bytes(
     verify(&mut reader, keys, policy, &mut tlv_buf, &mut chunk)
 }
 
-fn ml_dsa_on() -> bool {
-    keelsign_verify::mldsa::is_enabled()
-}
-
 /// The valid ML-DSA images, the parameter set and the policy that needs the PQ half only
 /// (or both halves for the hybrid image).
 #[cfg(feature = "ml-dsa")]
@@ -369,10 +365,13 @@ const NEGATIVES: [(&str, Algorithm, Error); 15] = [
     ),
 ];
 
-#[test]
-fn tp2_negatives_return_their_own_variant() {
+/// Run every TP2 negative under `PqOnly` and assert the verdict `want(algorithm,
+/// verdict_with_ml_dsa)`; also check each entry's manifest algorithm and that every class
+/// of mutation is present. Returns the `derived_from` base image of each negative.
+fn assert_negatives(want: fn(Algorithm, Error) -> Error) -> Vec<String> {
     let manifest = manifest();
     let outputs = object(&manifest, "outputs");
+    let mut bases = Vec::new();
     for (name, alg, on) in NEGATIVES {
         let entry = object(&outputs, name);
         assert_eq!(
@@ -380,25 +379,14 @@ fn tp2_negatives_return_their_own_variant() {
             Some(alg),
             "{name}"
         );
-        // Without the feature, the image rules and the key lookup still come first; every
-        // other failure is the dispatcher's UnsupportedAlgorithm.
-        let want = match on {
-            Error::Image(_) | Error::KeyNotTrusted => on,
-            _ if !ml_dsa_on() => Error::UnsupportedAlgorithm(alg),
-            _ => on,
-        };
         assert_eq!(
             run(name, Policy::PqOnly).map(|_| ()),
-            Err(want),
-            "{name} (ml-dsa feature {})",
-            ml_dsa_on()
+            Err(want(alg, on)),
+            "{name}"
         );
-        // The base image (same keys) verifies, so the mutation alone is the cause.
-        let base = field(&entry, "derived_from").unwrap();
-        if ml_dsa_on() {
-            assert!(run(&base, Policy::PqOnly).is_ok(), "{name}: base {base}");
-        }
+        bases.push(field(&entry, "derived_from").unwrap());
     }
+    assert_eq!(bases.len(), 15);
     // Each class is present: body, protected TLV, unprotected TLV, other image.
     for needle in ["bad-body", "bad-protected", "bad-sig", "foreign-sig"] {
         assert!(
@@ -406,6 +394,29 @@ fn tp2_negatives_return_their_own_variant() {
             "{needle}"
         );
     }
+    bases
+}
+
+/// With `ml-dsa`: each negative returns its own variant, and its base image (same keys)
+/// verifies, so the mutation alone is the cause.
+#[cfg(feature = "ml-dsa")]
+#[test]
+fn tp2_negatives_return_their_own_variant() {
+    for base in assert_negatives(|_, on| on) {
+        assert!(run(&base, Policy::PqOnly).is_ok(), "base {base}");
+    }
+}
+
+/// Without `ml-dsa`: the image rules and the key lookup still come first (their verdicts
+/// are unchanged); every other negative is the dispatcher's `UnsupportedAlgorithm` of
+/// its parameter set (the manifest's `policy_without_ml_dsa`).
+#[cfg(not(feature = "ml-dsa"))]
+#[test]
+fn tp2_negatives_without_ml_dsa_are_unsupported_algorithm_after_image_rules_and_key_lookup() {
+    assert_negatives(|alg, on| match on {
+        Error::Image(_) | Error::KeyNotTrusted => on,
+        _ => Error::UnsupportedAlgorithm(alg),
+    });
 }
 
 #[cfg(feature = "ml-dsa")]
