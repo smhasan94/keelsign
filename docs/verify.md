@@ -47,7 +47,8 @@ header is ignored, but text after the PEM footer is refused as a corrupt key fil
 The `AlgorithmIdentifier` parameters must be absent for all four. A file is refused
 with exit 5 if it is not a PEM or DER `SubjectPublicKeyInfo`, names another OID (the
 message lists the four above), has parameters, has a key of the wrong length (for
-HSS/LMS: not 52 or 60 bytes, or an unknown LMS typecode), or is a private key
+HSS/LMS: not 52 or 60 bytes, or an unknown LMS typecode), holds an Ed25519 key that is
+not a point on the curve, or is a private key
 (`PRIVATE KEY` or `ENCRYPTED PRIVATE KEY`; `verify` never reads private keys). Giving the
 same key twice, or more than 8 keys of a kind, is a usage error (exit 2). There is no
 raw or hex key input.
@@ -192,7 +193,9 @@ keelsign/src/error.rs assigns these codes, and [keys.md](keys.md#exit-codes) and
 
 How the verifier's errors map: `Parse`, `Read` and `TlvAreaTooLarge` (the image does not
 parse) are 7; `ChunkBufferEmpty` (a misuse of the verifier) is 1; every other
-`keelsign_verify::Error`, including any added later, is 9. The ticket's "signature
+`keelsign_verify::Error`, including any added later, is 9. `InvalidPublicKey` and
+`Ed25519(InvalidPublicKey)` stay 9 in that map but cannot be reached from `verify`, whose
+`--pub` keys are decoded when loaded (exit 5). The ticket's "signature
 failure" class is 9 rather than 1, because 1 already means an I/O error. Error messages
 go to standard error, start with `error:` and name the file.
 
