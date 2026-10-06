@@ -1023,6 +1023,39 @@ fn zephyr_sample_keeps_mcuboot_ecdsa_enabled() {
     );
 }
 
+/// AC3 (Ed25519 + PQ_ONLY): `KEELSIGN_POLICY_PQ_ONLY` works with MCUboot's Ed25519
+/// signature too. The full sample build with `SB_CONFIG_BOOT_SIGNATURE_TYPE_ED25519=y`
+/// links into the 64 KB boot partition, MCUboot is configured with Ed25519, the hooks and
+/// the PQ-only policy, and the application carries imgtool's Ed25519 TLV (0x24) next to
+/// keelsign's (0x4BA0, 0x4BA3); imgtool and keelsign both verify it (step
+/// `ed25519-build`).
+#[test]
+#[ignore = "needs west and the Zephyr SDK (scripts/zephyr-setup.sh); CI job `zephyr-sample`"]
+fn zephyr_sample_mcuboot_ed25519_pq_only_build_links() {
+    let out = sample_ci(&["setup-key", "ed25519-build"]);
+    assert!(out.contains("zephyr_sample_ci: ok: ed25519-build"), "{out}");
+    let root = workspace_root();
+    let mcuboot = "build-ed25519/mcuboot/zephyr/.config";
+    for line in [
+        "CONFIG_BOOT_SIGNATURE_TYPE_ED25519=y",
+        "CONFIG_KEELSIGN_POLICY_PQ_ONLY=y",
+        "CONFIG_BOOT_IMAGE_ACCESS_HOOKS=y",
+    ] {
+        assert!(config_has(mcuboot, line), "{mcuboot} lacks `{line}`");
+    }
+    assert!(
+        fs::metadata(root.join("build-ed25519/mcuboot/zephyr/zephyr.elf"))
+            .is_ok_and(|m| m.len() > 0),
+        "the Ed25519 MCUboot did not link"
+    );
+    let tlvs = unprotected_tlvs(
+        &root.join("build-ed25519/keelsign_hello/zephyr/zephyr.signed.keelsign.bin"),
+    );
+    for tlv in [0x24, 0x4BA0, 0x4BA3] {
+        assert!(tlvs.contains(&tlv), "TLV {tlv:#06x} missing: {tlvs:x?}");
+    }
+}
+
 /// AC3 (hybrid): with MCUboot's Ed25519 signature and `SB_CONFIG_KEELSIGN_POLICY_HYBRID`
 /// the sample configures, and the hook and `libkeelsign.a` with the `ed25519` feature
 /// compile for the MCUboot image. Compile-only: the hybrid MCUboot does not fit the 64 KB
@@ -1216,6 +1249,7 @@ fn doc_commands_match_scripts() {
             "build",
             "verify",
             "variants",
+            "ed25519-build",
             "hybrid-build",
             "allow-list-refused",
             "stock-build",

@@ -991,6 +991,9 @@ memory report (`scripts/mcuboot_sizes.py`, from the ELFs' load segments):
   MCUboot's `prj.conf` to 16,384 B (+6,144 B of RAM) for keelsign's about 5 KB of buffers and key tables and 1.5 KB of
   LMS/HSS ([mcuboot.md](mcuboot.md#stack)); both builds above use 16,384 B so the
   table isolates keelsign's code. Measured on-target stack and cycles are SHA-315.
+- **Ed25519 + PQ_ONLY** (MCUboot's own Ed25519 signature instead of ECDSA P-256,
+  keelsign's default policy, `ed25519-build`): the MCUboot image is 61,184 B (the
+  linker's `FLASH` use) and links into the 64 KB boot partition with 4,352 B to spare.
 - **Hybrid** (`KEELSIGN_POLICY_HYBRID` with MCUboot's own Ed25519 signature,
   `hybrid-build`): the MCUboot image needs 102,616 B and does not link into the 64 KB
   boot partition (the linker reports `FLASH` overflowed by 37,080 bytes): MCUboot's own

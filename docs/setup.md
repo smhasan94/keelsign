@@ -315,11 +315,12 @@ three-identical-runs procedure are in [on-target-tests.md](on-target-tests.md) (
   binary without running it) and `cargo build --release --locked --target <triple> --bins`.
 
 - `zephyr-sample` (SHA-62): on a fresh runner, `scripts/zephyr-setup.sh` (SDK and west
-  projects cached on the pins) then `scripts/zephyr_sample_ci.sh all`: builds MCUboot
-  with keelsign and the keelsign-signed `samples/keelsign_hello` for
-  `nrf52840dk/nrf52840`, checks the TLVs, configuration and both signatures, makes the
-  on-board variants, compiles the hybrid policy, checks that a build with MCUboot's TLV
-  allow list is refused, and prints the MCUboot size table ([mcuboot.md](mcuboot.md)).
+  projects cached on the pins) then `scripts/zephyr_sample_ci.sh all`: builds MCUboot with
+  keelsign and the keelsign-signed `samples/keelsign_hello` for `nrf52840dk/nrf52840`,
+  checks the TLVs, configuration and both signatures, makes the on-board variants, builds
+  MCUboot with Ed25519 and the PQ-only policy (it must link into the 64 KB boot
+  partition), compiles the hybrid policy, checks that a build with MCUboot's TLV allow
+  list is refused, and prints the MCUboot size table ([mcuboot.md](mcuboot.md)).
 
 `.github/workflows/miri.yml` (SHA-327) runs `keelsign-ffi`'s pointer-contract tests under
 Miri on nightly-2026-09-29, in parallel with `ci`: jobs `miri keelsign-ffi (features "")`

@@ -243,6 +243,14 @@ sysbuild options (`sysbuild/Kconfig`, in the application's `sysbuild.conf`):
   LMS/HSS signature by a trusted key. It works with any MCUboot signature type
   (`SB_CONFIG_BOOT_SIGNATURE_TYPE_*`, including none), and MCUboot keeps checking its
   own. The sample uses ECDSA P-256 + `PQ_ONLY`, so classical signing is unchanged.
+  With MCUboot's Ed25519 signature instead (`ed25519-build`), MCUboot is 61,184 B and
+  fits the sample's 64 KB boot partition
+  ([benchmarks.md](benchmarks.md#mcuboot-with-keelsign-sha-62)):
+
+  ```sh
+  west build -b nrf52840dk/nrf52840 samples/keelsign_hello --sysbuild -d build-ed25519 -- -DSB_CONFIG_BOOT_SIGNATURE_TYPE_ED25519=y
+  ```
+
 - **`KEELSIGN_POLICY_HYBRID`**: keelsign also checks MCUboot's Ed25519 pair (KEYHASH +
   ED25519, made by imgtool) over the same digest. For MCUboot built with
   `SB_CONFIG_BOOT_SIGNATURE_TYPE_ED25519`; `libkeelsign.a` gets the `ed25519` feature.
@@ -449,6 +457,6 @@ past keelsign:
 | `keelsign_verify_cb` (callback reader) | `keelsign_ffi::abi::tests::verify_cb_*`, `miri_verify_cb_unaligned_reader_struct`, `repo_checks::ffi::c_harness_verify_cb_matches_verify_on_every_fixture` | host |
 | Hook verdicts and log lines | `repo_checks::mcuboot::hook_harness_*`, `hook_glue_compiles_against_mcuboot_v2_5_0_rc1_headers` | network (MCUboot clone) |
 | Module, manifest, sample, CI job, setup script (text) | `repo_checks::mcuboot::{sysbuild_forces_allow_list_off_and_hooks_on, module_kconfig_refers_to_no_mcuboot_only_symbol, west_manifest_pins_zephyr_v4_4_2, sample_partitions_are_shared_by_both_images, ci_has_the_zephyr_sample_job, zephyr_setup_script_is_pinned_and_guarded, doc_commands_match_scripts}` | host |
-| Sample build, classical signature kept, hybrid compile, allow list refused, size table | `repo_checks::mcuboot::zephyr_*` (`cargo test -p repo-checks --locked --test mcuboot -- --ignored zephyr_`), CI job `zephyr-sample` | the workspace of [Setup](#setup) |
+| Sample build, classical signature kept, Ed25519 + PQ_ONLY build, hybrid compile, allow list refused, size table | `repo_checks::mcuboot::zephyr_*` (`cargo test -p repo-checks --locked --test mcuboot -- --ignored zephyr_`), CI job `zephyr-sample` | the workspace of [Setup](#setup) |
 | Size table format | `repo_checks::benchmarks_doc::mcuboot_delta_table_is_well_formed` | host |
 | P1-P4 | above | hardware |

@@ -13,6 +13,10 @@
 #                       imgtool's ECDSA 0x22), MCUboot's .config, and both signatures
 #   variants            tampered, wrong-key and bad-ECDSA images for the on-board
 #                       checks (build/variants/, scripts/mcuboot_variants.py)
+#   ed25519-build       west build with MCUboot's Ed25519 signature and
+#                       KEELSIGN_POLICY_PQ_ONLY (build-ed25519/): links into the 64 KB
+#                       boot partition; checks MCUboot's .config, the TLVs (imgtool's
+#                       Ed25519 0x24, keelsign 0x4BA0/0x4BA3) and both signatures
 #   hybrid-build        MCUboot with Ed25519 + KEELSIGN_POLICY_HYBRID: configure, then
 #                       compile the hook and libkeelsign.a (ed25519) (build-hybrid/;
 #                       compile-only: it does not fit the 64 KB boot partition)
@@ -116,6 +120,32 @@ step_variants() {
   pass "variants: tampered and wrong-key images rejected by keelsign verify; bad-ECDSA image passes keelsign, fails imgtool"
 }
 
+step_ed25519_build() {
+  # doc: ed25519-build
+  west build -b nrf52840dk/nrf52840 samples/keelsign_hello --sysbuild -d build-ed25519 -- -DSB_CONFIG_BOOT_SIGNATURE_TYPE_ED25519=y
+  # end doc
+  local app=build-ed25519/keelsign_hello/zephyr mcuboot=build-ed25519/mcuboot/zephyr
+  for f in "$mcuboot/zephyr.hex" "$app/zephyr.signed.keelsign.bin" "$app/zephyr.signed.keelsign.hex"; do
+    [ -s "$f" ] || fail "$f was not built"
+  done
+  has_line "$mcuboot/.config" "CONFIG_KEELSIGN=y"
+  has_line "$mcuboot/.config" "CONFIG_KEELSIGN_POLICY_PQ_ONLY=y"
+  has_line "$mcuboot/.config" "CONFIG_BOOT_SIGNATURE_TYPE_ED25519=y"
+  has_line "$mcuboot/.config" "CONFIG_BOOT_IMAGE_ACCESS_HOOKS=y"
+  has_line "$mcuboot/.config" "# CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST is not set"
+  local tlvs
+  tlvs="$(target/release/keelsign inspect --json "$app/zephyr.signed.keelsign.bin" |
+    python3 -c 'import json, sys; print(" ".join("%#06x" % t["type"] for t in json.load(sys.stdin)["unprotected"]["tlvs"]))')"
+  for tlv in 0x0024 0x4ba0 0x4ba3; do
+    case " $tlvs " in *" $tlv "*) ;; *) fail "the Ed25519 build's zephyr.signed.keelsign.bin has no TLV $tlv (has: $tlvs)" ;; esac
+  done
+  imgtool verify --key ../bootloader/mcuboot/root-ed25519.pem "$app/zephyr.signed.keelsign.bin" >/dev/null ||
+    fail "imgtool did not verify the Ed25519 signature"
+  target/release/keelsign verify --pub build-ed25519/keelsign.pub.pem "$app/zephyr.signed.keelsign.bin" >/dev/null ||
+    fail "keelsign did not verify the Ed25519 build's image"
+  pass "ed25519-build: MCUboot with Ed25519 + keelsign PQ_ONLY links into the 64 KB boot partition (TLVs $tlvs)"
+}
+
 step_hybrid_build() {
   # doc: hybrid-build
   west build -b nrf52840dk/nrf52840 samples/keelsign_hello --sysbuild -d build-hybrid --cmake-only -- -DSB_CONFIG_BOOT_SIGNATURE_TYPE_ED25519=y -DSB_CONFIG_KEELSIGN_POLICY_HYBRID=y
@@ -168,7 +198,7 @@ step_sizes() {
 }
 for arg in "$@"; do
   case "$arg" in
-    all) set -- setup-key build variants hybrid-build allow-list-refused stock-build sizes ;;
+    all) set -- setup-key build variants ed25519-build hybrid-build allow-list-refused stock-build sizes ;;
   esac
 done
 for step in "$@"; do
@@ -176,6 +206,7 @@ for step in "$@"; do
     setup-key) step_setup_key ;;
     build) step_build ;;
     variants) step_variants ;;
+    ed25519-build) step_ed25519_build ;;
     hybrid-build) step_hybrid_build ;;
     allow-list-refused) step_allow_list_refused ;;
     stock-build) step_stock_build ;;
