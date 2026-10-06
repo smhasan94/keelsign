@@ -1029,7 +1029,7 @@ fn zephyr_sample_keeps_mcuboot_ecdsa_enabled() {
 /// boot partition (docs/benchmarks.md#mcuboot-with-keelsign-sha-62).
 #[test]
 #[ignore = "needs west and the Zephyr SDK (scripts/zephyr-setup.sh); CI job `zephyr-sample`"]
-fn zephyr_sample_hybrid_ed25519_build_links() {
+fn zephyr_sample_hybrid_ed25519_build_compiles() {
     let out = sample_ci(&["setup-key", "hybrid-build"]);
     assert!(out.contains("zephyr_sample_ci: ok: hybrid-build"), "{out}");
     assert!(config_has(
