@@ -2,7 +2,7 @@
 //! pattern, run the code under test, then find the lowest word it overwrote.
 //!
 //! Measurement only. This crate holds the only `unsafe` outside `keelsign-ffi`
-//! (CLAUDE.md): the [`arm`] module, compiled only for Arm targets. It must never be a
+//! (CLAUDE.md): the `arm` module, compiled only for Arm targets. It must never be a
 //! dependency of a shipped crate.
 //!
 //! The stack layout assumed is flip-link's: the stack grows down from just below
@@ -13,7 +13,7 @@
 /// The word painted into unused stack.
 pub const PATTERN: u32 = 0x5AC3_A53C;
 
-/// The deepest stack use seen by [`high_water`].
+/// The deepest stack use seen by `high_water`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Watermark {
     /// Bytes between the reference stack pointer and the lowest overwritten word.
