@@ -298,7 +298,8 @@ three-identical-runs procedure are in [on-target-tests.md](on-target-tests.md) (
   feature states (none, `ml-dsa`, `ed25519`, `ed25519,ml-dsa`). Since SHA-303 also
   `cargo doc --workspace --no-deps --exclude keelsign-ffi` plus `cargo doc -p keelsign-ffi`,
   both with `RUSTDOCFLAGS=-D warnings`. Since SHA-62 also the MCUboot hook harness
-  (`--test mcuboot -- --ignored hook_harness`, network: it clones MCUboot v2.4.0).
+  and its v2.5.0-rc1 compile check (`--test mcuboot -- --ignored hook_`, network: it
+  clones MCUboot v2.4.0 and v2.5.0-rc1).
 - `verify-cross`: `keelsign-verify`, (SHA-55) `keelsign-embassy` with its board module,
   and (SHA-60) `keelsign-ffi`'s `libkeelsign.a` with the `staticlib_sizes.py --check`
   symbol rules, for both targets with every feature state.

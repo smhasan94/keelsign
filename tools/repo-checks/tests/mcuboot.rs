@@ -4,7 +4,8 @@
 //! The harness tests are ignored: they need the pinned MCUboot checkout, cloned over the
 //! network by `scripts/fetch_mcuboot.py` or taken from `KEELSIGN_MCUBOOT_DIR` (for example
 //! the west workspace's `bootloader/mcuboot`). CI step `MCUboot hook harness (network)`:
-//! `cargo test -p repo-checks --locked --test mcuboot -- --ignored hook_harness`.
+//! `cargo test -p repo-checks --locked --test mcuboot -- --ignored hook_` (the harness
+//! tests and `hook_glue_compiles_against_mcuboot_v2_5_0_rc1_headers`).
 
 use repo_checks::{cargo_in, mcuboot_checkout, run_ok, workspace_root};
 use std::fs;
@@ -568,9 +569,10 @@ fn hook_harness_without_swap_offset_reads_both_slots_from_offset_0() {
 }
 
 /// Forward compatibility: the glue builds against MCUboot v2.5.0-rc1's headers (same
-/// `boot_image_check_hook` prototype) and behaves the same there.
+/// `boot_image_check_hook` prototype, same `boot_get_state_secondary_offset`) and
+/// behaves the same there, with and without swap using offset.
 #[test]
-#[ignore = "needs the MCUboot v2.5.0-rc1 checkout (network)"]
+#[ignore = "needs the MCUboot v2.5.0-rc1 checkout (network); CI step `MCUboot hook harness (network)`"]
 fn hook_glue_compiles_against_mcuboot_v2_5_0_rc1_headers() {
     let image = "keelsign-lms-m32-h5.bin";
     let harness = Harness::new("rc1", "pq_only", &[raw_lms_key(image)], &[], "", true);
@@ -578,18 +580,49 @@ fn hook_glue_compiles_against_mcuboot_v2_5_0_rc1_headers() {
     assert_eq!((verdict.as_str(), status), ("REGULAR", 0));
     let (_, verdict, status) = harness.run(&image_path("keelsign-hss2-m32-h5h5.bin"), &[]);
     assert_eq!((verdict.as_str(), status), ("FAILURE", 15));
+    let swap_offset = Harness::with_defines(
+        "rc1-swap-offset",
+        "pq_only",
+        &[raw_lms_key(image)],
+        &[],
+        "",
+        true,
+        &["-DMCUBOOT_SWAP_USING_OFFSET=1"],
+    );
+    let (_, verdict, status) = swap_offset.run(
+        &image_path(image),
+        &["--slot", "1", "--slot-offset", "0x1000"],
+    );
+    assert_eq!((verdict.as_str(), status), ("REGULAR", 0));
 }
 
-/// The CI `ci` job runs the hook harness tests (network step).
+/// The CI `ci` job runs every `hook_` test (network step): the harness tests and the
+/// v2.5.0-rc1 compile check, whose names all start with `hook_`.
 #[test]
 fn ci_runs_the_mcuboot_hook_harness() {
     let ci = read(".github/workflows/ci.yml");
     let job = repo_checks::ci_job(&ci, "ci");
-    for needle in [
-        "name: MCUboot hook harness (network)",
-        "cargo test -p repo-checks --locked --test mcuboot -- --ignored hook_harness",
+    let command = "cargo test -p repo-checks --locked --test mcuboot -- --ignored hook_";
+    let step = job
+        .lines()
+        .find(|l| l.trim_start().starts_with("run: ") && l.contains("--test mcuboot"))
+        .expect("ci job must run the mcuboot repo-checks");
+    assert_eq!(
+        step.trim_start().strip_prefix("run: "),
+        Some(command),
+        "ci job must run `{command}` (the filter must reach the rc1 compile check)"
+    );
+    assert!(job.contains("name: MCUboot hook harness (network)"));
+    let source = read("tools/repo-checks/tests/mcuboot.rs");
+    for name in [
+        "hook_harness_tampered_image_logs_keelsign_and_fails",
+        "hook_harness_swap_offset_secondary_image_at_sector_offset_returns_regular",
+        "hook_glue_compiles_against_mcuboot_v2_5_0_rc1_headers",
     ] {
-        assert!(job.contains(needle), "ci job must have `{needle}`");
+        assert!(
+            source.contains(&format!("fn {name}()")) && name.starts_with("hook_"),
+            "{name} must exist and match the CI filter `hook_`"
+        );
     }
 }
 

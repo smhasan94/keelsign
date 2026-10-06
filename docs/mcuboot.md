@@ -356,7 +356,8 @@ the glue twice, with and without `MCUBOOT_SWAP_USING_OFFSET`; in the first build
 cargo test -p repo-checks --locked --test mcuboot -- --ignored hook_
 ```
 
-CI runs the `hook_harness` tests in the `ci` job (step `MCUboot hook harness (network)`).
+CI runs the same `hook_` tests (the harness and the v2.5.0-rc1 compile) in the `ci` job
+(step `MCUboot hook harness (network)`).
 The MCUboot simulator run with the hook is SHA-328.
 
 ## Other MCUboot ports
