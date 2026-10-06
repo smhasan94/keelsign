@@ -62,8 +62,9 @@
 //!     (`image_validate.c:286`), so there protected TLVs are bounded only by `tlv_end`; the
 //!     unprotected info header is skipped only when a TLV ends exactly at `prot_end`
 //!     (`tlv.c:133-142`). At v2.4.0 (`6d3b3d2`, the version keelsign targets)
-//!     `bootutil_tlv_iter_next` (`tlv.c:107-158`) has no per-section bound at all. Such an
-//!     image can be accepted by MCUboot.
+//!     `bootutil_tlv_iter_next` (`tlv.c:107-158`) reads `tlv.it_len` unchecked and bounds
+//!     no TLV against `prot_end` or `tlv_end` (it only ends a protected walk once `tlv_off`
+//!     reaches `prot_end`, `:135-138`). Such an image can be accepted by MCUboot.
 //! - A post-quantum signature TLV (`0x4BA1..=0x4BA3`) longer than
 //!   [`MAX_PQ_SIGNATURE_LEN`] is [`ParseError::PqSignatureTooLong`], in either area.
 //! - Bytes after the unprotected TLV area (a padded slot's trailer) are allowed;

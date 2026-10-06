@@ -481,6 +481,25 @@ fn checklist_rows_all_ticked_and_cite_sources() {
     assert!(!checklist.contains("- [ ]"));
 }
 
+/// The MCUboot labels SHA-329 corrected that `text` still carries: main-branch commit
+/// `a8ffd2c` called v2.5.0-rc1 or pinned by its full SHA, or named without the qualifier
+/// "after v2.4.0" within the 40 characters that follow it. A later commit cited as
+/// post-v2.4.0, or another project's 2.5.0, is not stale.
+fn stale_mcuboot_labels(text: &str) -> Vec<String> {
+    let mut stale: Vec<String> = ["2.5.0-rc1", "a8ffd2c312910cc648219bcb29e04260f7857492"]
+        .into_iter()
+        .filter(|label| text.contains(label))
+        .map(|label| format!("`{label}`"))
+        .collect();
+    for (at, _) in text.match_indices("a8ffd2c") {
+        let context: String = text[at..].chars().take(40).collect();
+        if !context.contains("after v2.4.0") {
+            stale.push(format!("unqualified `a8ffd2c`: {context}"));
+        }
+    }
+    stale
+}
+
 /// SHA-329: the doc, and every other file that cites MCUboot by commit, names MCUboot
 /// v2.4.0 (`6d3b3d2`) as the version it cites, and none mislabels main-branch commit
 /// `a8ffd2c` as v2.5.0-rc1.
@@ -510,15 +529,14 @@ fn mcuboot_citations_name_v2_4_0() {
         )),
         "the References entry for {full} must link its tree: {entry}"
     );
-    for stale in ["a8ffd2c", "2.5.0"] {
-        assert!(
-            !doc.contains(stale),
-            "docs/image-format.md must not mention `{stale}`"
-        );
-    }
-    // The other files that cite MCUboot by commit. Only keelsign-verify/src/image.rs may
-    // still name `a8ffd2c`: for the TLV-iterator hardening MCUboot main gained after
-    // v2.4.0, and only labelled as such.
+    let stale = stale_mcuboot_labels(&doc);
+    assert!(
+        stale.is_empty(),
+        "docs/image-format.md carries stale MCUboot labels: {stale:?}"
+    );
+    // The other files that cite MCUboot by commit. keelsign-verify/src/image.rs still
+    // names `a8ffd2c` for the TLV-iterator hardening MCUboot main gained after v2.4.0,
+    // labelled as such.
     for rel in [
         "docs/policy.md",
         "docs/benchmarks.md",
@@ -529,14 +547,11 @@ fn mcuboot_citations_name_v2_4_0() {
     ] {
         let text = read(rel);
         assert!(text.contains(short), "{rel} must cite MCUboot `{short}`");
-        assert!(!text.contains("2.5.0"), "{rel} must not mention `2.5.0`");
-        for (at, _) in text.match_indices("a8ffd2c") {
-            let context = text.get(at..at + 40).unwrap_or(&text[at..]);
-            assert!(
-                rel == "keelsign-verify/src/image.rs" && context.contains("after v2.4.0"),
-                "{rel} names `a8ffd2c` other than as MCUboot main after v2.4.0: {context}"
-            );
-        }
+        let stale = stale_mcuboot_labels(&text);
+        assert!(
+            stale.is_empty(),
+            "{rel} carries stale MCUboot labels: {stale:?}"
+        );
     }
 }
 
