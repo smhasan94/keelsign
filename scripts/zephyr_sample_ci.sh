@@ -38,6 +38,11 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 topdir="$(cd "${KEELSIGN_WORKSPACE:-$(dirname "$repo")}" && pwd -P)"
 cd "$repo"
 
+# The keelsign CLI that `setup-key` builds, in cargo's target directory (CARGO_TARGET_DIR
+# when set, relative to the repository like cargo run from here; else target/). The
+# `# doc:` blocks spell the same path out so the doc's commands work as pasted.
+keelsign="${CARGO_TARGET_DIR:-target}/release/keelsign"
+
 if ! command -v west >/dev/null 2>&1 && [ -x "$topdir/.venv/bin/west" ]; then
   export PATH="$topdir/.venv/bin:$PATH"
 fi
@@ -64,7 +69,7 @@ step_setup_key() {
   if [ ! -f samples/keelsign_hello/keelsign-dev.pem ]; then
     # doc: setup-key
     cargo build -p keelsign --release --locked
-    target/release/keelsign keygen --alg lms-sha256-m32-h10 --out samples/keelsign_hello/keelsign-dev.pem
+    "${CARGO_TARGET_DIR:-target}/release/keelsign" keygen --alg lms-sha256-m32-h10 --out samples/keelsign_hello/keelsign-dev.pem
     # end doc
   else
     cargo build -p keelsign --release --locked
@@ -87,32 +92,32 @@ step_build() {
   has_line "$mcuboot/.config" "CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y"
   has_line "$app/.config" "CONFIG_KEELSIGN_SIGN_IMAGE=y"
   local tlvs
-  tlvs="$(target/release/keelsign inspect --json "$app/zephyr.signed.keelsign.bin" |
+  tlvs="$("$keelsign" inspect --json "$app/zephyr.signed.keelsign.bin" |
     python3 -c 'import json, sys; print(" ".join("%#06x" % t["type"] for t in json.load(sys.stdin)["unprotected"]["tlvs"]))')"
   for tlv in 0x0022 0x4ba0 0x4ba3; do
     case " $tlvs " in *" $tlv "*) ;; *) fail "zephyr.signed.keelsign.bin has no TLV $tlv (has: $tlvs)" ;; esac
   done
   # doc: verify
   imgtool verify --key ../bootloader/mcuboot/root-ec-p256.pem build/keelsign_hello/zephyr/zephyr.signed.keelsign.bin
-  target/release/keelsign verify --pub build/keelsign.pub.pem build/keelsign_hello/zephyr/zephyr.signed.keelsign.bin
+  "${CARGO_TARGET_DIR:-target}/release/keelsign" verify --pub build/keelsign.pub.pem build/keelsign_hello/zephyr/zephyr.signed.keelsign.bin
   # end doc
   pass "build: MCUboot with keelsign, application signed by imgtool (ECDSA P-256) and keelsign (TLVs $tlvs)"
 }
 
 step_variants() {
   # doc: variants
-  python3 scripts/mcuboot_variants.py --keelsign target/release/keelsign build
+  python3 scripts/mcuboot_variants.py --keelsign "${CARGO_TARGET_DIR:-target}/release/keelsign" build
   # end doc
   local out
-  if out="$(target/release/keelsign verify --pub build/keelsign.pub.pem build/variants/tampered.bin 2>&1)"; then
+  if out="$("$keelsign" verify --pub build/keelsign.pub.pem build/variants/tampered.bin 2>&1)"; then
     fail "the tampered image verified"
   fi
   case "$out" in *"image digest does not match"*) ;; *) fail "tampered image: unexpected error: $out" ;; esac
-  if out="$(target/release/keelsign verify --pub build/keelsign.pub.pem build/variants/wrong-key.bin 2>&1)"; then
+  if out="$("$keelsign" verify --pub build/keelsign.pub.pem build/variants/wrong-key.bin 2>&1)"; then
     fail "the wrong-key image verified"
   fi
   case "$out" in *"key ID is not in the trusted key set"*) ;; *) fail "wrong-key image: unexpected error: $out" ;; esac
-  target/release/keelsign verify --pub build/keelsign.pub.pem build/variants/bad-ecdsa.bin >/dev/null ||
+  "$keelsign" verify --pub build/keelsign.pub.pem build/variants/bad-ecdsa.bin >/dev/null ||
     fail "keelsign rejected the bad-ECDSA image (its signature does not cover the ECDSA TLV)"
   if imgtool verify --key ../bootloader/mcuboot/root-ec-p256.pem build/variants/bad-ecdsa.bin >/dev/null 2>&1; then
     fail "imgtool verified the bad-ECDSA image"
@@ -134,14 +139,14 @@ step_ed25519_build() {
   has_line "$mcuboot/.config" "CONFIG_BOOT_IMAGE_ACCESS_HOOKS=y"
   has_line "$mcuboot/.config" "# CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST is not set"
   local tlvs
-  tlvs="$(target/release/keelsign inspect --json "$app/zephyr.signed.keelsign.bin" |
+  tlvs="$("$keelsign" inspect --json "$app/zephyr.signed.keelsign.bin" |
     python3 -c 'import json, sys; print(" ".join("%#06x" % t["type"] for t in json.load(sys.stdin)["unprotected"]["tlvs"]))')"
   for tlv in 0x0024 0x4ba0 0x4ba3; do
     case " $tlvs " in *" $tlv "*) ;; *) fail "the Ed25519 build's zephyr.signed.keelsign.bin has no TLV $tlv (has: $tlvs)" ;; esac
   done
   imgtool verify --key ../bootloader/mcuboot/root-ed25519.pem "$app/zephyr.signed.keelsign.bin" >/dev/null ||
     fail "imgtool did not verify the Ed25519 signature"
-  target/release/keelsign verify --pub build-ed25519/keelsign.pub.pem "$app/zephyr.signed.keelsign.bin" >/dev/null ||
+  "$keelsign" verify --pub build-ed25519/keelsign.pub.pem "$app/zephyr.signed.keelsign.bin" >/dev/null ||
     fail "keelsign did not verify the Ed25519 build's image"
   pass "ed25519-build: MCUboot with Ed25519 + keelsign PQ_ONLY links into the 64 KB boot partition (TLVs $tlvs)"
 }
@@ -162,12 +167,12 @@ step_hybrid_build() {
 }
 
 step_allow_list_refused() {
-  local log=target/allow-list-refused.log rc
+  local log="${CARGO_TARGET_DIR:-target}/allow-list-refused.log" rc
   set +e
   (
     # doc: allow-list-refused
-    target/release/keelsign pubkey --key samples/keelsign_hello/keelsign-dev.pem --out target/keelsign-dev.pub.pem --force
-    west build -b nrf52840dk/nrf52840 ../bootloader/mcuboot/boot/zephyr -d build-allow-list -p always --cmake-only -- -DCONFIG_KEELSIGN=y -DCONFIG_BOOT_IMAGE_ACCESS_HOOKS=y -DCONFIG_KEELSIGN_PUBLIC_KEY_FILE=\"$PWD/target/keelsign-dev.pub.pem\"
+    "${CARGO_TARGET_DIR:-target}/release/keelsign" pubkey --key samples/keelsign_hello/keelsign-dev.pem --out samples/keelsign_hello/keelsign-dev.pub.pem --force
+    west build -b nrf52840dk/nrf52840 ../bootloader/mcuboot/boot/zephyr -d build-allow-list -p always --cmake-only -- -DCONFIG_KEELSIGN=y -DCONFIG_BOOT_IMAGE_ACCESS_HOOKS=y -DCONFIG_KEELSIGN_PUBLIC_KEY_FILE=\"$PWD/samples/keelsign_hello/keelsign-dev.pub.pem\"
     # end doc
   ) >"$log" 2>&1
   rc=$?

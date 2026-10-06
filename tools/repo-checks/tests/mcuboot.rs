@@ -848,6 +848,21 @@ fn sample_ci(steps: &[&str]) -> String {
     stdout
 }
 
+/// Cargo's target directory as `scripts/zephyr_sample_ci.sh` sees it: `CARGO_TARGET_DIR`
+/// (relative to the repository, where the script runs cargo) or `target/`.
+fn cargo_target_dir() -> PathBuf {
+    let root = workspace_root();
+    match std::env::var_os("CARGO_TARGET_DIR") {
+        Some(dir) if !dir.is_empty() => root.join(dir),
+        _ => root.join("target"),
+    }
+}
+
+/// The keelsign CLI the script's `setup-key` step builds.
+fn keelsign_cli() -> PathBuf {
+    cargo_target_dir().join("release/keelsign")
+}
+
 /// `setup-key build`, once per test binary.
 fn sample_built() {
     static BUILT: OnceLock<()> = OnceLock::new();
@@ -860,7 +875,7 @@ fn sample_built() {
 /// python3's json module).
 fn unprotected_tlvs(image: &Path) -> Vec<u64> {
     let json = run_ok(
-        Command::new(workspace_root().join("target/release/keelsign"))
+        Command::new(keelsign_cli())
             .args(["inspect", "--json"])
             .arg(image),
     );
@@ -1016,7 +1031,7 @@ fn zephyr_sample_keeps_mcuboot_ecdsa_enabled() {
     );
     assert!(out.contains("Image was correctly validated"), "{out}");
     run_ok(
-        Command::new(root.join("target/release/keelsign"))
+        Command::new(keelsign_cli())
             .args(["verify", "--pub"])
             .arg(root.join("build/keelsign.pub.pem"))
             .arg(&image),
@@ -1084,7 +1099,8 @@ fn zephyr_build_with_allow_list_enabled_is_refused() {
         out.contains("zephyr_sample_ci: ok: allow-list-refused"),
         "{out}"
     );
-    let log = read("target/allow-list-refused.log");
+    let path = cargo_target_dir().join("allow-list-refused.log");
+    let log = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let log = log.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(log.contains(
         "keelsign: CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST=y rejects keelsign TLVs 0x4BA0-0x4BA3 (image_validate.c allowed_unprot_tlvs); set it to n"

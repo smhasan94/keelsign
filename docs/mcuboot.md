@@ -142,8 +142,11 @@ covers it, its `.state` and its `.journal`):
 
 ```sh
 cargo build -p keelsign --release --locked
-target/release/keelsign keygen --alg lms-sha256-m32-h10 --out samples/keelsign_hello/keelsign-dev.pem
+"${CARGO_TARGET_DIR:-target}/release/keelsign" keygen --alg lms-sha256-m32-h10 --out samples/keelsign_hello/keelsign-dev.pem
 ```
+
+`${CARGO_TARGET_DIR:-target}` is cargo's target directory: `target/` unless you set
+`CARGO_TARGET_DIR` (the later commands use the same path).
 
 Every build that relinks the application signs it again and uses up one leaf; read
 [lms.md](lms.md#rules-for-handling-a-key) before using a key for real firmware. For a
@@ -177,7 +180,7 @@ set `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` to your own key for anything but develop
 
 ```sh
 imgtool verify --key ../bootloader/mcuboot/root-ec-p256.pem build/keelsign_hello/zephyr/zephyr.signed.keelsign.bin
-target/release/keelsign verify --pub build/keelsign.pub.pem build/keelsign_hello/zephyr/zephyr.signed.keelsign.bin
+"${CARGO_TARGET_DIR:-target}/release/keelsign" verify --pub build/keelsign.pub.pem build/keelsign_hello/zephyr/zephyr.signed.keelsign.bin
 ```
 
 imgtool prints `Image was correctly validated`; keelsign prints `verified:` and the
@@ -186,7 +189,7 @@ key ID.
 ### Bad images for the on-board checks (`variants`)
 
 ```sh
-python3 scripts/mcuboot_variants.py --keelsign target/release/keelsign build
+python3 scripts/mcuboot_variants.py --keelsign "${CARGO_TARGET_DIR:-target}/release/keelsign" build
 ```
 
 writes, from the build above, `build/variants/tampered.{bin,hex}` (one body byte
@@ -282,8 +285,8 @@ fork, so keelsign needs `CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST=n`: sysbuild sets it 
 configure time (`allow-list-refused`, MCUboot built on its own):
 
 ```sh
-target/release/keelsign pubkey --key samples/keelsign_hello/keelsign-dev.pem --out target/keelsign-dev.pub.pem --force
-west build -b nrf52840dk/nrf52840 ../bootloader/mcuboot/boot/zephyr -d build-allow-list -p always --cmake-only -- -DCONFIG_KEELSIGN=y -DCONFIG_BOOT_IMAGE_ACCESS_HOOKS=y -DCONFIG_KEELSIGN_PUBLIC_KEY_FILE=\"$PWD/target/keelsign-dev.pub.pem\"
+"${CARGO_TARGET_DIR:-target}/release/keelsign" pubkey --key samples/keelsign_hello/keelsign-dev.pem --out samples/keelsign_hello/keelsign-dev.pub.pem --force
+west build -b nrf52840dk/nrf52840 ../bootloader/mcuboot/boot/zephyr -d build-allow-list -p always --cmake-only -- -DCONFIG_KEELSIGN=y -DCONFIG_BOOT_IMAGE_ACCESS_HOOKS=y -DCONFIG_KEELSIGN_PUBLIC_KEY_FILE=\"$PWD/samples/keelsign_hello/keelsign-dev.pub.pem\"
 ```
 
 fails with `keelsign: CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST=y rejects keelsign TLVs
