@@ -481,8 +481,9 @@ fn checklist_rows_all_ticked_and_cite_sources() {
     assert!(!checklist.contains("- [ ]"));
 }
 
-/// SHA-329: the doc names MCUboot v2.4.0 (`6d3b3d2`) as the version it cites, and no longer
-/// mislabels main-branch commit `a8ffd2c` as v2.5.0-rc1.
+/// SHA-329: the doc, and every other file that cites MCUboot by commit, names MCUboot
+/// v2.4.0 (`6d3b3d2`) as the version it cites, and none mislabels main-branch commit
+/// `a8ffd2c` as v2.5.0-rc1.
 #[test]
 fn mcuboot_citations_name_v2_4_0() {
     let (short, full) = MCUBOOT_V2_4_0;
@@ -514,6 +515,28 @@ fn mcuboot_citations_name_v2_4_0() {
             !doc.contains(stale),
             "docs/image-format.md must not mention `{stale}`"
         );
+    }
+    // The other files that cite MCUboot by commit. Only keelsign-verify/src/image.rs may
+    // still name `a8ffd2c`: for the TLV-iterator hardening MCUboot main gained after
+    // v2.4.0, and only labelled as such.
+    for rel in [
+        "docs/policy.md",
+        "docs/benchmarks.md",
+        "keelsign-verify/src/image.rs",
+        "keelsign-verify/src/digest.rs",
+        "keelsign-verify/src/ed25519.rs",
+        "scripts/gen_image_fixtures.py",
+    ] {
+        let text = read(rel);
+        assert!(text.contains(short), "{rel} must cite MCUboot `{short}`");
+        assert!(!text.contains("2.5.0"), "{rel} must not mention `2.5.0`");
+        for (at, _) in text.match_indices("a8ffd2c") {
+            let context = text.get(at..at + 40).unwrap_or(&text[at..]);
+            assert!(
+                rel == "keelsign-verify/src/image.rs" && context.contains("after v2.4.0"),
+                "{rel} names `a8ffd2c` other than as MCUboot main after v2.4.0: {context}"
+            );
+        }
     }
 }
 

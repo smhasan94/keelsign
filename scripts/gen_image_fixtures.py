@@ -159,7 +159,7 @@ IMAGE_HEADER_SIZE = 32
 TLV_INFO_MAGIC = 0x6907
 TLV_PROT_INFO_MAGIC = 0x6908
 
-# MCUboot TLV types (boot/bootutil/include/bootutil/image.h:99-121 @ a8ffd2c).
+# MCUboot TLV types (boot/bootutil/include/bootutil/image.h:99-121 @ 6d3b3d2).
 TLV_KEYHASH = 0x01
 TLV_SHA256 = 0x10
 TLV_RSA2048_PSS = 0x20

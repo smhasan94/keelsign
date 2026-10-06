@@ -144,7 +144,7 @@ build is running.
 ## Image rules
 
 These rules hold under every policy (`Error::Image(ImageError::…)`). MCUboot sources are
-cited at commit `a8ffd2c`.
+cited at commit `6d3b3d2` (MCUboot v2.4.0).
 
 - **Flags.** `IMAGE_F_ENCRYPTED_AES128` / `IMAGE_F_ENCRYPTED_AES256` is `Encrypted` and
   any `IMAGE_F_COMPRESSED_*` flag is `Compressed` (MCUboot's `IS_ENCRYPTED` /
