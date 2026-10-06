@@ -25,9 +25,12 @@ const REQUIRED_HEADINGS: [&str; 14] = [
     "## References",
 ];
 
+/// MCUboot v2.4.0 (the commit Zephyr v4.4.2 pins), as (short, full) SHA (SHA-329).
+const MCUBOOT_V2_4_0: (&str, &str) = ("6d3b3d2", "6d3b3d2c38ab20c242e5b9abb04d050086383eb2");
+
 /// Commits the checklist may cite: MCUboot, nrfconnect/sdk-mcuboot, nrfconnect/sdk-nrf.
 const PINNED_COMMITS: [(&str, &str); 3] = [
-    ("a8ffd2c", "a8ffd2c312910cc648219bcb29e04260f7857492"),
+    MCUBOOT_V2_4_0,
     ("2b21b8b", "2b21b8b1bd3e93b0538dd50768dab71b8836ac25"),
     ("8270993", "8270993e2405c973d083a8d04713bd5b9b38fc09"),
 ];
@@ -476,6 +479,80 @@ fn checklist_rows_all_ticked_and_cite_sources() {
         );
     }
     assert!(!checklist.contains("- [ ]"));
+}
+
+/// The MCUboot labels SHA-329 corrected that `text` still carries: main-branch commit
+/// `a8ffd2c` called v2.5.0-rc1 or pinned by its full SHA, or named without the qualifier
+/// "after v2.4.0" within the 40 characters that follow it. A later commit cited as
+/// post-v2.4.0, or another project's 2.5.0, is not stale.
+fn stale_mcuboot_labels(text: &str) -> Vec<String> {
+    let mut stale: Vec<String> = ["2.5.0-rc1", "a8ffd2c312910cc648219bcb29e04260f7857492"]
+        .into_iter()
+        .filter(|label| text.contains(label))
+        .map(|label| format!("`{label}`"))
+        .collect();
+    for (at, _) in text.match_indices("a8ffd2c") {
+        let context: String = text[at..].chars().take(40).collect();
+        if !context.contains("after v2.4.0") {
+            stale.push(format!("unqualified `a8ffd2c`: {context}"));
+        }
+    }
+    stale
+}
+
+/// SHA-329: the doc, and every other file that cites MCUboot by commit, names MCUboot
+/// v2.4.0 (`6d3b3d2`) as the version it cites, and none mislabels main-branch commit
+/// `a8ffd2c` as v2.5.0-rc1.
+#[test]
+fn mcuboot_citations_name_v2_4_0() {
+    let (short, full) = MCUBOOT_V2_4_0;
+    let doc = doc();
+    let intro = &doc[..doc
+        .find("\n## TLV table\n")
+        .expect("`## TLV table` heading")];
+    assert!(
+        intro.contains(&format!("`{short}`")) && intro.contains("v2.4.0"),
+        "the introduction must cite MCUboot `{short}` as v2.4.0"
+    );
+    let references = section(&doc, "## References");
+    let entry = references
+        .split("\n- ")
+        .find(|item| item.contains(full))
+        .unwrap_or_else(|| panic!("## References has no entry for {full}"));
+    assert!(
+        entry.contains("v2.4.0"),
+        "the References entry for {full} must name v2.4.0: {entry}"
+    );
+    assert!(
+        entry.contains(&format!(
+            "<https://github.com/mcu-tools/mcuboot/tree/{full}>"
+        )),
+        "the References entry for {full} must link its tree: {entry}"
+    );
+    let stale = stale_mcuboot_labels(&doc);
+    assert!(
+        stale.is_empty(),
+        "docs/image-format.md carries stale MCUboot labels: {stale:?}"
+    );
+    // The other files that cite MCUboot by commit. keelsign-verify/src/image.rs still
+    // names `a8ffd2c` for the TLV-iterator hardening MCUboot main gained after v2.4.0,
+    // labelled as such.
+    for rel in [
+        "docs/policy.md",
+        "docs/benchmarks.md",
+        "keelsign-verify/src/image.rs",
+        "keelsign-verify/src/digest.rs",
+        "keelsign-verify/src/ed25519.rs",
+        "scripts/gen_image_fixtures.py",
+    ] {
+        let text = read(rel);
+        assert!(text.contains(short), "{rel} must cite MCUboot `{short}`");
+        let stale = stale_mcuboot_labels(&text);
+        assert!(
+            stale.is_empty(),
+            "{rel} carries stale MCUboot labels: {stale:?}"
+        );
+    }
 }
 
 // ---- Sample images ----------------------------------------------------------------------

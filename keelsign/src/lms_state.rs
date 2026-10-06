@@ -354,7 +354,7 @@ impl StateFile {
         Self::parse(&path, &text, key)
     }
 
-    /// Replace the state file `path` whole (see [`write_atomically`]).
+    /// Replace the state file `path` whole (see `write_atomically`).
     pub fn replace(&self, path: &Path) -> Result<(), Error> {
         write_atomically(path, self.to_json().as_bytes(), false)
     }
