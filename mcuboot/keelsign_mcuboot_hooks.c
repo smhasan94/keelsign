@@ -14,6 +14,14 @@
  *     returns FIH_FAILURE (fail closed).
  * It never returns FIH_SUCCESS, which would skip MCUboot's own validation.
  *
+ * Swap using offset (MCUBOOT_SWAP_USING_OFFSET, Zephyr: CONFIG_BOOT_SWAP_USING_OFFSET,
+ * sysbuild's default MCUboot mode in Zephyr v4.4.2): the image in the secondary slot
+ * starts one sector into the area. The hook reads the slot from
+ * boot_get_state_secondary_offset(), the offset MCUboot's own bootutil_img_validate()
+ * reads it from (image_validate.c), which is 0 for every other area and in every other
+ * swap mode. An offset at or past the end of the area is rejected with
+ * KEELSIGN_ERR_READ_OUT_OF_BOUNDS (fail closed).
+ *
  * MCUBOOT_IMAGE_ACCESS_HOOKS (Zephyr: CONFIG_BOOT_IMAGE_ACCESS_HOOKS=y) makes MCUboot
  * call every hook of that set, so the others are defined here too and keep MCUboot's
  * normal path. MCUBOOT_USE_CUSTOM_CRYPTO is unrelated: it swaps MCUboot's crypto
@@ -31,6 +39,7 @@
 
 #include "bootutil/boot_hooks.h"
 #include "bootutil/boot_public_hooks.h"
+#include "bootutil/bootutil.h"
 #include "bootutil/bootutil_log.h"
 #include "bootutil/fault_injection_hardening.h"
 #include "bootutil/image.h"
@@ -45,10 +54,10 @@ int32_t keelsign_mcuboot_read(void *ctx, uint32_t offset, uint8_t *buf, size_t l
 {
     const keelsign_mcuboot_slot *slot = (const keelsign_mcuboot_slot *)ctx;
 
-    if (slot == NULL || slot->fap == NULL) {
+    if (slot == NULL || slot->fap == NULL || offset > UINT32_MAX - slot->start_off) {
         return -1;
     }
-    return flash_area_read(slot->fap, offset, buf, len) == 0 ? 0 : -1;
+    return flash_area_read(slot->fap, slot->start_off + offset, buf, len) == 0 ? 0 : -1;
 }
 
 fih_ret boot_image_check_hook(int img_index, int slot)
@@ -57,9 +66,11 @@ fih_ret boot_image_check_hook(int img_index, int slot)
     keelsign_reader_t reader;
     keelsign_result_t result;
     keelsign_status_t status;
+    uint32_t size;
     int area_id;
 
     ctx.fap = NULL;
+    ctx.start_off = 0;
     area_id = flash_area_id_from_multi_image_slot(img_index, slot);
     if (area_id < 0 || flash_area_open((uint8_t)area_id, &ctx.fap) != 0 || ctx.fap == NULL) {
         BOOT_LOG_ERR("keelsign: image %d slot %d rejected: status %d (flash area)", img_index,
@@ -67,8 +78,22 @@ fih_ret boot_image_check_hook(int img_index, int slot)
         FIH_RET(FIH_FAILURE);
     }
 
+#if defined(MCUBOOT_SWAP_USING_OFFSET)
+    /* Where MCUboot itself reads this slot's image: one sector in for the secondary
+     * slot of the image being validated, else 0. The match is by flash area pointer,
+     * which flash_area_open() returns from the static flash map. */
+    ctx.start_off = boot_get_state_secondary_offset(boot_get_loader_state(), ctx.fap);
+#endif
+    size = (uint32_t)flash_area_get_size(ctx.fap);
+    if (ctx.start_off >= size) {
+        flash_area_close(ctx.fap);
+        BOOT_LOG_ERR("keelsign: image %d slot %d rejected: status %d", img_index, slot,
+                     (int)KEELSIGN_ERR_READ_OUT_OF_BOUNDS);
+        FIH_RET(FIH_FAILURE);
+    }
+
     reader.ctx = &ctx;
-    reader.len = (uint32_t)flash_area_get_size(ctx.fap);
+    reader.len = size - ctx.start_off;
     reader.read = keelsign_mcuboot_read;
     status = keelsign_verify_cb(&reader, keelsign_mcuboot_keys, keelsign_mcuboot_n_keys,
                                 keelsign_mcuboot_policy, &result);

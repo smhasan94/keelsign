@@ -47,6 +47,27 @@ The hook reads the slot, then MCUboot reads it again for its own checks: MCUboot
 two-pass model (it hashes the slot in `bootutil_img_validate()` after the header check
 read it too).
 
+### Swap modes
+
+Where the image starts in a slot depends on MCUboot's upgrade mode. With swap using
+offset (`CONFIG_BOOT_SWAP_USING_OFFSET`, sysbuild's default `SB_CONFIG_MCUBOOT_MODE` in
+Zephyr v4.4.2 and the sample's mode) an update in the secondary slot starts one sector
+into the slot (`swap_offset.c`), and MCUboot validates it from there
+(`boot_get_state_secondary_offset()`, `image_validate.c`, `bootutil_img_hash.c`). The
+hook reads the slot from the same offset: under `MCUBOOT_SWAP_USING_OFFSET` it asks
+`boot_get_state_secondary_offset(boot_get_loader_state(), fap)`, which is the sector
+offset for the secondary slot of the image being validated and 0 for the primary slot
+(MCUboot matches the area by the pointer `flash_area_open()` returns, an entry of
+Zephyr's static flash map). Serial recovery sets the same offset before it calls the hook
+(`boot_serial.c`). An offset at or past the end of the slot is a reject (`status 40`,
+`KEELSIGN_ERR_READ_OUT_OF_BOUNDS`). In every other mode (scratch, move, overwrite-only,
+direct-XIP, single slot) the image starts at offset 0 and the hook reads it there. The
+hook only runs for a slot whose header MCUboot has already read and accepted at that
+offset (`boot_check_header_valid()`, or the header magic in serial recovery); it does
+not rely on that, and an erased or foreign slot that does reach it is rejected
+(`status 30`, `KEELSIGN_ERR_PARSE_BAD_MAGIC`). The host harness checks both builds
+([Host hook harness](#host-hook-harness)).
+
 ## Pins
 
 | What | Pin |
@@ -278,7 +299,7 @@ when the application relinks, and each run uses one LMS/HSS leaf.
 
 ## Partitions
 
-MCUboot plus keelsign's LMS/HSS verifier is 48,500 B, which leaves 652 B in the board's
+MCUboot plus keelsign's LMS/HSS verifier is 48,564 B, which leaves 588 B in the board's
 default 48 KB boot partition. The sample's `boards/nrf52840dk_nrf52840.overlay` makes it
 64 KB:
 
@@ -305,7 +326,7 @@ Measured on-target stack and cycles of the C entry points are SHA-315.
 ## Sizes
 
 [benchmarks.md](benchmarks.md#mcuboot-with-keelsign-sha-62) records MCUboot's flash and
-static RAM with and without keelsign (+18,932 B flash, +0 B static RAM). The stock build
+static RAM with and without keelsign (+18,996 B flash, +0 B static RAM). The stock build
 is the same sample with keelsign off (`stock-build`):
 
 ```sh
@@ -323,7 +344,11 @@ python3 scripts/mcuboot_sizes.py build-stock/mcuboot/zephyr/zephyr.elf build/mcu
 `mcuboot/hooktest/` compiles the glue against the pinned MCUboot headers as a port would
 (its own `mcuboot_config.h`, logging, flash map and `sysflash.h`; `flash_stub.c` backs the
 slots with files) and runs `boot_image_check_hook` on the image fixtures: good, tampered,
-wrong-key, hybrid and unopenable-slot cases, and a compile against v2.5.0-rc1.
+wrong-key, hybrid and unopenable-slot cases, and a compile against v2.5.0-rc1. It builds
+the glue twice, with and without `MCUBOOT_SWAP_USING_OFFSET`; in the first build
+`--slot-offset` places the secondary-slot image one sector in and the harness's
+`boot_get_state_secondary_offset()` reports that offset, as MCUboot's loader does
+([Swap modes](#swap-modes)).
 `scripts/fetch_mcuboot.py` clones MCUboot at the pin into `target/` (or uses
 `KEELSIGN_MCUBOOT_DIR`, for example the workspace's `bootloader/mcuboot`, offline):
 

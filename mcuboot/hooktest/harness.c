@@ -1,11 +1,15 @@
 /*
  * Host harness for keelsign's MCUboot image-check hook (SHA-62, docs/mcuboot.md).
  *
- *   harness [--slot S] [--slot-size N] IMAGE
+ *   harness [--slot S] [--slot-size N] [--slot-offset O] [--unmapped] IMAGE
  *
  * Maps IMAGE into image 0's slot S (default 0) of a file-backed flash (flash_stub.c; a
- * slot of N bytes reads 0xFF past the file), calls boot_image_check_hook(0, S) the way
- * MCUboot's boot_validate_slot() does (FIH_CALL) and prints MCUboot's log lines, then
+ * slot of N bytes reads 0xFF past the file), O bytes into the slot's flash area (default
+ * 0; reads 0xFF before it). For the secondary slot, O is also what the stub
+ * boot_get_state_secondary_offset() returns, as MCUboot's loader does under swap using
+ * offset (build with -DMCUBOOT_SWAP_USING_OFFSET). Calls boot_image_check_hook(0, S)
+ * the way MCUboot's boot_validate_slot() does (FIH_CALL) and prints MCUboot's log
+ * lines, then
  *
  *   hook=<REGULAR|FAILURE|SUCCESS|OTHER> status=<n>
  *
@@ -30,7 +34,7 @@
 #include "bootutil/fault_injection_hardening.h"
 
 /* flash_stub.c */
-int hooktest_map_slot(int slot, const char *path, uint32_t slot_size);
+int hooktest_map_slot(int slot, const char *path, uint32_t slot_size, uint32_t offset);
 int hooktest_open_count(void);
 const char *hooktest_last_log(void);
 
@@ -62,7 +66,7 @@ static int logged_status(void)
 int main(int argc, char **argv)
 {
     int slot = 0, unmapped = 0, i;
-    uint32_t slot_size = 0;
+    uint32_t slot_size = 0, slot_offset = 0;
     const char *image = NULL;
     const char *verdict;
     FIH_DECLARE(fih_rc, FIH_FAILURE);
@@ -72,6 +76,8 @@ int main(int argc, char **argv)
             slot = (int)parse_number(argv[++i]);
         } else if (strcmp(argv[i], "--slot-size") == 0 && i + 1 < argc) {
             slot_size = (uint32_t)parse_number(argv[++i]);
+        } else if (strcmp(argv[i], "--slot-offset") == 0 && i + 1 < argc) {
+            slot_offset = (uint32_t)parse_number(argv[++i]);
         } else if (strcmp(argv[i], "--unmapped") == 0) {
             unmapped = 1;
         } else if (image == NULL && argv[i][0] != '-') {
@@ -82,10 +88,11 @@ int main(int argc, char **argv)
         }
     }
     if (image == NULL || slot < 0 || slot > 1) {
-        fprintf(stderr, "usage: harness [--slot 0|1] [--slot-size N] [--unmapped] IMAGE\n");
+        fprintf(stderr,
+                "usage: harness [--slot 0|1] [--slot-size N] [--slot-offset O] [--unmapped] IMAGE\n");
         return 2;
     }
-    if (!unmapped && hooktest_map_slot(slot, image, slot_size) != 0) {
+    if (!unmapped && hooktest_map_slot(slot, image, slot_size, slot_offset) != 0) {
         fprintf(stderr, "harness: cannot open %s\n", image);
         return 2;
     }

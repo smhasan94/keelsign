@@ -29,13 +29,17 @@ extern const size_t keelsign_mcuboot_n_keys;
 /* KEELSIGN_POLICY_PQ_ONLY or KEELSIGN_POLICY_HYBRID. */
 extern const keelsign_policy_t keelsign_mcuboot_policy;
 
-/* The read context of keelsign_mcuboot_read: one open MCUboot flash area. */
+/* The read context of keelsign_mcuboot_read: one open MCUboot flash area and the
+ * offset of the image in it (non-zero only for the secondary slot under
+ * MCUBOOT_SWAP_USING_OFFSET). */
 typedef struct keelsign_mcuboot_slot {
   const struct flash_area *fap;
+  uint32_t start_off;
 } keelsign_mcuboot_slot;
 
-/* keelsign_reader_t.read over flash_area_read(): ctx is a keelsign_mcuboot_slot.
- * Returns 0 when all len bytes were read, -1 otherwise. */
+/* keelsign_reader_t.read over flash_area_read(): ctx is a keelsign_mcuboot_slot, offset
+ * is relative to the image (start_off is added). Returns 0 when all len bytes were read,
+ * -1 otherwise. */
 int32_t keelsign_mcuboot_read(void *ctx, uint32_t offset, uint8_t *buf, size_t len);
 
 #ifdef __cplusplus

@@ -136,11 +136,13 @@ fn glue_args(mcuboot: &Path) -> Vec<PathBuf> {
 
 /// Compile and link the harness: the glue, the harness, the file-backed flash, MCUboot's
 /// `fault_injection_hardening.c` and `keys_c`, against `lib`, as C99 with warnings as
-/// errors and sanitizers.
-fn build_harness(mcuboot: &Path, keys_c: &Path, lib: &Path, out: &Path) {
+/// errors and sanitizers, with the extra `defines` (for example
+/// `-DMCUBOOT_SWAP_USING_OFFSET`).
+fn build_harness(mcuboot: &Path, keys_c: &Path, lib: &Path, defines: &[&str], out: &Path) {
     let root = workspace_root();
     let mut cmd = c_compiler();
     cmd.args(["-std=c99", "-Wall", "-Wextra", "-Werror", "-g"])
+        .args(defines)
         .args(glue_args(mcuboot));
     if let Some(s) = sanitizers() {
         cmd.arg(format!("-fsanitize={s}"))
@@ -177,6 +179,33 @@ impl Harness {
         features: &str,
         rc1: bool,
     ) -> Harness {
+        Harness::with_defines(name, policy, raw, files, features, rc1, &[])
+    }
+
+    /// As [`Harness::new`] for the PQ-only policy and the default library, with the glue
+    /// built as MCUboot builds it under swap using offset (`MCUBOOT_SWAP_USING_OFFSET`,
+    /// Zephyr `CONFIG_BOOT_SWAP_USING_OFFSET`, the sample's mode).
+    fn swap_offset(name: &str, raw: &[String]) -> Harness {
+        Harness::with_defines(
+            name,
+            "pq_only",
+            raw,
+            &[],
+            "",
+            false,
+            &["-DMCUBOOT_SWAP_USING_OFFSET=1"],
+        )
+    }
+
+    fn with_defines(
+        name: &str,
+        policy: &str,
+        raw: &[String],
+        files: &[PathBuf],
+        features: &str,
+        rc1: bool,
+        defines: &[&str],
+    ) -> Harness {
         let mcuboot = mcuboot_checkout(rc1);
         let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
             .join("mcuboot-hooktest")
@@ -185,7 +214,7 @@ impl Harness {
         fs::create_dir_all(&dir).expect("create harness dir");
         let keys_c = embed_keys(&dir, policy, raw, files);
         let binary = dir.join("harness");
-        build_harness(&mcuboot, &keys_c, &library(features), &binary);
+        build_harness(&mcuboot, &keys_c, &library(features), defines, &binary);
         Harness { binary }
     }
 
@@ -398,6 +427,143 @@ fn hook_harness_unopenable_slot_fails_closed() {
     assert_eq!(
         logs,
         ["ERR keelsign: image 0 slot 0 rejected: status 42 (flash area)"]
+    );
+}
+
+/// B1 (swap using offset, the sample's MCUboot mode): MCUboot places the update image in
+/// the secondary slot one sector in (`swap_offset.c`) and validates it from there
+/// (`boot_get_state_secondary_offset`, `image_validate.c`). The glue built with
+/// `MCUBOOT_SWAP_USING_OFFSET` reads it from the same offset: a good image at 0x1000 in
+/// slot 1 returns `FIH_BOOT_HOOK_REGULAR` (never `FIH_SUCCESS`), and the primary slot is
+/// still read from offset 0.
+#[test]
+#[ignore = "needs the pinned MCUboot checkout (network, or KEELSIGN_MCUBOOT_DIR); CI step `MCUboot hook harness (network)`"]
+fn hook_harness_swap_offset_secondary_image_at_sector_offset_returns_regular() {
+    let image = "keelsign-lms-m32-h5.bin";
+    let harness = Harness::swap_offset("swap-offset-good", &[raw_lms_key(image)]);
+    let (logs, verdict, status) = harness.run(
+        &image_path(image),
+        &[
+            "--slot",
+            "1",
+            "--slot-offset",
+            "0x1000",
+            "--slot-size",
+            "0x76000",
+        ],
+    );
+    assert_eq!((verdict.as_str(), status), ("REGULAR", 0), "logs: {logs:?}");
+    assert_eq!(
+        logs,
+        ["INF keelsign: image 0 slot 1 verified (pq key 0, ed25519 key 4294967295)"]
+    );
+    let (logs, verdict, status) = harness.run(&image_path(image), &["--slot-size", "0x76000"]);
+    assert_eq!((verdict.as_str(), status), ("REGULAR", 0), "logs: {logs:?}");
+    assert_eq!(
+        logs,
+        ["INF keelsign: image 0 slot 0 verified (pq key 0, ed25519 key 4294967295)"]
+    );
+}
+
+/// B1: under swap using offset a tampered image (one body byte flipped) at 0x1000 in slot
+/// 1 is rejected with a keelsign line and status 70 (`KEELSIGN_ERR_IMAGE_DIGEST_MISMATCH`),
+/// so the image is verified where it is, not skipped.
+#[test]
+#[ignore = "needs the pinned MCUboot checkout (network, or KEELSIGN_MCUBOOT_DIR); CI step `MCUboot hook harness (network)`"]
+fn hook_harness_swap_offset_tampered_image_at_sector_offset_fails() {
+    let image = "keelsign-hybrid-bad-body.bin";
+    let harness = Harness::swap_offset("swap-offset-tampered", &[raw_lms_key(image)]);
+    let (logs, verdict, status) = harness.run(
+        &image_path(image),
+        &[
+            "--slot",
+            "1",
+            "--slot-offset",
+            "0x1000",
+            "--slot-size",
+            "0x76000",
+        ],
+    );
+    assert_eq!(
+        (verdict.as_str(), status),
+        ("FAILURE", 70),
+        "logs: {logs:?}"
+    );
+    assert_eq!(logs, ["ERR keelsign: image 0 slot 1 rejected: status 70"]);
+}
+
+/// B1 (fail closed): a secondary-slot offset at or past the end of the flash area (here an
+/// empty slot of one 0x1000 sector whose image would start at 0x1000) is rejected with a
+/// keelsign line and status 40 (`KEELSIGN_ERR_READ_OUT_OF_BOUNDS`), without reading.
+#[test]
+#[ignore = "needs the pinned MCUboot checkout (network, or KEELSIGN_MCUBOOT_DIR); CI step `MCUboot hook harness (network)`"]
+fn hook_harness_swap_offset_at_area_end_fails_closed() {
+    let harness =
+        Harness::swap_offset("swap-offset-end", &[raw_lms_key("keelsign-lms-m32-h5.bin")]);
+    let empty =
+        Path::new(env!("CARGO_TARGET_TMPDIR")).join("mcuboot-hooktest/swap-offset-end/empty.bin");
+    fs::write(&empty, b"").expect("write empty slot");
+    let (logs, verdict, status) = harness.run(
+        &empty,
+        &[
+            "--slot",
+            "1",
+            "--slot-offset",
+            "0x1000",
+            "--slot-size",
+            "0x1000",
+        ],
+    );
+    assert_eq!(
+        (verdict.as_str(), status),
+        ("FAILURE", 40),
+        "logs: {logs:?}"
+    );
+    assert_eq!(logs, ["ERR keelsign: image 0 slot 1 rejected: status 40"]);
+}
+
+/// B1: without `MCUBOOT_SWAP_USING_OFFSET` (scratch, move, overwrite-only) both slots are
+/// read from offset 0, as before: a good image at offset 0 passes in either slot, and the
+/// glue does not apply an offset it was not built for (an image at 0x1000 in slot 1 has no
+/// header at 0: status 30, `KEELSIGN_ERR_PARSE_BAD_MAGIC`).
+#[test]
+#[ignore = "needs the pinned MCUboot checkout (network, or KEELSIGN_MCUBOOT_DIR); CI step `MCUboot hook harness (network)`"]
+fn hook_harness_without_swap_offset_reads_both_slots_from_offset_0() {
+    let image = "keelsign-lms-m32-h5.bin";
+    let harness = Harness::new(
+        "no-swap-offset",
+        "pq_only",
+        &[raw_lms_key(image)],
+        &[],
+        "",
+        false,
+    );
+    for slot in ["0", "1"] {
+        let (logs, verdict, status) = harness.run(
+            &image_path(image),
+            &["--slot", slot, "--slot-size", "0x76000"],
+        );
+        assert_eq!(
+            (verdict.as_str(), status),
+            ("REGULAR", 0),
+            "slot {slot}: {logs:?}"
+        );
+    }
+    let (logs, verdict, status) = harness.run(
+        &image_path(image),
+        &[
+            "--slot",
+            "1",
+            "--slot-offset",
+            "0x1000",
+            "--slot-size",
+            "0x76000",
+        ],
+    );
+    assert_eq!(
+        (verdict.as_str(), status),
+        ("FAILURE", 30),
+        "logs: {logs:?}"
     );
 }
 
