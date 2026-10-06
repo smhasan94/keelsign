@@ -1197,9 +1197,17 @@ fn zephyr_setup_script_is_pinned_and_guarded() {
         // ... which is when every project's HEAD is its manifest revision (resolved locally).
         &"west list -f '{name} {revision} {abspath}'".to_owned(),
         &"rev-parse --verify --quiet \"$rev^{commit}\"".to_owned(),
+        // The Python guard, in step with docs/mcuboot.md#setup (checked below).
+        &"sys.exit(sys.version_info < (3, 12))".to_owned(),
     ] {
         assert!(setup.contains(needle.as_str()), "scripts/zephyr-setup.sh lacks `{needle}`");
     }
+    let doc = read("docs/mcuboot.md");
+    let flat = doc.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        flat.contains("python3 3.12 or newer"),
+        "docs/mcuboot.md must say python3 3.12 or newer, as the script's guard"
+    );
     assert!(
         !setup.contains("setup.sh -c") && !setup.contains("sudo "),
         "nothing outside the workspace"
@@ -1211,8 +1219,10 @@ fn zephyr_setup_script_is_pinned_and_guarded() {
 /// The lines of every ```sh block of `markdown` (indented blocks too), each line trimmed.
 /// The per-shell lines of docs/mcuboot.md#setup, pasted in `keelsign-ws` where the setup
 /// commands leave the reader, point at what `scripts/zephyr-setup.sh` installs (its
-/// `.zephyr-sdk-<version>` and `.venv` in the workspace) and end in the repository, and
-/// the script prints the same three lines with absolute paths.
+/// `.zephyr-sdk-<version>` and `.venv` in the workspace) and end in the repository. For a
+/// default install the script prints the same three lines with absolute paths; reusing an
+/// SDK (`ZEPHYR_SDK_INSTALL_DIR`) it names that SDK, and reusing a `west` on `PATH` it
+/// prints no `PATH` line, which the doc says.
 #[test]
 fn doc_shell_exports_match_setup_script_layout() {
     let doc = read("docs/mcuboot.md");
@@ -1233,13 +1243,21 @@ fn doc_shell_exports_match_setup_script_layout() {
         "sdk=\"${ZEPHYR_SDK_INSTALL_DIR:-$topdir/.zephyr-sdk-$SDK_VERSION}\"",
         "venv=\"$topdir/.venv\"",
         "echo \"  export ZEPHYR_SDK_INSTALL_DIR=\\\"$sdk\\\" ZEPHYR_TOOLCHAIN_VARIANT=zephyr\"",
-        "echo \"  export PATH=\\\"$venv/bin:\\$PATH\\\"\"",
+        "if [ \"$manage_venv\" = 1 ]; then\n  echo \"  export PATH=\\\"$venv/bin:\\$PATH\\\"\"",
         "echo \"  cd \\\"$repo\\\"\"",
     ] {
         assert!(
             setup.contains(needle),
             "scripts/zephyr-setup.sh lacks `{needle}`"
         );
+    }
+    let flat = doc.split_whitespace().collect::<Vec<_>>().join(" ");
+    for needle in [
+        "For a default install the script ends by printing these lines with absolute paths.",
+        "The script's `export ZEPHYR_SDK_INSTALL_DIR=...` line then names that SDK",
+        "the script prints no `export PATH=...` line",
+    ] {
+        assert!(flat.contains(needle), "docs/mcuboot.md must say `{needle}`");
     }
 }
 

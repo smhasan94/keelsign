@@ -152,7 +152,7 @@ fi
   die "bootloader/mcuboot is not at $MCUBOOT_REV"
 
 if [ "$manage_venv" = 1 ]; then
-  step "installing Zephyr and MCUboot Python requirements, imgtool $IMGTOOL_VERSION"
+  step "checking Zephyr and MCUboot Python requirements and imgtool $IMGTOOL_VERSION (pip installs what is missing)"
   "$venv/bin/python" -m pip install --quiet --disable-pip-version-check \
     -r "$topdir/zephyr/scripts/requirements-base.txt" \
     "imgtool==$IMGTOOL_VERSION" \

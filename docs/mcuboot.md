@@ -38,7 +38,9 @@ keelsign uses the second. `mcuboot/keelsign_mcuboot_hooks.c` (MIT OR Apache-2.0)
   4294967295)` at INF and returns `FIH_BOOT_HOOK_REGULAR`;
 - on any error logs `keelsign: image 0 slot 0 rejected: status N` at ERR (N is a
   `keelsign_status_t`, [ffi.md](ffi.md#status-codes)) and returns `FIH_FAILURE`; a flash
-  area it cannot open or read is a reject too, with the same line (`status 42`);
+  area it cannot open or read is a reject too, with the same line (`status 42`), and so
+  is a swap-offset start at or past the end of the area (`status 40`,
+  [Swap modes](#swap-modes));
 - never returns `FIH_SUCCESS`, which would skip MCUboot's own checks;
 - defines the rest of the `MCUBOOT_IMAGE_ACCESS_HOOKS` set (MCUboot calls all of them)
   with MCUboot's normal behaviour.
@@ -105,9 +107,8 @@ commit). Rust needs the soft-float Cortex-M4 target:
 rustup target add thumbv7em-none-eabi
 ```
 
-Then, in each shell, from `keelsign-ws` (where the commands above leave you; the script
-prints the same lines with absolute paths, and `scripts/zephyr_sample_ci.sh` sets the
-variables itself):
+Then, in each shell, from `keelsign-ws` (where the commands above leave you;
+`scripts/zephyr_sample_ci.sh` sets the variables itself):
 
 ```sh
 export ZEPHYR_SDK_INSTALL_DIR="$PWD/.zephyr-sdk-1.0.1" ZEPHYR_TOOLCHAIN_VARIANT=zephyr
@@ -115,9 +116,16 @@ export PATH="$PWD/.venv/bin:$PATH"
 cd keelsign
 ```
 
-With an existing Zephyr SDK 1.0.1 (with `arm-zephyr-eabi`), set `ZEPHYR_SDK_INSTALL_DIR`
-before running the script and it is used instead of a download; with `west` already on
-`PATH`, no venv is made (your Python then needs Zephyr's requirements and imgtool 2.4.0).
+For a default install the script ends by printing these lines with absolute paths.
+It can also reuse what you have, and then prints different lines:
+
+- With an existing Zephyr SDK 1.0.1 (with `arm-zephyr-eabi`), set
+  `ZEPHYR_SDK_INSTALL_DIR` before running the script and it is used instead of a
+  download. The script's `export ZEPHYR_SDK_INSTALL_DIR=...` line then names that SDK:
+  use it in place of the first line above.
+- With `west` already on `PATH` (and no `.venv` in the workspace), no venv is made and
+  the script prints no `export PATH=...` line: leave out the second line above. Your
+  Python then needs Zephyr's requirements and imgtool 2.4.0.
 
 ### Workspace layout
 
@@ -150,7 +158,10 @@ cargo build -p keelsign --release --locked
 ```
 
 `${CARGO_TARGET_DIR:-target}` is cargo's target directory: `target/` unless you set
-`CARGO_TARGET_DIR` (the later commands use the same path).
+`CARGO_TARGET_DIR` (the later commands use the same path). A relative
+`CARGO_TARGET_DIR` is resolved against the repository root, by
+`scripts/zephyr_sample_ci.sh` (which runs cargo there) and by the repo-checks tests, so
+set an absolute path.
 
 Every build that relinks the application signs it again and uses up one leaf; read
 [lms.md](lms.md#rules-for-handling-a-key) before using a key for real firmware. For a
