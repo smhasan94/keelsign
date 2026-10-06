@@ -3,13 +3,15 @@
  * tools/repo-checks/tests/ffi.rs; see docs/ffi.md for the manual smoke test.
  *
  *   harness verify POLICY IMAGE [ALG:KEYFILE ...]
+ *   harness verify-cb POLICY IMAGE [ALG:KEYFILE ...]
  *   harness digest IMAGE
  *   harness abuse IMAGE LMS_KEYFILE
  *
  * POLICY is classical_only, pq_only, hybrid or a number; ALG is mldsa44, mldsa65, lms,
- * ed25519 or a number. KEYFILE holds the raw public key bytes. Each command prints one
- * line starting with "status=" and exits 0 whenever the library was called; usage and
- * I/O errors exit 2.
+ * ed25519 or a number. KEYFILE holds the raw public key bytes. verify-cb is verify through
+ * keelsign_verify_cb, the image read from the open file by a callback (SHA-62). Each
+ * command prints one line starting with "status=" and exits 0 whenever the library was
+ * called; usage and I/O errors exit 2.
  *
  * SPDX-License-Identifier: MIT OR Apache-2.0
  */
@@ -79,20 +81,51 @@ static void print_hex(const uint8_t *bytes, size_t len) {
   for (i = 0; i < len; i++) printf("%02x", bytes[i]);
 }
 
-static int cmd_verify(int argc, char **argv) {
+/* The keelsign_reader_t.read of verify-cb: reads the image file at offset. Exits on a
+ * range outside the file (keelsign never asks for one). */
+typedef struct file_ctx {
+  FILE *f;
+  long size;
+  unsigned long calls;
+} file_ctx;
+
+static int32_t read_file(void *ctx, uint32_t offset, uint8_t *buf, size_t len) {
+  file_ctx *fc = (file_ctx *)ctx;
+  fc->calls++;
+  if ((unsigned long)offset + (unsigned long)len > (unsigned long)fc->size) {
+    fprintf(stderr, "harness: read %lu+%lu past the image\n", (unsigned long)offset,
+            (unsigned long)len);
+    exit(2);
+  }
+  if (fseek(fc->f, (long)offset, SEEK_SET) != 0) return -1;
+  if (fread(buf, 1, len, fc->f) != len) return -1;
+  return 0;
+}
+
+/* A read function that always fails (abuse). */
+static int32_t read_fail(void *ctx, uint32_t offset, uint8_t *buf, size_t len) {
+  (void)ctx;
+  (void)offset;
+  (void)buf;
+  (void)len;
+  return -5;
+}
+
+/* verify and verify-cb: the same keys, policy and output line. */
+static int cmd_verify(int argc, char **argv, int with_callback) {
   keelsign_key_t keys[MAX_KEYS];
   uint8_t *key_bytes[MAX_KEYS];
   keelsign_result_t out;
   keelsign_status_t status;
-  size_t image_len, n_keys = 0, i;
+  size_t image_len = 0, n_keys = 0, i;
   keelsign_policy_t policy;
-  uint8_t *image;
+  uint8_t *image = NULL;
   if (argc < 4 || argc - 4 > MAX_KEYS) {
-    fprintf(stderr, "usage: harness verify POLICY IMAGE [ALG:KEYFILE ...]\n");
+    fprintf(stderr, "usage: harness %s POLICY IMAGE [ALG:KEYFILE ...]\n", argv[1]);
     return 2;
   }
   policy = parse_policy(argv[2]);
-  image = slurp(argv[3], &image_len);
+  if (!with_callback) image = slurp(argv[3], &image_len);
   for (i = 4; i < (size_t)argc; i++) {
     char *colon = strchr(argv[i], ':');
     if (colon == NULL) {
@@ -106,7 +139,24 @@ static int cmd_verify(int argc, char **argv) {
     n_keys++;
   }
   memset(&out, 0xA5, sizeof out);
-  status = keelsign_verify(image, image_len, n_keys > 0 ? keys : NULL, n_keys, policy, &out);
+  if (with_callback) {
+    keelsign_reader_t reader;
+    file_ctx fc;
+    fc.f = fopen(argv[3], "rb");
+    fc.calls = 0;
+    if (fc.f == NULL || fseek(fc.f, 0, SEEK_END) != 0 || (fc.size = ftell(fc.f)) < 0 ||
+        (unsigned long)fc.size > 0xFFFFFFFFul) {
+      fprintf(stderr, "harness: cannot open or size %s\n", argv[3]);
+      exit(2);
+    }
+    reader.ctx = &fc;
+    reader.len = (uint32_t)fc.size;
+    reader.read = read_file;
+    status = keelsign_verify_cb(&reader, n_keys > 0 ? keys : NULL, n_keys, policy, &out);
+    fclose(fc.f);
+  } else {
+    status = keelsign_verify(image, image_len, n_keys > 0 ? keys : NULL, n_keys, policy, &out);
+  }
   printf("status=%d", (int)status);
   if (status == KEELSIGN_OK) {
     printf(" version=%u.%u.%u+%lu", (unsigned)out.major, (unsigned)out.minor,
@@ -146,11 +196,12 @@ static int cmd_digest(int argc, char **argv) {
   return 0;
 }
 
-/* NULL, zero-length and malformed arguments, each a separate call: prints the nine
+/* NULL, zero-length and malformed arguments, each a separate call: prints the thirteen
  * statuses in order. */
 static int cmd_abuse(int argc, char **argv) {
   keelsign_key_t key, many[KEELSIGN_MAX_PQ_KEYS + 1], pair[2], bad;
-  keelsign_status_t s[9];
+  keelsign_reader_t reader;
+  keelsign_status_t s[13];
   size_t image_len, key_len, i;
   uint8_t *image, *key_buf;
   if (argc != 4) {
@@ -188,8 +239,21 @@ static int cmd_abuse(int argc, char **argv) {
   bad = key;
   bad.key_len = key_len - 1;
   s[8] = keelsign_verify(image, image_len, &bad, 1, KEELSIGN_POLICY_PQ_ONLY, NULL);
+  /* keelsign_verify_cb (SHA-62). 1: NULL reader. */
+  s[9] = keelsign_verify_cb(NULL, &key, 1, KEELSIGN_POLICY_PQ_ONLY, NULL);
+  /* 1: NULL read function. */
+  reader.ctx = NULL;
+  reader.len = (uint32_t)image_len;
+  reader.read = NULL;
+  s[10] = keelsign_verify_cb(&reader, &key, 1, KEELSIGN_POLICY_PQ_ONLY, NULL);
+  /* 42: a read function that fails. */
+  reader.read = read_fail;
+  s[11] = keelsign_verify_cb(&reader, &key, 1, KEELSIGN_POLICY_PQ_ONLY, NULL);
+  /* 31: a zero-length reader (read is never called). */
+  reader.len = 0;
+  s[12] = keelsign_verify_cb(&reader, &key, 1, KEELSIGN_POLICY_PQ_ONLY, NULL);
   printf("status=");
-  for (i = 0; i < 9; i++) printf(i == 0 ? "%d" : ",%d", (int)s[i]);
+  for (i = 0; i < 13; i++) printf(i == 0 ? "%d" : ",%d", (int)s[i]);
   printf("\n");
   free(key_buf);
   free(image);
@@ -197,11 +261,13 @@ static int cmd_abuse(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-  if (argc >= 2 && strcmp(argv[1], "verify") == 0) return cmd_verify(argc, argv);
+  if (argc >= 2 && strcmp(argv[1], "verify") == 0) return cmd_verify(argc, argv, 0);
+  if (argc >= 2 && strcmp(argv[1], "verify-cb") == 0) return cmd_verify(argc, argv, 1);
   if (argc >= 2 && strcmp(argv[1], "digest") == 0) return cmd_digest(argc, argv);
   if (argc >= 2 && strcmp(argv[1], "abuse") == 0) return cmd_abuse(argc, argv);
   fprintf(stderr,
           "usage: harness verify POLICY IMAGE [ALG:KEYFILE ...]\n"
+          "       harness verify-cb POLICY IMAGE [ALG:KEYFILE ...]\n"
           "       harness digest IMAGE\n"
           "       harness abuse IMAGE LMS_KEYFILE\n");
   return 2;

@@ -19,7 +19,8 @@ the member has no `.data` or `.bss`. The triple is read from the path
 --symbols prints the member's exported, undefined and panic-related symbols.
 --strings prints the printable runs in its `.rodata*` sections.
 --check fails (exit 1) unless, for every archive:
-  * the exported functions are exactly keelsign_verify and keelsign_digest;
+  * the exported functions are exactly keelsign_verify, keelsign_verify_cb and
+    keelsign_digest;
   * no symbol is formatting code (core::fmt, Formatter, Display, Debug, LowerHex, ...);
   * every panic-related symbol is one of the libcore trap funnels PANIC_ALLOWLIST
     allows for the `--features` state given, and at most 32 bytes;
@@ -70,7 +71,7 @@ FORMATTING_MARKERS = (
     "8UpperHex",
     "9Arguments",
 )
-EXPORTS = ["keelsign_digest", "keelsign_verify"]
+EXPORTS = ["keelsign_digest", "keelsign_verify", "keelsign_verify_cb"]
 ALLOWED_STRINGS = ("keelsign-mcuboot-image-v1",)
 FORBIDDEN_IN_STRINGS = (".rs", "panicked", "attempt to")
 MIN_STRING = 8

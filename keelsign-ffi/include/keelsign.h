@@ -233,6 +233,24 @@ typedef struct keelsign_result_t {
   uint32_t ed25519_key_index;
 } keelsign_result_t;
 
+// An image that `keelsign_verify_cb` reads through a callback instead of a pointer: an
+// image slot in flash that is not memory-mapped (MCUboot's `flash_area_read`).
+//
+// keelsign calls `read` only for ranges inside `[0, len)`: the header, the TLV areas,
+// then the hashed bytes after the header in ascending `KEELSIGN_CHUNK_LEN`-byte chunks,
+// at any offset and length (no alignment), with `buf` pointing to keelsign's own stack
+// buffers. Nothing is retained after the call.
+typedef struct keelsign_reader_t {
+  // Passed unchanged to every `read` call.
+  void *ctx;
+  // Readable bytes from offset 0: the slot size (or the slot minus its trailer).
+  uint32_t len;
+  // Reads `len` bytes at image-relative `offset` into `buf` (never NULL). Returns 0
+  // when all `len` bytes were read; any other value fails the call with
+  // `KEELSIGN_ERR_READ_OTHER`.
+  int32_t (*read)(void *ctx, uint32_t offset, uint8_t *buf, size_t len);
+} keelsign_reader_t;
+
 // ML-DSA-44 (FIPS 204); a raw 1312-byte public key. Needs the `ml-dsa` feature to verify.
 #define KEELSIGN_ALG_MLDSA44 1
 
@@ -296,6 +314,41 @@ keelsign_status_t keelsign_verify(const uint8_t *image,
                                   size_t n_keys,
                                   keelsign_policy_t policy,
                                   struct keelsign_result_t *out);
+
+// Verify the MCUboot image that `reader` reads, under `policy` with the trusted `keys`:
+// `keelsign_verify` for an image that is not in addressable memory (an MCUboot slot
+// read with `flash_area_read`). Same keys, policy, result and status codes.
+//
+// `reader->read` is called only for ranges inside `[0, reader->len)`, at most
+// `KEELSIGN_TLV_BUF_LEN` bytes at a time: the header, the TLV areas, then the hashed
+// bytes after the header in ascending `KEELSIGN_CHUNK_LEN`-byte chunks. A non-zero
+// return fails the call with `KEELSIGN_ERR_READ_OTHER`.
+//
+// Arguments are checked in this order, the first failure is returned:
+// `reader` NULL, `reader->read` NULL or `keys` NULL with `n_keys > 0`
+// (`KEELSIGN_ERR_NULL_POINTER`); then as `keelsign_verify` from `policy` on.
+// `reader->len == 0` gives `KEELSIGN_ERR_PARSE_TRUNCATED` without calling `read`.
+//
+// # Safety
+//
+// - `reader` is non-NULL and points to one readable `keelsign_reader_t` (any
+//   alignment), which is copied before the first `read` call.
+// - `reader->read`, if not NULL, is a function that is safe to call with `reader->ctx`,
+//   an `offset` and `len` inside `[0, reader->len)` and a `buf` writable for `len`
+//   bytes; it writes nothing but `buf[0..len)` and the state behind `ctx` (never `out`,
+//   `keys` or any key's bytes).
+// - `keys` is NULL only if `n_keys` is 0; otherwise it points to `n_keys` consecutive
+//   `keelsign_key_t` (any alignment).
+// - Each `keys[i].key` is non-NULL and readable for `keys[i].key_len` bytes.
+// - `out` is NULL or writable for one `keelsign_result_t` (any alignment), and does
+//   not overlap `keys` or any key's bytes.
+// - None of this memory is written by anyone else during the call. Nothing is retained
+//   after the call returns.
+keelsign_status_t keelsign_verify_cb(const struct keelsign_reader_t *reader,
+                                     const struct keelsign_key_t *keys,
+                                     size_t n_keys,
+                                     keelsign_policy_t policy,
+                                     struct keelsign_result_t *out);
 
 // Compute the image digest `M` of `image[0..len)` (SHA-256 of the header, the body and
 // the protected TLV area, as both signatures cover it) and write its 32 bytes to

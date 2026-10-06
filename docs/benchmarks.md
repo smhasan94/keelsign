@@ -925,18 +925,20 @@ does not reach), measured with [stable Rust 1.91.1](#measurement-toolchains).
 
 | Target | Features | `.text` | `.rodata` | Total |
 |---|---|---|---|---|
-| `thumbv7em-none-eabihf` | (none) | 16,242 B | 390 B | 16,632 B |
-| `thumbv7em-none-eabihf` | `ed25519` | 56,258 B | 1,522 B | 57,780 B |
-| `thumbv7em-none-eabihf` | `ml-dsa` | 31,628 B | 1,824 B | 33,452 B |
-| `thumbv7em-none-eabihf` | `ed25519,ml-dsa` | 71,638 B | 2,956 B | 74,594 B |
-| `thumbv8m.main-none-eabihf` | (none) | 16,240 B | 390 B | 16,630 B |
-| `thumbv8m.main-none-eabihf` | `ed25519` | 55,618 B | 1,522 B | 57,140 B |
-| `thumbv8m.main-none-eabihf` | `ml-dsa` | 31,622 B | 1,824 B | 33,446 B |
-| `thumbv8m.main-none-eabihf` | `ed25519,ml-dsa` | 70,994 B | 2,956 B | 73,950 B |
+| `thumbv7em-none-eabihf` | (none) | 16,914 B | 390 B | 17,304 B |
+| `thumbv7em-none-eabihf` | `ed25519` | 56,886 B | 1,522 B | 58,408 B |
+| `thumbv7em-none-eabihf` | `ml-dsa` | 32,310 B | 1,824 B | 34,134 B |
+| `thumbv7em-none-eabihf` | `ed25519,ml-dsa` | 72,232 B | 2,956 B | 75,188 B |
+| `thumbv8m.main-none-eabihf` | (none) | 16,908 B | 390 B | 17,298 B |
+| `thumbv8m.main-none-eabihf` | `ed25519` | 56,218 B | 1,522 B | 57,740 B |
+| `thumbv8m.main-none-eabihf` | `ml-dsa` | 32,308 B | 1,824 B | 34,132 B |
+| `thumbv8m.main-none-eabihf` | `ed25519,ml-dsa` | 71,568 B | 2,956 B | 74,524 B |
 
-The default (LMS/HSS only) library is about 16.6 KB. The same script's `--check` (run in
-the `verify-cross` CI job) also proves the archives export only `keelsign_verify` and
-`keelsign_digest`, carry no formatting code and no panic strings
+The default (LMS/HSS only) library is about 17.3 KB (re-measured for SHA-62, which added
+`keelsign_verify_cb`: about 0.7 KB more than the two-function library). The same script's
+`--check` (run in the `verify-cross` CI job) also proves the archives export only
+`keelsign_verify`, `keelsign_verify_cb` and `keelsign_digest`, carry no formatting code
+and no panic strings
 ([ffi.md](ffi.md#nm-check)). Stack and cycles of the C entry points on the boards are a
 follow-up; the verifier figures above apply, plus the about 5 KB of buffers and key tables
 `keelsign_verify` keeps on the stack.
@@ -1001,14 +1003,14 @@ bootloader linking it gains ([C static library](#c-static-library-sha-60), `.tex
 
 | Target | Features | Total |
 |---|---|---|
-| `thumbv7em-none-eabihf` | (none) | 16,632 B |
-| `thumbv7em-none-eabihf` | `ed25519` | 57,780 B |
-| `thumbv7em-none-eabihf` | `ml-dsa` | 33,452 B |
-| `thumbv7em-none-eabihf` | `ed25519,ml-dsa` | 74,594 B |
-| `thumbv8m.main-none-eabihf` | (none) | 16,630 B |
-| `thumbv8m.main-none-eabihf` | `ed25519` | 57,140 B |
-| `thumbv8m.main-none-eabihf` | `ml-dsa` | 33,446 B |
-| `thumbv8m.main-none-eabihf` | `ed25519,ml-dsa` | 73,950 B |
+| `thumbv7em-none-eabihf` | (none) | 17,304 B |
+| `thumbv7em-none-eabihf` | `ed25519` | 58,408 B |
+| `thumbv7em-none-eabihf` | `ml-dsa` | 34,134 B |
+| `thumbv7em-none-eabihf` | `ed25519,ml-dsa` | 75,188 B |
+| `thumbv8m.main-none-eabihf` | (none) | 17,298 B |
+| `thumbv8m.main-none-eabihf` | `ed25519` | 57,740 B |
+| `thumbv8m.main-none-eabihf` | `ml-dsa` | 34,132 B |
+| `thumbv8m.main-none-eabihf` | `ed25519,ml-dsa` | 74,524 B |
 
 ## Recorded figures (SHA-275)
 
