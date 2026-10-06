@@ -72,6 +72,13 @@ jobs:
       - name: C harness (libkeelsign, ASan+UBSan)
         run: cargo test -p repo-checks --locked --test ffi
 
+      # SHA-62: keelsign's MCUboot image-check hook (mcuboot/keelsign_mcuboot_hooks.c)
+      # compiled against the pinned MCUboot v2.4.0 headers (cloned by
+      # scripts/fetch_mcuboot.py) and run on the image fixtures: good, tampered, wrong-key
+      # and hybrid images (repo_checks::mcuboot, docs/mcuboot.md#host-hook-harness).
+      - name: MCUboot hook harness (network)
+        run: cargo test -p repo-checks --locked --test mcuboot -- --ignored hook_harness
+
       # keelsign-verify alone, so no workspace member's features are unified in: both
       # features off (ClassicalOnly / Hybrid fail closed with Ed25519(NotEnabled)).
       - name: cargo test (keelsign-verify, no features)

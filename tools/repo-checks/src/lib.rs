@@ -267,6 +267,39 @@ pub const SHIPPED_CRATES: [&str; 4] = [
     "keelsign-ffi",
 ];
 
+/// SHA-62: MCUboot v2.4.0, the MCUboot that Zephyr v4.4.2 pins (west.yml); the hook glue
+/// is built and tested against it (scripts/fetch_mcuboot.py).
+pub const MCUBOOT_PIN: &str = "6d3b3d2c38ab20c242e5b9abb04d050086383eb2";
+
+/// SHA-62: MCUboot v2.5.0-rc1, compiled against only to show the glue builds with the next
+/// release's headers.
+pub const MCUBOOT_RC1_PIN: &str = "bcb0fe5a66c6b795817fa3280ce991bfc128af72";
+
+/// A pinned MCUboot source tree from `scripts/fetch_mcuboot.py` (`rc1`: v2.5.0-rc1, else
+/// v2.4.0, which honours `KEELSIGN_MCUBOOT_DIR`). Clones over the network on first use;
+/// calls are serialised so two tests never clone into the same directory at once.
+pub fn mcuboot_checkout(rc1: bool) -> PathBuf {
+    static CLONE: Mutex<()> = Mutex::new(());
+    let _guard = CLONE.lock().unwrap_or_else(PoisonError::into_inner);
+    let rev = if rc1 { "v2.5.0-rc1" } else { "v2.4.0" };
+    let out = run_ok(python_script("fetch_mcuboot.py").args(["--rev", rev]));
+    let tree = PathBuf::from(out.trim());
+    let head = run_ok(
+        Command::new("git")
+            .arg("-C")
+            .arg(&tree)
+            .args(["rev-parse", "HEAD"]),
+    );
+    let pin = if rc1 { MCUBOOT_RC1_PIN } else { MCUBOOT_PIN };
+    assert_eq!(
+        head.trim(),
+        pin,
+        "{} is not at the {rev} pin",
+        tree.display()
+    );
+    tree
+}
+
 /// Absolute path of the workspace root (two levels above this crate).
 pub fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
