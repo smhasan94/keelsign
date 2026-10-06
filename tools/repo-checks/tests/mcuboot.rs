@@ -425,10 +425,7 @@ fn hook_harness_unopenable_slot_fails_closed() {
         ("FAILURE", 42),
         "logs: {logs:?}"
     );
-    assert_eq!(
-        logs,
-        ["ERR keelsign: image 0 slot 0 rejected: status 42 (flash area)"]
-    );
+    assert_eq!(logs, ["ERR keelsign: image 0 slot 0 rejected: status 42"]);
 }
 
 /// B1 (swap using offset, the sample's MCUboot mode): MCUboot places the update image in
@@ -817,7 +814,8 @@ fn sample_partitions_are_shared_by_both_images() {
         "samples/**/*.pem\n",
         "*.pem.state\n",
         "*.pem.journal\n",
-        "build*/\n",
+        // The sample's build directories at the repository root only.
+        "\n/build*/\n",
     ] {
         assert!(ignore.contains(needle), ".gitignore lacks `{needle}`");
     }

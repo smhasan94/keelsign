@@ -73,8 +73,8 @@ fih_ret boot_image_check_hook(int img_index, int slot)
     ctx.start_off = 0;
     area_id = flash_area_id_from_multi_image_slot(img_index, slot);
     if (area_id < 0 || flash_area_open((uint8_t)area_id, &ctx.fap) != 0 || ctx.fap == NULL) {
-        BOOT_LOG_ERR("keelsign: image %d slot %d rejected: status %d (flash area)", img_index,
-                     slot, (int)KEELSIGN_ERR_READ_OTHER);
+        BOOT_LOG_ERR("keelsign: image %d slot %d rejected: status %d", img_index, slot,
+                     (int)KEELSIGN_ERR_READ_OTHER);
         FIH_RET(FIH_FAILURE);
     }
 

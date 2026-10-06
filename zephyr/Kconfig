@@ -47,9 +47,12 @@ config KEELSIGN_PUBLIC_KEY_FILE
 	help
 	  Public key files as `keelsign pubkey` writes them (SubjectPublicKeyInfo PEM or
 	  DER), separated by spaces: 1 to 8 LMS/HSS keys (key rotation) and, for the
-	  hybrid policy, 1 to 8 Ed25519 keys. Relative paths are relative to the
-	  application configuration directory. scripts/keelsign_embed_keys.py turns them
-	  into the hook's key table at build time.
+	  hybrid policy, 1 to 8 Ed25519 keys. This is an option of the MCUboot image, so
+	  relative paths resolve against the MCUboot image's configuration directory
+	  (its APPLICATION_CONFIG_DIR, MCUboot's boot/zephyr by default), not the
+	  application's; with sysbuild, SB_CONFIG_KEELSIGN sets an absolute path.
+	  scripts/keelsign_embed_keys.py turns them into the hook's key table at build
+	  time.
 
 config KEELSIGN_LIBRARY
 	string "Prebuilt libkeelsign.a (empty: build it with cargo)"

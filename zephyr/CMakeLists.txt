@@ -13,8 +13,9 @@
 set(KEELSIGN_DIR ${CMAKE_CURRENT_LIST_DIR}/..)
 cmake_path(NORMAL_PATH KEELSIGN_DIR)
 
-# A relative path of the image configuration resolved against the application
-# configuration directory.
+# A relative path of the image configuration resolved against the configuration
+# directory (APPLICATION_CONFIG_DIR) of the image being built: MCUboot's for
+# CONFIG_KEELSIGN_PUBLIC_KEY_FILE, the application's for CONFIG_KEELSIGN_SIGNATURE_KEY_FILE.
 function(keelsign_resolve_path path out)
   if(NOT IS_ABSOLUTE "${path}")
     set(path "${APPLICATION_CONFIG_DIR}/${path}")

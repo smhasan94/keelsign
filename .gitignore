@@ -1,7 +1,7 @@
 target/
 .venv-imgtool/
 # SHA-62: Zephyr sample builds and the keelsign-dev.pem signing key (never committed).
-build*/
+/build*/
 samples/**/*.pem
 *.pem.state
 *.pem.journal

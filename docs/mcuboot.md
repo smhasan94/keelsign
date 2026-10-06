@@ -38,7 +38,7 @@ keelsign uses the second. `mcuboot/keelsign_mcuboot_hooks.c` (MIT OR Apache-2.0)
   4294967295)` at INF and returns `FIH_BOOT_HOOK_REGULAR`;
 - on any error logs `keelsign: image 0 slot 0 rejected: status N` at ERR (N is a
   `keelsign_status_t`, [ffi.md](ffi.md#status-codes)) and returns `FIH_FAILURE`; a flash
-  area it cannot open or read is a reject too (`status 42`);
+  area it cannot open or read is a reject too, with the same line (`status 42`);
 - never returns `FIH_SUCCESS`, which would skip MCUboot's own checks;
 - defines the rest of the `MCUBOOT_IMAGE_ACCESS_HOOKS` set (MCUboot calls all of them)
   with MCUboot's normal behaviour.
@@ -223,7 +223,7 @@ Image options (`zephyr/Kconfig`), set by sysbuild in the sample:
 |---|---|---|
 | `CONFIG_KEELSIGN` | MCUboot | the hook, the key table and `libkeelsign.a`; needs `CONFIG_BOOT_IMAGE_ACCESS_HOOKS=y` and `CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST=n` (the build stops otherwise) |
 | `CONFIG_KEELSIGN_POLICY_PQ_ONLY` (default) / `CONFIG_KEELSIGN_POLICY_HYBRID` | MCUboot | the policy ([Policies](#policies)) |
-| `CONFIG_KEELSIGN_PUBLIC_KEY_FILE` | MCUboot | public key files (`keelsign pubkey` output, PEM or DER), separated by spaces: 1-8 LMS/HSS keys, plus 1-8 Ed25519 keys for the hybrid policy |
+| `CONFIG_KEELSIGN_PUBLIC_KEY_FILE` | MCUboot | public key files (`keelsign pubkey` output, PEM or DER), separated by spaces: 1-8 LMS/HSS keys, plus 1-8 Ed25519 keys for the hybrid policy; a relative path resolves against the MCUboot image's configuration directory |
 | `CONFIG_KEELSIGN_LIBRARY` | MCUboot | a prebuilt `libkeelsign.a`; empty: cargo builds it |
 | `CONFIG_KEELSIGN_RUST_TARGET` | MCUboot | Rust target of `libkeelsign.a`; empty: from the CPU (`thumbv6m`/`thumbv7m`/`thumbv7em`/`thumbv8m.base`/`thumbv8m.main`, `hf` only with `CONFIG_FP_HARDABI`) |
 | `CONFIG_KEELSIGN_MIN_MAIN_STACK` | MCUboot | warn below this `CONFIG_MAIN_STACK_SIZE` (12288; 16384 hybrid) |
