@@ -174,9 +174,12 @@ The halves:
 
 - **Ed25519 (classical) half**, over the unprotected area: exactly one ED25519 TLV
   (`Ed25519(Missing)`, `Ed25519(Multiple)`), at most one KEYHASH TLV
-  (`Ed25519(Multiple)`), KEYHASH immediately before ED25519 (`Ed25519(Unpaired)`;
-  MCUboot pairs them the same way, `image_validate.c:364-403`, resetting the key after
-  each signature at `:433`), a 32-byte KEYHASH (`Ed25519(InvalidKeyHash)`), a 64-byte
+  (`Ed25519(Multiple)`), KEYHASH immediately before ED25519 (`Ed25519(Unpaired)`; this
+  is stricter than MCUboot, whose KEYHASH stays armed across other TLVs until the next
+  signature, `image_validate.c:364-403`, resetting the key after each signature at
+  `:433`; see "KEYHASH adjacency" under
+  [Differences from MCUboot](#differences-from-mcuboot)), a 32-byte KEYHASH
+  (`Ed25519(InvalidKeyHash)`), a 64-byte
   signature (`Ed25519(InvalidSignatureLength)`, `image_validate.c:87-90`), a trusted key
   with that KEYHASH (`Ed25519(KeyNotTrusted)`), a public key that decodes
   (`Ed25519(InvalidPublicKey)`), and a signature over `M` that passes `verify_strict`
@@ -340,6 +343,14 @@ the bootloader's concern).
   key and lets the last result win, and skips a signature no KEYHASH precedes;
   `verify` requires exactly one KEYHASH + ED25519 pair and rejects an unpaired ED25519 TLV
   (`Ed25519(Multiple)`, `Ed25519(Unpaired)`).
+- **KEYHASH adjacency.** keelsign requires the KEYHASH TLV to be the TLV immediately
+  before the ED25519 TLV (otherwise `Ed25519(Unpaired)`). MCUboot does not: at MCUboot
+  `6d3b3d2` (v2.4.0) a KEYHASH TLV arms `key_id` (`image_validate.c:364-395`), every
+  other non-signature TLV (SHA256, SEC_CNT, vendor TLVs) leaves it armed, a signature
+  TLV with no key armed is skipped (`:401-404`), and `key_id` is reset only after a
+  signature (`:433`). So MCUboot accepts a KEYHASH separated from its signature by other
+  TLVs, and keelsign rejects that image: keelsign is strictly stricter. imgtool always
+  writes the pair adjacent, so imgtool images are unaffected.
 - **`verify_strict`.** `ed25519-dalek`'s `verify_strict` also rejects small-order keys and
   non-canonical `R`, which MCUboot's cofactorless verifier accepts. It only ever rejects
   more than MCUboot; imgtool's signatures are canonical (both sample Ed25519 images pass).

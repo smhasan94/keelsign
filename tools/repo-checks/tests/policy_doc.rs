@@ -432,3 +432,43 @@ fn image_len_row_says_not_signed() {
         "VerifiedImage::image_len rustdoc must say `{NEEDLE}`: {field_doc}"
     );
 }
+
+/// SHA-318 AC2: docs/policy.md describes keelsign's KEYHASH pairing (adjacent to the
+/// ED25519 TLV) as stricter than MCUboot's (armed until the next signature), with the
+/// `image_validate.c` cites, and no longer says MCUboot pairs them the same way.
+#[test]
+fn differences_section_says_keyhash_adjacency_is_stricter_than_mcuboot() {
+    let doc = doc();
+    let flat = doc.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        !flat.contains("pairs them the same way"),
+        "docs/policy.md must not say MCUboot pairs KEYHASH and ED25519 the same way"
+    );
+    let differences = section(&doc, "## Differences from MCUboot");
+    let bullet = differences
+        .split("\n- ")
+        .find(|b| b.starts_with("**KEYHASH adjacency.**"))
+        .expect("## Differences from MCUboot has a **KEYHASH adjacency.** bullet")
+        .replace("\n  ", " ");
+    for needle in [
+        "immediately before the ED25519 TLV",
+        "`Ed25519(Unpaired)`",
+        "`6d3b3d2`",
+        "`image_validate.c:364-395`",
+        "`:401-404`",
+        "`:433`",
+        "strictly stricter",
+        "imgtool images are unaffected",
+    ] {
+        assert!(
+            bullet.contains(needle),
+            "KEYHASH adjacency bullet must mention `{needle}`: {bullet}"
+        );
+    }
+    // The Ed25519 half points at the difference.
+    let rules = section(&doc, "## Image rules").replace("\n  ", " ");
+    assert!(
+        rules.contains("stricter than MCUboot") && rules.contains("KEYHASH adjacency"),
+        "the Ed25519 half must call KEYHASH adjacency stricter than MCUboot"
+    );
+}
