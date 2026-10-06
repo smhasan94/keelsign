@@ -383,3 +383,52 @@ fn doc_names_every_error_variant() {
     let src = read("keelsign-verify/src/policy.rs");
     assert!(src.contains("//! # Error precedence"));
 }
+
+/// SHA-318 AC1: `VerifiedImage::image_len` is not covered by the signatures, and the
+/// `VerifiedImage` table row in docs/policy.md, the struct rustdoc and the field rustdoc
+/// all say so.
+#[test]
+fn image_len_row_says_not_signed() {
+    const NEEDLE: &str = "Not covered by the signatures";
+    let doc = doc();
+    let section = section(&doc, "## VerifiedImage and anti-rollback");
+    let row = section
+        .lines()
+        .find(|l| l.starts_with("| `image_len` |"))
+        .expect("docs/policy.md: VerifiedImage table has an `image_len` row");
+    assert!(row.contains(NEEDLE), "image_len row must say `{NEEDLE}`");
+    assert!(row.contains("it_tlv_tot") && row.contains("Do not treat it as authenticated"));
+
+    let src = read("keelsign-verify/src/policy.rs");
+    let start = src
+        .find("/// An image that passed [`verify`]")
+        .expect("VerifiedImage rustdoc");
+    let item = &src[start..];
+    let item = &item[..item.find("\n}\n").expect("end of VerifiedImage")];
+    let (struct_doc, fields) = item
+        .split_once("pub struct VerifiedImage")
+        .expect("pub struct VerifiedImage");
+    // The struct doc no longer claims everything it reports is signed.
+    let struct_doc = struct_doc.replace("\n/// ", " ");
+    assert!(
+        struct_doc
+            .contains("Everything it reports except [`VerifiedImage::image_len`] was covered")
+            && struct_doc.contains("`image_len` is not covered by the signatures"),
+        "VerifiedImage rustdoc must exempt image_len"
+    );
+    // The field doc: the `///` lines directly above `pub image_len: u32,`.
+    let lines: Vec<&str> = fields.lines().map(str::trim).collect();
+    let at = lines
+        .iter()
+        .position(|l| *l == "pub image_len: u32,")
+        .expect("VerifiedImage::image_len");
+    let first = lines[..at]
+        .iter()
+        .rposition(|l| !l.starts_with("///"))
+        .map_or(0, |i| i + 1);
+    let field_doc = lines[first..at].join(" ");
+    assert!(
+        field_doc.contains(NEEDLE) && field_doc.contains("it_tlv_tot"),
+        "VerifiedImage::image_len rustdoc must say `{NEEDLE}`: {field_doc}"
+    );
+}

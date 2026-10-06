@@ -306,7 +306,7 @@ make one):
 | `version` | `ImageVersion` from the header, `major.minor.revision+build_num` |
 | `security_counter` | the protected `SEC_CNT` value, `None` without one (an unprotected one is ignored) |
 | `digest` | `M`, 32 bytes (for logging or attestation) |
-| `image_len` | header, body and both TLV areas (`Image::tlv_end`) |
+| `image_len` | header, body and both TLV areas (`Image::tlv_end`). Not covered by the signatures: it comes from the unprotected TLV info header's `it_tlv_tot`, outside `M`, so appending or removing unprotected TLVs changes it without failing verification; only the parse bounds hold. Do not treat it as authenticated (logging or parse result only) |
 | `pq_key` | the trusted PQ key that verified it, when the policy checks the PQ half |
 | `ed25519_key` | the trusted Ed25519 key that verified it, when the policy checks the Ed25519 half |
 
