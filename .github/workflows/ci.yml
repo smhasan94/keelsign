@@ -307,3 +307,48 @@ jobs:
       - name: build flash-footprint bins (ml-dsa)
         if: ${{ matrix.bench }}
         run: cargo build --release --locked --target ${{ matrix.target }} --bins --features ml-dsa --target-dir target/mldsa
+
+  # SHA-62: the keelsign_hello MCUboot sample on a fresh runner, using only the scripts
+  # docs/mcuboot.md tells a reader to run: scripts/zephyr-setup.sh (west 1.5.0 in a venv,
+  # Zephyr v4.4.2 with MCUboot v2.4.0, Zephyr SDK 1.0.1 SHA256-checked) and
+  # scripts/zephyr_sample_ci.sh all (build MCUboot + the keelsign-signed application,
+  # the tampered / wrong-key variants, the hybrid compile, the refused allow-list build,
+  # the stock build and the size table). The repository is checked out as `keelsign`
+  # inside the workspace directory, as west.yml expects. The board runs are manual
+  # (docs/mcuboot.md P1-P4).
+  zephyr-sample:
+    name: zephyr-sample
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: keelsign
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv7em-none-eabi
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: keelsign
+
+      - name: Install ninja
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+
+      # The SDK and the west projects, keyed on the pins (west.yml, zephyr-setup.sh).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .zephyr-sdk-1.0.1
+            .west
+            zephyr
+            bootloader
+            modules
+          key: zephyr-sample-${{ runner.os }}-${{ hashFiles('keelsign/west.yml', 'keelsign/scripts/zephyr-setup.sh') }}
+
+      - name: Zephyr workspace (scripts/zephyr-setup.sh)
+        run: keelsign/scripts/zephyr-setup.sh
+
+      - name: Sample build and checks (scripts/zephyr_sample_ci.sh all)
+        run: keelsign/scripts/zephyr_sample_ci.sh all

@@ -623,3 +623,314 @@ fn sample_partitions_are_shared_by_both_images() {
         assert!(ignore.contains(needle), ".gitignore lacks `{needle}`");
     }
 }
+
+// ---- Zephyr sample builds (ignored: west + Zephyr SDK, D6) -------------------------------
+
+/// Run `scripts/zephyr_sample_ci.sh` with `steps` (serialised: the steps share build
+/// directories) and return its standard output; panics with the output if it fails.
+fn sample_ci(steps: &[&str]) -> String {
+    static LOCK: Mutex<()> = Mutex::new(());
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    assert!(
+        repo_checks::west_available(),
+        "the Zephyr workspace is missing: run scripts/zephyr-setup.sh (docs/mcuboot.md#setup)"
+    );
+    let out = Command::new(workspace_root().join("scripts/zephyr_sample_ci.sh"))
+        .args(steps)
+        .output()
+        .expect("run scripts/zephyr_sample_ci.sh");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        out.status.success(),
+        "scripts/zephyr_sample_ci.sh {steps:?} failed ({}):\n{stdout}\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    stdout
+}
+
+/// `setup-key build`, once per test binary.
+fn sample_built() {
+    static BUILT: OnceLock<()> = OnceLock::new();
+    BUILT.get_or_init(|| {
+        sample_ci(&["setup-key", "build"]);
+    });
+}
+
+/// The unprotected TLV types of `image`, from `keelsign inspect --json` (parsed by
+/// python3's json module).
+fn unprotected_tlvs(image: &Path) -> Vec<u64> {
+    let json = run_ok(
+        Command::new(workspace_root().join("target/release/keelsign"))
+            .args(["inspect", "--json"])
+            .arg(image),
+    );
+    let mut python = Command::new("python3");
+    python
+        .args([
+            "-c",
+            "import json, sys; print(' '.join(str(t['type']) for t in json.load(sys.stdin)['unprotected']['tlvs']))",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped());
+    let mut child = python.spawn().expect("run python3");
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(json.as_bytes())
+            .expect("write JSON");
+    }
+    let out = child.wait_with_output().expect("python3");
+    assert!(
+        out.status.success(),
+        "python3 could not read the inspect JSON"
+    );
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .map(|t| t.parse().expect("numeric TLV type"))
+        .collect()
+}
+
+fn config_has(config: &str, line: &str) -> bool {
+    read(config).lines().any(|l| l == line)
+}
+
+/// AC1: `west build -b nrf52840dk/nrf52840 samples/keelsign_hello --sysbuild` produces
+/// MCUboot and the keelsign-signed application: MCUboot's hex, the application's
+/// `zephyr.signed.keelsign.hex`/`.bin` with keelsign's key ID (0x4BA0) and LMS/HSS
+/// signature (0x4BA3) next to imgtool's ECDSA signature (0x22), and an MCUboot image
+/// configured with the image-access hooks on and the TLV allow list off.
+#[test]
+#[ignore = "needs west and the Zephyr SDK (scripts/zephyr-setup.sh); CI job `zephyr-sample`"]
+fn zephyr_sample_builds_mcuboot_and_keelsign_signed_app() {
+    sample_built();
+    let root = workspace_root();
+    let app = root.join("build/keelsign_hello/zephyr");
+    for file in [
+        root.join("build/mcuboot/zephyr/zephyr.hex"),
+        app.join("zephyr.signed.keelsign.hex"),
+        app.join("zephyr.signed.keelsign.bin"),
+    ] {
+        assert!(
+            fs::metadata(&file).is_ok_and(|m| m.len() > 0),
+            "{} was not built",
+            file.display()
+        );
+    }
+    let tlvs = unprotected_tlvs(&app.join("zephyr.signed.keelsign.bin"));
+    for tlv in [0x22, 0x4BA0, 0x4BA3] {
+        assert!(tlvs.contains(&tlv), "TLV {tlv:#06x} missing: {tlvs:x?}");
+    }
+    let mcuboot = "build/mcuboot/zephyr/.config";
+    for line in [
+        "CONFIG_KEELSIGN=y",
+        "CONFIG_BOOT_IMAGE_ACCESS_HOOKS=y",
+        "# CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST is not set",
+        "CONFIG_MAIN_STACK_SIZE=16384",
+    ] {
+        assert!(config_has(mcuboot, line), "{mcuboot} lacks `{line}`");
+    }
+    assert!(config_has(
+        "build/keelsign_hello/zephyr/.config",
+        "CONFIG_KEELSIGN_SIGN_IMAGE=y"
+    ));
+    // The keelsign hex is exactly the keelsign bin, at slot 0 (0x10000).
+    let (base, bytes) = decode_hex(&read(
+        "build/keelsign_hello/zephyr/zephyr.signed.keelsign.hex",
+    ));
+    assert_eq!(base, 0x10000, "slot0_partition of the sample");
+    assert_eq!(
+        bytes,
+        fs::read(app.join("zephyr.signed.keelsign.bin")).expect("read bin")
+    );
+}
+
+/// The lowest address and the contiguous bytes of an Intel HEX file (data, end of file,
+/// extended segment and linear addresses; start-address records are skipped).
+fn decode_hex(text: &str) -> (u32, Vec<u8>) {
+    let mut upper = 0u32;
+    let mut data: Vec<(u32, Vec<u8>)> = Vec::new();
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let raw: Vec<u8> = (1..line.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&line[i..i + 2], 16).expect("hex digit"))
+            .collect();
+        let count = usize::from(raw[0]);
+        let offset = u32::from(u16::from_be_bytes([raw[1], raw[2]]));
+        let payload = &raw[4..4 + count];
+        assert_eq!(
+            raw.iter().fold(0u8, |a, b| a.wrapping_add(*b)),
+            0,
+            "checksum of `{line}`"
+        );
+        match raw[3] {
+            0x00 => data.push((upper + offset, payload.to_vec())),
+            0x01 => break,
+            0x02 => upper = u32::from(u16::from_be_bytes([payload[0], payload[1]])) << 4,
+            0x04 => upper = u32::from(u16::from_be_bytes([payload[0], payload[1]])) << 16,
+            // Start addresses (objcopy writes one); nothing is programmed.
+            0x03 | 0x05 => {}
+            other => panic!("unexpected record type {other:#04x}"),
+        }
+    }
+    data.sort_by_key(|(addr, _)| *addr);
+    let base = data.first().expect("data records").0;
+    let mut bytes = Vec::new();
+    for (addr, chunk) in data {
+        assert_eq!(addr - base, bytes.len() as u32, "contiguous data");
+        bytes.extend(chunk);
+    }
+    (base, bytes)
+}
+
+/// AC3: classical signing still works with keelsign enabled: MCUboot keeps its own
+/// ECDSA P-256 signature type, the keelsign-signed application still carries imgtool's
+/// ECDSA TLV (0x22) and imgtool verifies it with MCUboot's key; keelsign verifies its own
+/// signature with the exported public key.
+#[test]
+#[ignore = "needs west and the Zephyr SDK (scripts/zephyr-setup.sh); CI job `zephyr-sample`"]
+fn zephyr_sample_keeps_mcuboot_ecdsa_enabled() {
+    sample_built();
+    let root = workspace_root();
+    assert!(config_has(
+        "build/mcuboot/zephyr/.config",
+        "CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y"
+    ));
+    let image = root.join("build/keelsign_hello/zephyr/zephyr.signed.keelsign.bin");
+    assert!(unprotected_tlvs(&image).contains(&0x22));
+    let topdir = root.parent().expect("workspace").to_path_buf();
+    let imgtool = topdir.join(".venv/bin/imgtool");
+    let imgtool = if imgtool.is_file() {
+        imgtool
+    } else {
+        PathBuf::from("imgtool")
+    };
+    let out = run_ok(
+        Command::new(imgtool)
+            .arg("verify")
+            .arg("--key")
+            .arg(topdir.join("bootloader/mcuboot/root-ec-p256.pem"))
+            .arg(&image),
+    );
+    assert!(out.contains("Image was correctly validated"), "{out}");
+    run_ok(
+        Command::new(root.join("target/release/keelsign"))
+            .args(["verify", "--pub"])
+            .arg(root.join("build/keelsign.pub.pem"))
+            .arg(&image),
+    );
+}
+
+/// AC3 (hybrid): with MCUboot's Ed25519 signature and `SB_CONFIG_KEELSIGN_POLICY_HYBRID`
+/// the sample configures, and the hook and `libkeelsign.a` with the `ed25519` feature
+/// compile for the MCUboot image. Compile-only: the hybrid MCUboot does not fit the 64 KB
+/// boot partition (docs/benchmarks.md#mcuboot-with-keelsign-sha-62).
+#[test]
+#[ignore = "needs west and the Zephyr SDK (scripts/zephyr-setup.sh); CI job `zephyr-sample`"]
+fn zephyr_sample_hybrid_ed25519_build_links() {
+    let out = sample_ci(&["setup-key", "hybrid-build"]);
+    assert!(out.contains("zephyr_sample_ci: ok: hybrid-build"), "{out}");
+    assert!(config_has(
+        "build-hybrid/mcuboot/zephyr/.config",
+        "CONFIG_KEELSIGN_POLICY_HYBRID=y"
+    ));
+    let keys = read("build-hybrid/mcuboot/modules/keelsign/keelsign_mcuboot_keys.c");
+    assert!(keys.contains("KEELSIGN_ALG_ED25519") && keys.contains("KEELSIGN_POLICY_HYBRID"));
+}
+
+/// D4 (ticket comment): an MCUboot build with keelsign and MCUboot's TLV allow list on
+/// stops at configure time with keelsign's message. Sysbuild always turns the allow list
+/// off for keelsign, so the check builds MCUboot on its own with CONFIG_KEELSIGN=y.
+#[test]
+#[ignore = "needs west and the Zephyr SDK (scripts/zephyr-setup.sh); CI job `zephyr-sample`"]
+fn zephyr_build_with_allow_list_enabled_is_refused() {
+    let out = sample_ci(&["setup-key", "allow-list-refused"]);
+    assert!(
+        out.contains("zephyr_sample_ci: ok: allow-list-refused"),
+        "{out}"
+    );
+    let log = read("target/allow-list-refused.log");
+    let log = log.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(log.contains(
+        "keelsign: CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST=y rejects keelsign TLVs 0x4BA0-0x4BA3 (image_validate.c allowed_unprot_tlvs); set it to n"
+    ));
+}
+
+/// AC4: the MCUboot flash/RAM table in docs/benchmarks.md is what a fresh stock and
+/// keelsign build of the sample measure, cell for cell.
+#[test]
+#[ignore = "needs west and the Zephyr SDK (scripts/zephyr-setup.sh); CI job `zephyr-sample`"]
+fn zephyr_sample_sizes_match_recorded_table() {
+    sample_built();
+    let out = sample_ci(&["stock-build", "sizes"]);
+    let measured: Vec<&str> = out
+        .lines()
+        .skip_while(|l| !l.starts_with("| MCUboot image |"))
+        .take_while(|l| l.starts_with('|'))
+        .collect();
+    assert_eq!(measured.len(), 5, "sizes table:\n{out}");
+    let doc = read("docs/benchmarks.md");
+    let recorded: Vec<&str> = doc
+        .lines()
+        .skip_while(|l| !l.starts_with("| MCUboot image |"))
+        .take_while(|l| l.starts_with('|'))
+        .collect();
+    assert_eq!(
+        recorded, measured,
+        "docs/benchmarks.md#mcuboot-with-keelsign-sha-62 differs from a fresh build"
+    );
+}
+
+/// TP3 / D7: the `zephyr-sample` CI job builds the sample on a fresh runner with nothing
+/// but the two scripts docs/mcuboot.md tells a reader to run, with the repository checked
+/// out as `keelsign` inside the workspace and the soft-float Rust target installed.
+#[test]
+fn ci_has_the_zephyr_sample_job() {
+    let ci = read(".github/workflows/ci.yml");
+    let job = repo_checks::ci_job(&ci, "zephyr-sample");
+    for needle in [
+        "    name: zephyr-sample\n",
+        "          path: keelsign\n",
+        "          targets: thumbv7em-none-eabi\n",
+        "run: keelsign/scripts/zephyr-setup.sh\n",
+        "run: keelsign/scripts/zephyr_sample_ci.sh all\n",
+        "hashFiles('keelsign/west.yml', 'keelsign/scripts/zephyr-setup.sh')",
+    ] {
+        assert!(job.contains(needle), "zephyr-sample job lacks `{needle}`");
+    }
+    // Only the documented scripts run west.
+    assert!(!job.contains("west build") && !job.contains("west init"));
+}
+
+/// D6: the setup script pins what the docs and the repo-checks name, checks the SDK
+/// archives' SHA256, never registers anything outside the workspace and refuses a
+/// directory that is not a fresh workspace.
+#[test]
+fn zephyr_setup_script_is_pinned_and_guarded() {
+    let setup = read("scripts/zephyr-setup.sh");
+    for needle in [
+        &format!("WEST_VERSION={}\n", repo_checks::WEST_VERSION),
+        &format!("ZEPHYR_REV={}\n", repo_checks::ZEPHYR_PIN),
+        &format!("MCUBOOT_REV={}\n", repo_checks::MCUBOOT_PIN),
+        &format!("SDK_VERSION={}\n", repo_checks::ZEPHYR_SDK_VERSION),
+        &"IMGTOOL_VERSION=2.4.0\n".to_owned(),
+        &"SDK_SHA256_macos_aarch64_minimal=867063901f39528a6175a80ebc20367bd6cb440593e7e2650eda30392f1f6b65\n".to_owned(),
+        &"SDK_SHA256_macos_aarch64_arm=4008edb5d4840cd994aedd7f1309bfb63e7243729d57839ebf1cc83c1f17c886\n".to_owned(),
+        &"SDK_SHA256_linux_x86_64_minimal=ca9bc0ff66fafca1dac9d592a36d953cf16d096a9d09b1c0357f021cf9f6a7eb\n".to_owned(),
+        &"SDK_SHA256_linux_x86_64_arm=21b85981cb5a1818d9bc53d82af80f208946ec038b982ff1907287572ed3a634\n".to_owned(),
+        &"west init -l keelsign".to_owned(),
+        &"west update --narrow -o=--depth=1".to_owned(),
+        &"is inside a git work tree".to_owned(),
+        &"the workspace may hold only keelsign and what this script installs".to_owned(),
+        &"SHA256 mismatch".to_owned(),
+    ] {
+        assert!(setup.contains(needle.as_str()), "scripts/zephyr-setup.sh lacks `{needle}`");
+    }
+    assert!(
+        !setup.contains("setup.sh -c") && !setup.contains("sudo "),
+        "nothing outside the workspace"
+    );
+}

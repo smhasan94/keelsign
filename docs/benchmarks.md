@@ -959,6 +959,56 @@ python3 scripts/staticlib_sizes.py --check --features ed25519,ml-dsa target/ffi-
 
 Each command prints its table row.
 
+## MCUboot with keelsign (SHA-62)
+
+What keelsign adds to MCUboot itself: the bootloader of `samples/keelsign_hello`
+([mcuboot.md](mcuboot.md)) for `nrf52840dk/nrf52840`, built twice with
+`scripts/zephyr_sample_ci.sh`, once as the sample ships (`build`: MCUboot's image-check
+hook, the key table and `libkeelsign.a`, policy `KEELSIGN_POLICY_PQ_ONLY`) and once with
+`-DSB_CONFIG_KEELSIGN=n` (`stock-build`), everything else equal: Zephyr v4.4.2
+(`dccb09599635bdff17633fa7e9dab014b91dce90`), MCUboot v2.4.0
+(`6d3b3d2c38ab20c242e5b9abb04d050086383eb2`), Zephyr SDK 1.0.1 (arm-zephyr-eabi-gcc
+14.3.0, `CONFIG_SIZE_OPTIMIZATIONS`), MCUboot's ECDSA P-256 signature (TinyCrypt), swap
+using offset, minimal logging at INF, `CONFIG_MAIN_STACK_SIZE=16384`. `libkeelsign.a`
+is built for `thumbv7em-none-eabi` (MCUboot is soft-float) with
+[stable Rust 1.91.1](#measurement-toolchains), default features (LMS/HSS only): 17,304 B
+of `.text` + `.rodata` by `staticlib_sizes.py`. Flash and static RAM are the linker's
+memory report (`scripts/mcuboot_sizes.py`, from the ELFs' load segments):
+
+| MCUboot image | Flash | Static RAM | MAIN_STACK_SIZE | Compiler |
+|---|---|---|---|---|
+| stock | 29,568 B | 22,464 B | 16384 | GCC: (Zephyr SDK 1.0.1) 14.3.0 |
+| with keelsign | 48,500 B | 22,464 B | 16384 | GCC: (Zephyr SDK 1.0.1) 14.3.0 |
+| Δ | +18,932 B | +0 B | | |
+
+- **Flash +18,932 B**: the LMS/HSS verifier, image parser and SHA256 code of
+  `libkeelsign.a` (the linker keeps what `keelsign_verify_cb` reaches), the hook glue and
+  the 60-byte key table. The keelsign MCUboot (48,500 B) would fit the board's default
+  48 KB (49,152 B) boot partition with 652 B to spare; the sample's 64 KB partition
+  leaves room for more keys, debug logging and MCUboot updates.
+- **Static RAM +0 B**: keelsign keeps all its state on the stack. The stack itself grows:
+  the sample raises MCUboot's main stack from the `CONFIG_MAIN_STACK_SIZE=10240` of
+  MCUboot's `prj.conf` to 16,384 B (+6,144 B of RAM) for keelsign's about 5 KB of buffers and key tables and 1.5 KB of
+  LMS/HSS ([mcuboot.md](mcuboot.md#stack)); both builds above use 16,384 B so the
+  table isolates keelsign's code. Measured on-target stack and cycles are SHA-315.
+- **Hybrid** (`KEELSIGN_POLICY_HYBRID` with MCUboot's own Ed25519 signature,
+  `hybrid-build`): the MCUboot image needs 102,568 B and does not link into the 64 KB
+  boot partition (the linker reports `FLASH` overflowed by 37,032 bytes): MCUboot's own
+  Ed25519 code instead of ECDSA, plus keelsign's `ed25519` feature (58,408 B of
+  `libkeelsign.a` for `thumbv7em-none-eabi`). The sample therefore only compiles the
+  hybrid hook and library in CI; a hybrid bootloader needs a boot partition of at
+  least 104 KB.
+
+Reproduce (in the workspace of `scripts/zephyr-setup.sh`, [mcuboot.md](mcuboot.md#setup)):
+
+```sh
+scripts/zephyr_sample_ci.sh setup-key build stock-build sizes
+```
+
+The last step prints the table above. The ignored repo-check
+`repo_checks::mcuboot::zephyr_sample_sizes_match_recorded_table` runs the same steps and
+compares every cell.
+
 ## RAM/flash budget (SHA-47)
 
 What each verify path costs on the two boards, in one place. Nothing here is measured

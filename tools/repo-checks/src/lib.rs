@@ -285,22 +285,26 @@ pub const ZEPHYR_SDK_VERSION: &str = "1.0.1";
 /// SHA-62: the west release `scripts/zephyr-setup.sh` installs.
 pub const WEST_VERSION: &str = "1.5.0";
 
-/// Whether the Zephyr sample can be built here: `west` on `PATH` and
-/// `ZEPHYR_SDK_INSTALL_DIR` naming a Zephyr SDK of [`ZEPHYR_SDK_VERSION`] (the environment
-/// `scripts/zephyr-setup.sh` prints), with the repository inside a west workspace.
+/// Whether the Zephyr sample can be built here, as `scripts/zephyr_sample_ci.sh` finds
+/// the tools: the repository inside a west workspace, `west` on `PATH` or in the
+/// workspace's `.venv`, and a Zephyr SDK of [`ZEPHYR_SDK_VERSION`] in
+/// `ZEPHYR_SDK_INSTALL_DIR` or the workspace's `.zephyr-sdk-1.0.1`
+/// (`scripts/zephyr-setup.sh` makes all three).
 pub fn west_available() -> bool {
-    let west = Command::new("west")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    let sdk = std::env::var_os("ZEPHYR_SDK_INSTALL_DIR").is_some_and(|dir| {
-        std::fs::read_to_string(Path::new(&dir).join("sdk_version"))
-            .is_ok_and(|v| v.trim() == ZEPHYR_SDK_VERSION)
-    });
-    let workspace = workspace_root()
-        .parent()
-        .is_some_and(|topdir| topdir.join(".west").is_dir());
-    west && sdk && workspace
+    let Some(topdir) = workspace_root().parent().map(Path::to_path_buf) else {
+        return false;
+    };
+    let west = topdir.join(".venv/bin/west").is_file()
+        || Command::new("west")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success());
+    let sdk_dir = std::env::var_os("ZEPHYR_SDK_INSTALL_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| topdir.join(format!(".zephyr-sdk-{ZEPHYR_SDK_VERSION}")));
+    let sdk = std::fs::read_to_string(sdk_dir.join("sdk_version"))
+        .is_ok_and(|v| v.trim() == ZEPHYR_SDK_VERSION);
+    topdir.join(".west").is_dir() && west && sdk
 }
 
 /// A pinned MCUboot source tree from `scripts/fetch_mcuboot.py` (`rc1`: v2.5.0-rc1, else
