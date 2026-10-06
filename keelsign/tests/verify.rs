@@ -871,6 +871,11 @@ fn invalid_ed25519_pub_whose_keyhash_the_image_carries_exits_5_not_9() {
     {
         let image = Image::parse(&original).expect("parse");
         let keyhash = unprotected_value(&image, IMAGE_TLV_KEYHASH);
+        assert_eq!(
+            keyhash.len(),
+            32,
+            "the fixture's KEYHASH TLV must hold a 32-byte SHA256 of the key"
+        );
         let at = value_offset(&original, keyhash);
         patched[at..at + 32].copy_from_slice(&keelsign_verify::keyhash_of(&not_a_point));
     }

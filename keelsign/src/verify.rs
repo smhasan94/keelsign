@@ -85,10 +85,12 @@ pub fn exit_class(error: &keelsign_verify::Error) -> ExitClass {
         | E::UnsupportedAlgorithm(_)
         | E::UnsupportedParameterSet
         | E::MalformedSignature
-        // Unreachable for keys the CLI loaded since SHA-302 (they are decoded when loaded,
-        // exit 5); kept at 9 because a verifier error is never a reason to accept.
-        | E::InvalidPublicKey
         | E::SignatureInvalid
+        // The next two arms: unreachable for keys the CLI loaded since SHA-302:
+        // `InvalidPublicKey` and `Ed25519(Ed25519Error::InvalidPublicKey)` are refused at
+        // load (exit 5); the other `Ed25519` variants are reachable. Kept at 9 because a
+        // verifier error is never a reason to accept.
+        | E::InvalidPublicKey
         | E::Ed25519(_)
         | E::Image(_) => ExitClass::NotVerified,
         // `keelsign_verify::Error` is #[non_exhaustive]: a variant added later is a reason
