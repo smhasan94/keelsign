@@ -267,6 +267,71 @@ pub const SHIPPED_CRATES: [&str; 4] = [
     "keelsign-ffi",
 ];
 
+/// SHA-62: MCUboot v2.4.0, the MCUboot that Zephyr v4.4.2 pins (west.yml); the hook glue
+/// is built and tested against it (scripts/fetch_mcuboot.py).
+pub const MCUBOOT_PIN: &str = "6d3b3d2c38ab20c242e5b9abb04d050086383eb2";
+
+/// SHA-62: MCUboot v2.5.0-rc1, compiled against only to show the glue builds with the next
+/// release's headers.
+pub const MCUBOOT_RC1_PIN: &str = "bcb0fe5a66c6b795817fa3280ce991bfc128af72";
+
+/// SHA-62: Zephyr v4.4.2, the west.yml pin of the MCUboot sample (it pins MCUboot v2.4.0).
+pub const ZEPHYR_PIN: &str = "dccb09599635bdff17633fa7e9dab014b91dce90";
+
+/// SHA-62: the Zephyr SDK of Zephyr v4.4.2 (`zephyr/SDK_VERSION`; arm-zephyr-eabi-gcc
+/// 14.3.0), installed by `scripts/zephyr-setup.sh`.
+pub const ZEPHYR_SDK_VERSION: &str = "1.0.1";
+
+/// SHA-62: the west release `scripts/zephyr-setup.sh` installs.
+pub const WEST_VERSION: &str = "1.5.0";
+
+/// Whether the Zephyr sample can be built here, as `scripts/zephyr_sample_ci.sh` finds
+/// the tools: the repository inside a west workspace, `west` on `PATH` or in the
+/// workspace's `.venv`, and a Zephyr SDK of [`ZEPHYR_SDK_VERSION`] in
+/// `ZEPHYR_SDK_INSTALL_DIR` or the workspace's `.zephyr-sdk-1.0.1`
+/// (`scripts/zephyr-setup.sh` makes all three).
+pub fn west_available() -> bool {
+    let Some(topdir) = workspace_root().parent().map(Path::to_path_buf) else {
+        return false;
+    };
+    let west = topdir.join(".venv/bin/west").is_file()
+        || Command::new("west")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success());
+    let sdk_dir = std::env::var_os("ZEPHYR_SDK_INSTALL_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| topdir.join(format!(".zephyr-sdk-{ZEPHYR_SDK_VERSION}")));
+    let sdk = std::fs::read_to_string(sdk_dir.join("sdk_version"))
+        .is_ok_and(|v| v.trim() == ZEPHYR_SDK_VERSION);
+    topdir.join(".west").is_dir() && west && sdk
+}
+
+/// A pinned MCUboot source tree from `scripts/fetch_mcuboot.py` (`rc1`: v2.5.0-rc1, else
+/// v2.4.0, which honours `KEELSIGN_MCUBOOT_DIR`). Clones over the network on first use;
+/// calls are serialised so two tests never clone into the same directory at once.
+pub fn mcuboot_checkout(rc1: bool) -> PathBuf {
+    static CLONE: Mutex<()> = Mutex::new(());
+    let _guard = CLONE.lock().unwrap_or_else(PoisonError::into_inner);
+    let rev = if rc1 { "v2.5.0-rc1" } else { "v2.4.0" };
+    let out = run_ok(python_script("fetch_mcuboot.py").args(["--rev", rev]));
+    let tree = PathBuf::from(out.trim());
+    let head = run_ok(
+        Command::new("git")
+            .arg("-C")
+            .arg(&tree)
+            .args(["rev-parse", "HEAD"]),
+    );
+    let pin = if rc1 { MCUBOOT_RC1_PIN } else { MCUBOOT_PIN };
+    assert_eq!(
+        head.trim(),
+        pin,
+        "{} is not at the {rev} pin",
+        tree.display()
+    );
+    tree
+}
+
 /// Absolute path of the workspace root (two levels above this crate).
 pub fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

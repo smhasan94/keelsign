@@ -2,12 +2,14 @@
 //! block carries a `// SAFETY:` comment naming the part of the caller's contract it
 //! relies on.
 
+use core::ffi::c_void;
 use core::{ptr, slice};
 
 use keelsign_verify::image::Image;
 use keelsign_verify::lms;
 use keelsign_verify::{
-    Algorithm, Ed25519Key, Policy, TrustedKey, TrustedKeys, VerifiedImage, image_digest, verify,
+    Algorithm, Ed25519Key, ImageReader, Policy, ReadError, TrustedKey, TrustedKeys, VerifiedImage,
+    image_digest, verify,
 };
 
 use crate::status::{keelsign_status_t, keyset_status, status_of};
@@ -22,6 +24,28 @@ use keelsign_status_t::{
     KEELSIGN_ERR_IMAGE_TOO_LARGE, KEELSIGN_ERR_INVALID_ALGORITHM, KEELSIGN_ERR_INVALID_POLICY,
     KEELSIGN_ERR_KEY_LENGTH, KEELSIGN_ERR_NULL_POINTER, KEELSIGN_ERR_TOO_MANY_KEYS, KEELSIGN_OK,
 };
+
+/// An image that `keelsign_verify_cb` reads through a callback instead of a pointer: an
+/// image slot in flash that is not memory-mapped (MCUboot's `flash_area_read`).
+///
+/// keelsign calls `read` only for ranges inside `[0, len)`: the header, the TLV areas,
+/// then the hashed bytes after the header in ascending `KEELSIGN_CHUNK_LEN`-byte chunks,
+/// at any offset and length (no alignment), with `buf` pointing to keelsign's own stack
+/// buffers. Nothing is retained after the call.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct keelsign_reader_t {
+    /// Passed unchanged to every `read` call.
+    pub ctx: *mut c_void,
+    /// Readable bytes from offset 0: the slot size (or the slot minus its trailer).
+    pub len: u32,
+    /// Reads `len` bytes at image-relative `offset` into `buf` (never NULL). Returns 0
+    /// when all `len` bytes were read; any other value fails the call with
+    /// `KEELSIGN_ERR_READ_OTHER`.
+    pub read: Option<
+        unsafe extern "C" fn(ctx: *mut c_void, offset: u32, buf: *mut u8, len: usize) -> i32,
+    >,
+}
 
 /// Whether `len` is a raw public-key length of `algorithm`: FIPS 204 1312 / 1952 bytes,
 /// HSS 52 (L=1) or 60 bytes. Checked per key, before a slice is formed; the key set
@@ -81,6 +105,126 @@ pub unsafe extern "C" fn keelsign_verify(
     if !len_fits(len) {
         return KEELSIGN_ERR_IMAGE_TOO_LARGE;
     }
+    // SAFETY: `image` is non-NULL (checked above) and readable for `len` bytes that
+    // nobody writes during the call (contract); `len_fits` keeps `len <= isize::MAX`;
+    // `u8` has no alignment requirement. The slice does not outlive the call.
+    let mut reader: &[u8] = unsafe { slice::from_raw_parts(image, len) };
+    // SAFETY: `keys` is NULL only with `n_keys == 0` (checked above); the rest of
+    // `run`'s contract is this function's (keys, key bytes, `out`).
+    unsafe { run(&mut reader, keys, n_keys, policy, out) }
+}
+
+/// Verify the MCUboot image that `reader` reads, under `policy` with the trusted `keys`:
+/// `keelsign_verify` for an image that is not in addressable memory (an MCUboot slot
+/// read with `flash_area_read`). Same keys, policy, result and status codes.
+///
+/// `reader->read` is called only for ranges inside `[0, reader->len)`, at most
+/// `KEELSIGN_TLV_BUF_LEN` bytes at a time: the header, the TLV areas, then the hashed
+/// bytes after the header in ascending `KEELSIGN_CHUNK_LEN`-byte chunks. A non-zero
+/// return fails the call with `KEELSIGN_ERR_READ_OTHER`.
+///
+/// Arguments are checked in this order, the first failure is returned:
+/// `reader` NULL, `reader->read` NULL or `keys` NULL with `n_keys > 0`
+/// (`KEELSIGN_ERR_NULL_POINTER`); then as `keelsign_verify` from `policy` on.
+/// `reader->len == 0` gives `KEELSIGN_ERR_PARSE_TRUNCATED` without calling `read`.
+///
+/// # Safety
+///
+/// - `reader` is non-NULL and points to one readable `keelsign_reader_t` (any
+///   alignment), which is copied before the first `read` call.
+/// - `reader->read`, if not NULL, is a function that is safe to call with `reader->ctx`,
+///   an `offset` and `len` inside `[0, reader->len)` and a `buf` writable for `len`
+///   bytes; it writes nothing but `buf[0..len)` and the state behind `ctx` (never `out`,
+///   `keys` or any key's bytes).
+/// - `keys` is NULL only if `n_keys` is 0; otherwise it points to `n_keys` consecutive
+///   `keelsign_key_t` (any alignment).
+/// - Each `keys[i].key` is non-NULL and readable for `keys[i].key_len` bytes.
+/// - `out` is NULL or writable for one `keelsign_result_t` (any alignment), and does
+///   not overlap `keys` or any key's bytes.
+/// - None of this memory is written by anyone else during the call. Nothing is retained
+///   after the call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn keelsign_verify_cb(
+    reader: *const keelsign_reader_t,
+    keys: *const keelsign_key_t,
+    n_keys: usize,
+    policy: keelsign_policy_t,
+    out: *mut keelsign_result_t,
+) -> keelsign_status_t {
+    if reader.is_null() {
+        return KEELSIGN_ERR_NULL_POINTER;
+    }
+    // SAFETY: `reader` is non-NULL (checked above) and points to one readable
+    // `keelsign_reader_t` (contract); `read_unaligned` copies it at any alignment.
+    let reader = unsafe { reader.read_unaligned() };
+    let Some(read) = reader.read else {
+        return KEELSIGN_ERR_NULL_POINTER;
+    };
+    if keys.is_null() && n_keys != 0 {
+        return KEELSIGN_ERR_NULL_POINTER;
+    }
+    let mut reader = CallbackReader {
+        ctx: reader.ctx,
+        len: reader.len,
+        read,
+    };
+    // SAFETY: `keys` is NULL only with `n_keys == 0` (checked above); the rest of
+    // `run`'s contract is this function's (keys, key bytes, `out`).
+    unsafe { run(&mut reader, keys, n_keys, policy, out) }
+}
+
+/// The C reader of `keelsign_verify_cb`. Reads outside `[0, len)` fail with
+/// `ReadError::OutOfBounds` before the callback is called.
+struct CallbackReader {
+    ctx: *mut c_void,
+    len: u32,
+    read: unsafe extern "C" fn(*mut c_void, u32, *mut u8, usize) -> i32,
+}
+
+impl ImageReader for CallbackReader {
+    fn len(&self) -> u32 {
+        self.len
+    }
+
+    fn read(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), ReadError> {
+        let n = u32::try_from(buf.len()).map_err(|_| ReadError::OutOfBounds)?;
+        let end = offset.checked_add(n).ok_or(ReadError::OutOfBounds)?;
+        if end > self.len {
+            return Err(ReadError::OutOfBounds);
+        }
+        if buf.is_empty() {
+            return Ok(());
+        }
+        // SAFETY: `read` is safe to call with `ctx` and a range inside `[0, len)` (the
+        // caller's contract of `keelsign_verify_cb`; checked just above); `buf` is a live
+        // `&mut [u8]` of `buf.len()` writable bytes that nothing else references during
+        // the call.
+        let rc = unsafe { (self.read)(self.ctx, offset, buf.as_mut_ptr(), buf.len()) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(ReadError::Other)
+        }
+    }
+}
+
+/// The shared body of `keelsign_verify` and `keelsign_verify_cb` after their pointer and
+/// length checks: the policy, the keys, then the image through `reader`. One
+/// `verify::<dyn ImageReader>` serves both entry points.
+///
+/// # Safety
+///
+/// `keys` is NULL only if `n_keys` is 0, else it points to `n_keys` readable
+/// `keelsign_key_t` (any alignment) whose `key` bytes are readable for `key_len` and
+/// unwritten during the call; `out` is NULL or writable for one `keelsign_result_t` (any
+/// alignment) and overlaps none of that memory.
+unsafe fn run(
+    reader: &mut dyn ImageReader,
+    keys: *const keelsign_key_t,
+    n_keys: usize,
+    policy: keelsign_policy_t,
+    out: *mut keelsign_result_t,
+) -> keelsign_status_t {
     let Some(policy) = policy_of(policy) else {
         return KEELSIGN_ERR_INVALID_POLICY;
     };
@@ -98,7 +242,7 @@ pub unsafe extern "C" fn keelsign_verify(
     // At most KEELSIGN_MAX_PQ_KEYS + KEELSIGN_MAX_ED25519_KEYS + 1 entries are ever read:
     // the next one after both limits are full fails with KEELSIGN_ERR_TOO_MANY_KEYS.
     for i in 0..n_keys {
-        // SAFETY: `n_keys > 0` here, so `keys` is non-NULL (checked above) and points to
+        // SAFETY: `n_keys > 0` here, so `keys` is non-NULL (contract) and points to
         // `n_keys` consecutive entries (contract); `i < n_keys` keeps `keys.add(i)` inside
         // that array. `read_unaligned` copies the entry at any alignment.
         let key = unsafe { keys.add(i).read_unaligned() };
@@ -160,13 +304,9 @@ pub unsafe extern "C" fn keelsign_verify(
         Err(e) => return keyset_status(e),
     };
 
-    // SAFETY: `image` is non-NULL (checked above) and readable for `len` bytes that
-    // nobody writes during the call (contract); `len_fits` keeps `len <= isize::MAX`;
-    // `u8` has no alignment requirement. The slice does not outlive the call.
-    let mut reader: &[u8] = unsafe { slice::from_raw_parts(image, len) };
     let mut tlv_buf = [0u8; KEELSIGN_TLV_BUF_LEN];
     let mut chunk = [0u8; KEELSIGN_CHUNK_LEN];
-    let verified = match verify(&mut reader, &set, policy, &mut tlv_buf, &mut chunk) {
+    let verified = match verify(reader, &set, policy, &mut tlv_buf, &mut chunk) {
         Ok(verified) => verified,
         Err(e) => return status_of(e),
     };
@@ -1027,6 +1167,311 @@ mod tests {
             let (status, out) = call(image, &[lms], KEELSIGN_POLICY_PQ_ONLY);
             assert_eq!(status, KEELSIGN_OK);
             assert_ne!(out, sentinel());
+        }
+    }
+
+    // ---- keelsign_verify_cb (SHA-62) ------------------------------------------------
+
+    /// The `ctx` of [`read_slice`]: an image in memory read through the callback, with
+    /// every call recorded and call `fail_at` failing with `rc`.
+    struct SliceCtx<'a> {
+        image: &'a [u8],
+        reads: Vec<(u32, usize)>,
+        fail_at: Option<usize>,
+        rc: i32,
+    }
+
+    impl<'a> SliceCtx<'a> {
+        fn new(image: &'a [u8]) -> Self {
+            SliceCtx {
+                image,
+                reads: Vec::new(),
+                fail_at: None,
+                rc: -1,
+            }
+        }
+    }
+
+    /// A `keelsign_reader_t.read` over a [`SliceCtx`]. Returns -2 for a range outside
+    /// the image (never expected: keelsign checks the range first).
+    unsafe extern "C" fn read_slice(
+        ctx: *mut c_void,
+        offset: u32,
+        buf: *mut u8,
+        len: usize,
+    ) -> i32 {
+        // SAFETY: every reader in these tests passes a live `SliceCtx` as `ctx`, and
+        // nothing else references it during the call.
+        let ctx = unsafe { &mut *ctx.cast::<SliceCtx<'_>>() };
+        let call = ctx.reads.len();
+        ctx.reads.push((offset, len));
+        if ctx.fail_at == Some(call) {
+            return ctx.rc;
+        }
+        let start = offset as usize;
+        let Some(src) = ctx.image.get(start..start + len) else {
+            return -2;
+        };
+        // SAFETY: keelsign passes `buf` writable for `len` bytes (its own stack buffer);
+        // `src` is a different allocation.
+        unsafe { ptr::copy_nonoverlapping(src.as_ptr(), buf, len) };
+        0
+    }
+
+    /// `keelsign_verify_cb` over `ctx` (reader length `len`), `out` pre-filled with
+    /// [`sentinel`].
+    fn call_cb(
+        ctx: &mut SliceCtx<'_>,
+        len: u32,
+        keys: &[keelsign_key_t],
+        policy: keelsign_policy_t,
+    ) -> (keelsign_status_t, keelsign_result_t) {
+        let reader = keelsign_reader_t {
+            ctx: ptr::from_mut(ctx).cast(),
+            len,
+            read: Some(read_slice),
+        };
+        let mut out = sentinel();
+        // SAFETY: `reader` is a live local whose `read` is `read_slice` over the live
+        // `ctx`; `keys` is a live slice of keys built from live slices; `out` is a live
+        // local.
+        let status =
+            unsafe { keelsign_verify_cb(&reader, keys.as_ptr(), keys.len(), policy, &mut out) };
+        (status, out)
+    }
+
+    fn image_len(image: &[u8]) -> u32 {
+        u32::try_from(image.len()).unwrap()
+    }
+
+    /// Callback reader: every policy-matrix cell (57 images × 3 policies) gives the same
+    /// status and the same `*out` through `keelsign_verify_cb` as through
+    /// `keelsign_verify`, the callback is only called inside `[0, len)` with at most
+    /// `KEELSIGN_TLV_BUF_LEN` bytes, and a slot longer than the image (trailing erased
+    /// bytes) changes nothing.
+    #[test]
+    #[cfg_attr(miri, ignore = "the full matrix is too slow under miri")]
+    fn verify_cb_matches_verify_on_every_fixture() {
+        let mut cells = 0;
+        for case in cases() {
+            let image = policy_kat::image(case.name).unwrap();
+            let mut slot = image.to_vec();
+            slot.resize(image.len() + 4096, 0xFF);
+            let keys = keys_for(&case);
+            for &policy in Policy::ALL {
+                let policy = c_policy(policy);
+                let direct = call(image, &keys, policy);
+                let mut ctx = SliceCtx::new(image);
+                let via_cb = call_cb(&mut ctx, image_len(image), &keys, policy);
+                assert_eq!(via_cb, direct, "{} under {policy:?}", case.name);
+                for &(offset, n) in &ctx.reads {
+                    let end = u64::from(offset) + n as u64;
+                    assert!(end <= image.len() as u64, "{}: read past len", case.name);
+                    assert!(
+                        n > 0 && n <= KEELSIGN_TLV_BUF_LEN,
+                        "{}: read of {n}",
+                        case.name
+                    );
+                }
+                let mut ctx = SliceCtx::new(&slot);
+                let padded = call_cb(&mut ctx, image_len(&slot), &keys, policy);
+                assert_eq!(padded, direct, "{} in a larger slot", case.name);
+                cells += 1;
+            }
+        }
+        assert_eq!(cells, 57 * 3);
+    }
+
+    /// Callback reader: a NULL `reader` or a NULL `reader->read` is
+    /// `KEELSIGN_ERR_NULL_POINTER`, before `keys`, `policy` or the image are looked at;
+    /// `keys` NULL with `n_keys > 0` too. `out` is not written.
+    #[test]
+    fn verify_cb_null_reader_or_read_fn_is_null_pointer() {
+        let case = case("keelsign-lms-m32-h5.bin");
+        let image = policy_kat::image(case.name).unwrap();
+        let lms = key(KEELSIGN_ALG_LMS_HSS, case.public_key);
+        let mut out = sentinel();
+        // SAFETY: `reader` is NULL, which is rejected before anything else is read.
+        let status = unsafe {
+            keelsign_verify_cb(ptr::null(), ptr::null(), 1, keelsign_policy_t(7), &mut out)
+        };
+        assert_eq!(status, KEELSIGN_ERR_NULL_POINTER);
+        let mut ctx = SliceCtx::new(image);
+        let no_fn = keelsign_reader_t {
+            ctx: ptr::from_mut(&mut ctx).cast(),
+            len: image_len(image),
+            read: None,
+        };
+        // SAFETY: `no_fn` is a live local with `read` NULL, rejected before any call.
+        let status =
+            unsafe { keelsign_verify_cb(&no_fn, &lms, 1, KEELSIGN_POLICY_PQ_ONLY, &mut out) };
+        assert_eq!(status, KEELSIGN_ERR_NULL_POINTER);
+        let with_fn = keelsign_reader_t {
+            read: Some(read_slice),
+            ..no_fn
+        };
+        // SAFETY: `keys` is NULL with `n_keys` 1, rejected before the reader is called.
+        let status =
+            unsafe { keelsign_verify_cb(&with_fn, ptr::null(), 1, keelsign_policy_t(7), &mut out) };
+        assert_eq!(status, KEELSIGN_ERR_NULL_POINTER);
+        assert!(ctx.reads.is_empty(), "the reader was called");
+        assert_eq!(out, sentinel());
+        // The checks after the pointers are keelsign_verify's: policy, then keys.
+        assert_eq!(
+            call_cb(&mut ctx, image_len(image), &[lms], keelsign_policy_t(0)).0,
+            KEELSIGN_ERR_INVALID_POLICY
+        );
+        assert_eq!(
+            call_cb(
+                &mut ctx,
+                image_len(image),
+                &[lms, lms],
+                KEELSIGN_POLICY_PQ_ONLY
+            )
+            .0,
+            KEELSIGN_ERR_DUPLICATE_KEY
+        );
+        assert!(
+            ctx.reads.is_empty(),
+            "the reader was called before the image"
+        );
+    }
+
+    /// Callback reader: any non-zero return of `read`, on any call (the header, the TLV
+    /// area, a hashed chunk), fails with `KEELSIGN_ERR_READ_OTHER` and leaves `out`
+    /// untouched; nothing is read after the failure.
+    #[test]
+    fn verify_cb_read_error_is_read_other() {
+        let case = case("keelsign-hybrid-bad-body.bin");
+        let image = policy_kat::image(case.name).unwrap();
+        let keys = [key(KEELSIGN_ALG_LMS_HSS, case.public_key)];
+        let mut ctx = SliceCtx::new(image);
+        assert_eq!(
+            call_cb(&mut ctx, image_len(image), &keys, KEELSIGN_POLICY_PQ_ONLY).0,
+            KEELSIGN_ERR_IMAGE_DIGEST_MISMATCH
+        );
+        let calls = ctx.reads.len();
+        assert!(
+            calls >= 4,
+            "header, TLV info, TLV area and chunks: {calls} reads"
+        );
+        for fail_at in [0, 1, 2, calls - 1] {
+            for rc in [-1, 1, -5, i32::MIN, i32::MAX] {
+                let mut ctx = SliceCtx::new(image);
+                ctx.fail_at = Some(fail_at);
+                ctx.rc = rc;
+                let (status, out) =
+                    call_cb(&mut ctx, image_len(image), &keys, KEELSIGN_POLICY_PQ_ONLY);
+                assert_eq!(status, KEELSIGN_ERR_READ_OTHER, "call {fail_at} rc {rc}");
+                assert_eq!(out, sentinel());
+                assert_eq!(ctx.reads.len(), fail_at + 1, "read after the failure");
+            }
+        }
+    }
+
+    /// Callback reader: `reader->len == 0` is `KEELSIGN_ERR_PARSE_TRUNCATED` without a
+    /// call; a `len` shorter than the image is a parse error, never a read past `len`.
+    #[test]
+    fn verify_cb_len_zero_is_truncated() {
+        let case = case("keelsign-lms-m32-h5.bin");
+        let image = policy_kat::image(case.name).unwrap();
+        let keys = [key(KEELSIGN_ALG_LMS_HSS, case.public_key)];
+        let mut ctx = SliceCtx::new(image);
+        let (status, out) = call_cb(&mut ctx, 0, &keys, KEELSIGN_POLICY_PQ_ONLY);
+        assert_eq!(status, KEELSIGN_ERR_PARSE_TRUNCATED);
+        assert_eq!(out, sentinel());
+        assert!(ctx.reads.is_empty());
+        for len in [1, 31, 32, 600, image_len(image) - 1] {
+            let mut ctx = SliceCtx::new(image);
+            let (status, _) = call_cb(&mut ctx, len, &keys, KEELSIGN_POLICY_PQ_ONLY);
+            assert_ne!(status, KEELSIGN_OK, "len {len}");
+            assert!(
+                ctx.reads
+                    .iter()
+                    .all(|&(offset, n)| u64::from(offset) + n as u64 <= u64::from(len)),
+                "len {len}: read past len: {:?}",
+                ctx.reads
+            );
+        }
+    }
+
+    /// Callback reader under miri: the `keelsign_reader_t`, the keys array, the key
+    /// bytes and `out` at odd addresses, each in an exactly sized allocation. Under miri
+    /// on an image whose body is tampered (read and hashed in full, no signature
+    /// arithmetic); outside miri on the valid image too.
+    #[test]
+    fn miri_verify_cb_unaligned_reader_struct() {
+        let case = case("keelsign-lms-m32-h5.bin");
+        let image = policy_kat::image(case.name).unwrap();
+        let mut tampered = image.to_vec();
+        tampered[600] ^= 1;
+        let mut images: Vec<(&[u8], keelsign_status_t)> =
+            std::vec![(&tampered, KEELSIGN_ERR_IMAGE_DIGEST_MISMATCH)];
+        if !cfg!(miri) {
+            images.push((image, KEELSIGN_OK));
+        }
+
+        let mut key_buf: Vec<u8> = Vec::with_capacity(case.public_key.len() + 1);
+        key_buf.push(0);
+        key_buf.extend_from_slice(case.public_key);
+        let key_buf = key_buf.into_boxed_slice();
+        let entry = key(KEELSIGN_ALG_LMS_HSS, &key_buf[1..]);
+        let key_size = core::mem::size_of::<keelsign_key_t>();
+        let mut keys_buf: Box<[u8]> = std::vec![0u8; key_size + 1].into_boxed_slice();
+        // SAFETY: `key_size` bytes from offset 1 of a `key_size + 1`-byte buffer.
+        unsafe {
+            keys_buf
+                .as_mut_ptr()
+                .add(1)
+                .cast::<keelsign_key_t>()
+                .write_unaligned(entry);
+        }
+        // SAFETY: offset 1 of a `key_size + 1`-byte buffer, as written above.
+        let keys_ptr = unsafe { keys_buf.as_ptr().add(1).cast::<keelsign_key_t>() };
+
+        for (img, expected) in images {
+            let mut ctx = SliceCtx::new(img);
+            let reader = keelsign_reader_t {
+                ctx: ptr::from_mut(&mut ctx).cast(),
+                len: image_len(img),
+                read: Some(read_slice),
+            };
+            let size = core::mem::size_of::<keelsign_reader_t>();
+            let mut reader_buf: Box<[u8]> = std::vec![0u8; size + 1].into_boxed_slice();
+            // SAFETY: `size` bytes from offset 1 of a `size + 1`-byte buffer.
+            unsafe {
+                reader_buf
+                    .as_mut_ptr()
+                    .add(1)
+                    .cast::<keelsign_reader_t>()
+                    .write_unaligned(reader);
+            }
+            // SAFETY: offset 1 of a `size + 1`-byte buffer, as written above.
+            let reader_ptr = unsafe { reader_buf.as_ptr().add(1).cast::<keelsign_reader_t>() };
+            let out_size = core::mem::size_of::<keelsign_result_t>();
+            let mut out_buf: Box<[u8]> = std::vec![0xA5u8; out_size + 1].into_boxed_slice();
+            // SAFETY: offset 1 of an `out_size + 1`-byte buffer.
+            let out_ptr = unsafe { out_buf.as_mut_ptr().add(1).cast::<keelsign_result_t>() };
+            // SAFETY: every pointer refers to a live, exactly sized buffer (the reader
+            // struct over the live `ctx`, one key in `keys_buf` over `key_buf`,
+            // `out_buf`); alignment is deliberately 1, which the contract allows.
+            let status = unsafe {
+                keelsign_verify_cb(reader_ptr, keys_ptr, 1, KEELSIGN_POLICY_PQ_ONLY, out_ptr)
+            };
+            assert_eq!(status, expected);
+            // SAFETY: `out_ptr` points to `out_size` initialised bytes.
+            let out = unsafe { out_ptr.read_unaligned() };
+            if expected == KEELSIGN_OK {
+                assert_eq!(out.pq_key_index, 0);
+                assert_eq!(out.image_len as usize, img.len());
+            } else {
+                assert_eq!(
+                    out_buf[1..],
+                    [0xA5; 64][..out_size],
+                    "out written on failure"
+                );
+            }
+            assert!(!ctx.reads.is_empty());
         }
     }
 }

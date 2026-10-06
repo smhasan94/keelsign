@@ -1,0 +1,16 @@
+/*
+ * keelsign_hello partitions for the MCUboot image (SHA-62, docs/mcuboot.md#partitions):
+ * the application's partition table (one source for both images), plus what MCUboot's
+ * own boot/zephyr/app.overlay sets, which a sysbuild <image>.overlay replaces: MCUboot
+ * links into the boot partition.
+ *
+ * SPDX-License-Identifier: MIT OR Apache-2.0
+ */
+
+#include "../boards/nrf52840dk_nrf52840.overlay"
+
+/ {
+	chosen {
+		zephyr,code-partition = &boot_partition;
+	};
+};

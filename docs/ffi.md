@@ -1,8 +1,10 @@
 # C static library (keelsign-ffi)
 
 `keelsign-ffi` builds `libkeelsign.a`, a C ABI over `keelsign-verify`, and ships its
-header `keelsign-ffi/include/keelsign.h`. It is the input to MCUboot's
-`MCUBOOT_USE_CUSTOM_CRYPTO` hook (SHA-62 adds the MCUboot glue) and to any other C caller.
+header `keelsign-ffi/include/keelsign.h`. It is the library behind keelsign's MCUboot
+image-check hook (`boot_image_check_hook`, [mcuboot.md](mcuboot.md); MCUboot's
+`MCUBOOT_USE_CUSTOM_CRYPTO` swaps the crypto backend and is not a signature hook) and is
+usable from any other C caller.
 Pre-release: the crate is not published (`publish = false`); build it from this
 repository.
 
@@ -75,6 +77,9 @@ repo-checks --test ffi -- --ignored`). It is C99 and C++ compatible.
 keelsign_status_t keelsign_verify(const uint8_t *image, size_t len,
                                   const keelsign_key_t *keys, size_t n_keys,
                                   keelsign_policy_t policy, keelsign_result_t *out);
+keelsign_status_t keelsign_verify_cb(const keelsign_reader_t *reader,
+                                     const keelsign_key_t *keys, size_t n_keys,
+                                     keelsign_policy_t policy, keelsign_result_t *out);
 keelsign_status_t keelsign_digest(const uint8_t *image, size_t len, uint8_t *out_digest);
 ```
 
@@ -85,6 +90,10 @@ keelsign_status_t keelsign_digest(const uint8_t *image, size_t len, uint8_t *out
   verified it into `*out`, unless `out` is NULL. The ticket's signature had no `out`; it
   is added so a bootloader can apply anti-rollback and report the key without parsing the
   image again.
+- `keelsign_verify_cb` (SHA-62) is `keelsign_verify` for an image that is not in
+  addressable memory: it reads the image through the caller's `keelsign_reader_t`
+  callback (below). Same keys, policies, result and status codes; MCUboot's hook uses it
+  with `flash_area_read`.
 - `keelsign_digest` writes the 32-byte image digest `M` without checking a signature.
 
 Keys are one array of `keelsign_key_t { alg, key, key_len }` mixing kinds, raw public
@@ -94,6 +103,32 @@ keys: `KEELSIGN_ALG_MLDSA44` (1, 1312 bytes), `KEELSIGN_ALG_MLDSA65` (2, 1952 by
 (8) Ed25519 keys. `pq_key_index` / `ed25519_key_index` are indices into this array, found
 by pointer identity, or `KEELSIGN_NO_KEY` (`0xFFFFFFFF`) for a half the policy does not
 check.
+
+### Callback reader
+
+```c
+typedef struct keelsign_reader_t {
+  void *ctx;     /* passed unchanged to every read call */
+  uint32_t len;  /* readable bytes from offset 0: the slot size */
+  int32_t (*read)(void *ctx, uint32_t offset, uint8_t *buf, size_t len);
+} keelsign_reader_t;
+```
+
+- `read` fills `buf[0..len)` from image-relative `offset` and returns 0, or returns any
+  other value on failure; the call then fails with `KEELSIGN_ERR_READ_OTHER` (42) and
+  `read` is not called again.
+- keelsign calls `read` only for ranges inside `[0, reader->len)`, at most
+  `KEELSIGN_TLV_BUF_LEN` bytes at a time, at any offset and length (no alignment): the
+  header, the TLV areas, then the hashed bytes after the header in ascending
+  `KEELSIGN_CHUNK_LEN`-byte chunks. A reader whose `len` is the whole slot is fine:
+  bytes after the image (the erased rest of the slot, the boot trailer) are never read.
+- `reader` NULL or `reader->read` NULL is `KEELSIGN_ERR_NULL_POINTER` (1), checked before
+  `keys` NULL, then the order is `keelsign_verify`'s from `policy` on. `reader->len == 0`
+  is `KEELSIGN_ERR_PARSE_TRUNCATED` (31) without a `read` call.
+- The `keelsign_reader_t` itself may be at any alignment; it is copied before the first
+  `read`. `read` must not write `out`, the keys or the key bytes.
+
+`KEELSIGN_ABI_VERSION` stays 1: the reader and `keelsign_verify_cb` are additions.
 
 ### Pointer and length contract
 
@@ -150,6 +185,7 @@ recognise as an error. The authoritative list, with a comment per code, is the e
 |---|---|
 | Status mapping, numbers | `keelsign-ffi` unit tests `status::tests` |
 | Every policy-matrix cell, digests, key indices, argument order, the pointer contract | `keelsign-ffi` unit tests `abi::tests` (`cargo test -p keelsign-ffi --locked [--features ed25519,ml-dsa]`) |
+| Callback reader (`keelsign_verify_cb`) | `abi::tests::verify_cb_*` and `miri_verify_cb_unaligned_reader_struct`; `repo_checks::ffi::c_harness_verify_cb_matches_verify_on_every_fixture` |
 | Miri | see below |
 | C harness, both builds, sanitizers | `repo_checks::ffi::c_harness_*` (`cargo test -p repo-checks --locked --test ffi`), CI step `C harness (libkeelsign, ASan+UBSan)` |
 | Header drift, header contents | `repo_checks::ffi::*`, CI step `keelsign.h drift (cbindgen 0.29.4)` |
@@ -160,17 +196,19 @@ recognise as an error. The authoritative list, with a comment per code, is the e
 -pedantic`) linked against `libkeelsign.a`:
 
 ```text
-harness verify POLICY IMAGE [ALG:KEYFILE ...]   # POLICY: classical_only | pq_only | hybrid | <number>
-harness digest IMAGE                            # ALG: mldsa44 | mldsa65 | lms | ed25519 | <number>
-harness abuse IMAGE LMS_KEYFILE                 # NULL / zero-length / malformed arguments
+harness verify POLICY IMAGE [ALG:KEYFILE ...]     # POLICY: classical_only | pq_only | hybrid | <number>
+harness verify-cb POLICY IMAGE [ALG:KEYFILE ...]  # the same through keelsign_verify_cb (file callback)
+harness digest IMAGE                              # ALG: mldsa44 | mldsa65 | lms | ed25519 | <number>
+harness abuse IMAGE LMS_KEYFILE                   # NULL / zero-length / malformed arguments
 ```
 
 It prints one `status=…` line and exits 0 whenever the library was called. The repo-check
 builds both feature states, compiles the harness with `-fsanitize=address,undefined` on
 Linux and `-fsanitize=undefined` elsewhere (AddressSanitizer hangs on macOS; set
 `KEELSIGN_FFI_SANITIZE=address,undefined`, `undefined` or `none` to override), and runs
-the 52 × 3 policy-matrix cells in each build, every image's digest, the 200 KB image and
-the tampered / wrong-key / NULL cases. On macOS it sets `SDKROOT` from `xcrun --sdk macosx
+the 57 × 3 policy-matrix cells in each build (through `verify` and, with the same
+output line expected, `verify-cb`), every image's digest, the 200 KB image and the
+tampered / wrong-key / NULL cases. On macOS it sets `SDKROOT` from `xcrun --sdk macosx
 --show-sdk-path` when the environment does not (the Command Line Tools' SDK may not match
 the compiler otherwise).
 
@@ -186,6 +224,7 @@ cc -std=c99 -Wall -Wextra -Werror -pedantic -fsanitize=undefined -fno-sanitize-r
    -I keelsign-ffi/include keelsign-ffi/ctest/harness.c target/ffi/libkeelsign.a -o "$work/harness"
 python3 -c 'import json,sys; m=json.load(open("tests/fixtures/images/MANIFEST.json")); sys.stdout.buffer.write(bytes.fromhex(m["outputs"]["keelsign-lms-m32-h5.bin"]["public_key_hex"]))' > "$work/lms.key"
 "$work/harness" verify pq_only tests/fixtures/images/keelsign-lms-m32-h5.bin "lms:$work/lms.key"
+"$work/harness" verify-cb pq_only tests/fixtures/images/keelsign-lms-m32-h5.bin "lms:$work/lms.key"
 "$work/harness" digest tests/fixtures/images/keelsign-lms-m32-h5.bin
 "$work/harness" abuse tests/fixtures/images/keelsign-lms-m32-h5.bin "$work/lms.key"
 "$work/harness" verify hybrid tests/fixtures/images/keelsign-lms-m32-h5.bin "lms:$work/lms.key"
@@ -196,8 +235,9 @@ Expected output:
 
 ```text
 status=0 version=1.2.3+4 has_security_counter=0 security_counter=0 image_len=3408 digest=e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1 pq_key_index=0 ed25519_key_index=4294967295
+status=0 version=1.2.3+4 has_security_counter=0 security_counter=0 image_len=3408 digest=e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1 pq_key_index=0 ed25519_key_index=4294967295
 status=0 digest=e72878a8fe7374ccc97aec1ffab2f5642747b63a298bc2699ffdf6fefa9c09c1
-status=1,1,1,31,3,4,5,6,7
+status=1,1,1,31,3,4,5,6,7,1,1,42,31
 status=50
 ```
 
@@ -297,7 +337,8 @@ library of both builds with `nm`, and `scripts/staticlib_sizes.py --check` check
 thumb archive in the `verify-cross` CI job (step `libkeelsign symbols (no fmt, no panic
 strings)`). They require:
 
-- the exported functions are exactly `keelsign_verify` and `keelsign_digest`;
+- the exported functions are exactly `keelsign_verify`, `keelsign_verify_cb` and
+  `keelsign_digest`;
 - no `core::fmt` symbol (`Formatter`, `fmt::write`, `Display`, `Debug`, `LowerHex`, …);
 - no `.rodata` string but `keelsign-mcuboot-image-v1` (the ML-DSA context), so no file
   names, `panicked` or `attempt to` messages;

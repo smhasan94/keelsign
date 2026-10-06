@@ -925,18 +925,20 @@ does not reach), measured with [stable Rust 1.91.1](#measurement-toolchains).
 
 | Target | Features | `.text` | `.rodata` | Total |
 |---|---|---|---|---|
-| `thumbv7em-none-eabihf` | (none) | 16,242 B | 390 B | 16,632 B |
-| `thumbv7em-none-eabihf` | `ed25519` | 56,258 B | 1,522 B | 57,780 B |
-| `thumbv7em-none-eabihf` | `ml-dsa` | 31,628 B | 1,824 B | 33,452 B |
-| `thumbv7em-none-eabihf` | `ed25519,ml-dsa` | 71,638 B | 2,956 B | 74,594 B |
-| `thumbv8m.main-none-eabihf` | (none) | 16,240 B | 390 B | 16,630 B |
-| `thumbv8m.main-none-eabihf` | `ed25519` | 55,618 B | 1,522 B | 57,140 B |
-| `thumbv8m.main-none-eabihf` | `ml-dsa` | 31,622 B | 1,824 B | 33,446 B |
-| `thumbv8m.main-none-eabihf` | `ed25519,ml-dsa` | 70,994 B | 2,956 B | 73,950 B |
+| `thumbv7em-none-eabihf` | (none) | 16,914 B | 390 B | 17,304 B |
+| `thumbv7em-none-eabihf` | `ed25519` | 56,886 B | 1,522 B | 58,408 B |
+| `thumbv7em-none-eabihf` | `ml-dsa` | 32,310 B | 1,824 B | 34,134 B |
+| `thumbv7em-none-eabihf` | `ed25519,ml-dsa` | 72,232 B | 2,956 B | 75,188 B |
+| `thumbv8m.main-none-eabihf` | (none) | 16,908 B | 390 B | 17,298 B |
+| `thumbv8m.main-none-eabihf` | `ed25519` | 56,218 B | 1,522 B | 57,740 B |
+| `thumbv8m.main-none-eabihf` | `ml-dsa` | 32,308 B | 1,824 B | 34,132 B |
+| `thumbv8m.main-none-eabihf` | `ed25519,ml-dsa` | 71,568 B | 2,956 B | 74,524 B |
 
-The default (LMS/HSS only) library is about 16.6 KB. The same script's `--check` (run in
-the `verify-cross` CI job) also proves the archives export only `keelsign_verify` and
-`keelsign_digest`, carry no formatting code and no panic strings
+The default (LMS/HSS only) library is about 17.3 KB (re-measured for SHA-62, which added
+`keelsign_verify_cb`: about 0.7 KB more than the two-function library). The same script's
+`--check` (run in the `verify-cross` CI job) also proves the archives export only
+`keelsign_verify`, `keelsign_verify_cb` and `keelsign_digest`, carry no formatting code
+and no panic strings
 ([ffi.md](ffi.md#nm-check)). Stack and cycles of the C entry points on the boards are a
 follow-up; the verifier figures above apply, plus the about 5 KB of buffers and key tables
 `keelsign_verify` keeps on the stack.
@@ -956,6 +958,59 @@ python3 scripts/staticlib_sizes.py --check --features ed25519,ml-dsa target/ffi-
 ```
 
 Each command prints its table row.
+
+## MCUboot with keelsign (SHA-62)
+
+What keelsign adds to MCUboot itself: the bootloader of `samples/keelsign_hello`
+([mcuboot.md](mcuboot.md)) for `nrf52840dk/nrf52840`, built twice with
+`scripts/zephyr_sample_ci.sh`, once as the sample ships (`build`: MCUboot's image-check
+hook, the key table and `libkeelsign.a`, policy `KEELSIGN_POLICY_PQ_ONLY`) and once with
+`-DSB_CONFIG_KEELSIGN=n` (`stock-build`), everything else equal: Zephyr v4.4.2
+(`dccb09599635bdff17633fa7e9dab014b91dce90`), MCUboot v2.4.0
+(`6d3b3d2c38ab20c242e5b9abb04d050086383eb2`), Zephyr SDK 1.0.1 (arm-zephyr-eabi-gcc
+14.3.0, `CONFIG_SIZE_OPTIMIZATIONS`), MCUboot's ECDSA P-256 signature (TinyCrypt), swap
+using offset, minimal logging at INF, `CONFIG_MAIN_STACK_SIZE=16384`. `libkeelsign.a`
+is built for `thumbv7em-none-eabi` (MCUboot is soft-float) with
+[stable Rust 1.91.1](#measurement-toolchains), default features (LMS/HSS only): 17,304 B
+of `.text` + `.rodata` by `staticlib_sizes.py`. Flash and static RAM are the linker's
+memory report (`scripts/mcuboot_sizes.py`, from the ELFs' load segments):
+
+| MCUboot image | Flash | Static RAM | MAIN_STACK_SIZE | Compiler |
+|---|---|---|---|---|
+| stock | 29,568 B | 22,464 B | 16384 | GCC: (Zephyr SDK 1.0.1) 14.3.0 |
+| with keelsign | 48,484 B | 22,464 B | 16384 | GCC: (Zephyr SDK 1.0.1) 14.3.0 |
+| Δ | +18,916 B | +0 B | | |
+
+- **Flash +18,916 B**: the LMS/HSS verifier, image parser and SHA256 code of
+  `libkeelsign.a` (the linker keeps what `keelsign_verify_cb` reaches), the hook glue and
+  the 60-byte key table. The keelsign MCUboot (48,484 B) would fit the board's default
+  48 KB (49,152 B) boot partition with 668 B to spare; the sample's 64 KB partition
+  leaves room for more keys, debug logging and MCUboot updates.
+- **Static RAM +0 B**: keelsign keeps all its state on the stack. The stack itself grows:
+  the sample raises MCUboot's main stack from the `CONFIG_MAIN_STACK_SIZE=10240` of
+  MCUboot's `prj.conf` to 16,384 B (+6,144 B of RAM) for keelsign's about 5 KB of buffers and key tables and 1.5 KB of
+  LMS/HSS ([mcuboot.md](mcuboot.md#stack)); both builds above use 16,384 B so the
+  table isolates keelsign's code. Measured on-target stack and cycles are SHA-315.
+- **Ed25519 + PQ_ONLY** (MCUboot's own Ed25519 signature instead of ECDSA P-256,
+  keelsign's default policy, `ed25519-build`): the MCUboot image is 61,104 B (the
+  linker's `FLASH` use) and links into the 64 KB boot partition with 4,432 B to spare.
+- **Hybrid** (`KEELSIGN_POLICY_HYBRID` with MCUboot's own Ed25519 signature,
+  `hybrid-build`): the MCUboot image needs 102,536 B and does not link into the 64 KB
+  boot partition (the linker reports `FLASH` overflowed by 37,000 bytes): MCUboot's own
+  Ed25519 code instead of ECDSA, plus keelsign's `ed25519` feature (58,408 B of
+  `libkeelsign.a` for `thumbv7em-none-eabi`). The sample therefore only compiles the
+  hybrid hook and library in CI; a hybrid bootloader needs a boot partition of at
+  least 104 KB.
+
+Reproduce (in the workspace of `scripts/zephyr-setup.sh`, [mcuboot.md](mcuboot.md#setup)):
+
+```sh
+scripts/zephyr_sample_ci.sh setup-key build stock-build sizes
+```
+
+The last step prints the table above. The ignored repo-check
+`repo_checks::mcuboot::zephyr_sample_sizes_match_recorded_table` runs the same steps and
+compares every cell.
 
 ## RAM/flash budget (SHA-47)
 
@@ -1001,14 +1056,14 @@ bootloader linking it gains ([C static library](#c-static-library-sha-60), `.tex
 
 | Target | Features | Total |
 |---|---|---|
-| `thumbv7em-none-eabihf` | (none) | 16,632 B |
-| `thumbv7em-none-eabihf` | `ed25519` | 57,780 B |
-| `thumbv7em-none-eabihf` | `ml-dsa` | 33,452 B |
-| `thumbv7em-none-eabihf` | `ed25519,ml-dsa` | 74,594 B |
-| `thumbv8m.main-none-eabihf` | (none) | 16,630 B |
-| `thumbv8m.main-none-eabihf` | `ed25519` | 57,140 B |
-| `thumbv8m.main-none-eabihf` | `ml-dsa` | 33,446 B |
-| `thumbv8m.main-none-eabihf` | `ed25519,ml-dsa` | 73,950 B |
+| `thumbv7em-none-eabihf` | (none) | 17,304 B |
+| `thumbv7em-none-eabihf` | `ed25519` | 58,408 B |
+| `thumbv7em-none-eabihf` | `ml-dsa` | 34,134 B |
+| `thumbv7em-none-eabihf` | `ed25519,ml-dsa` | 75,188 B |
+| `thumbv8m.main-none-eabihf` | (none) | 17,298 B |
+| `thumbv8m.main-none-eabihf` | `ed25519` | 57,740 B |
+| `thumbv8m.main-none-eabihf` | `ml-dsa` | 34,132 B |
+| `thumbv8m.main-none-eabihf` | `ed25519,ml-dsa` | 74,524 B |
 
 ## Recorded figures (SHA-275)
 

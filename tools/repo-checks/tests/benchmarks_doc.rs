@@ -10,7 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-const REQUIRED_HEADINGS: [&str; 18] = [
+const REQUIRED_HEADINGS: [&str; 19] = [
     "# ML-DSA verify benchmarks (SHA-34)",
     "## Method",
     "## Prerequisites",
@@ -27,6 +27,7 @@ const REQUIRED_HEADINGS: [&str; 18] = [
     "## Decision",
     "## Follow-ups",
     "## C static library (SHA-60)",
+    "## MCUboot with keelsign (SHA-62)",
     "## RAM/flash budget (SHA-47)",
     "## Recorded figures (SHA-275)",
 ];
@@ -3116,4 +3117,75 @@ fn budget_table_matches_source_tables() {
         !doc.contains("pending (SHA-69)"),
         "docs/benchmarks.md: SHA-69 measures the hybrid verify; its cells are `{PENDING}`"
     );
+}
+
+/// SHA-62 AC4: docs/benchmarks.md records MCUboot's flash and static RAM without and with
+/// keelsign: a stock / with keelsign / Δ table whose Δ row is the difference, the
+/// compiler (from the ELFs), the pins, the boot partition and `MAIN_STACK_SIZE` of both
+/// builds, and the command that reproduces it. The figures themselves are checked
+/// against a fresh build by `repo_checks::mcuboot::zephyr_sample_sizes_match_recorded_table`
+/// (ignored: needs the Zephyr workspace).
+#[test]
+fn mcuboot_delta_table_is_well_formed() {
+    let doc = doc();
+    let mcuboot = section(&doc, "## MCUboot with keelsign (SHA-62)");
+    let table = table_with_header(
+        mcuboot,
+        "| MCUboot image | Flash | Static RAM | MAIN_STACK_SIZE | Compiler |",
+    )
+    .expect("the stock / with keelsign / Δ table");
+    let rows = &table[1..];
+    assert_eq!(rows.len(), 3, "stock, with keelsign, Δ: {rows:?}");
+    let labels: Vec<&str> = rows.iter().map(|r| r[0].as_str()).collect();
+    assert_eq!(labels, ["stock", "with keelsign", "Δ"]);
+    let bytes = |row: &[String], col: usize| {
+        parse_bytes(&row[col]).unwrap_or_else(|| panic!("`{}` is not a byte count", row[col]))
+    };
+    for col in [1, 2] {
+        let stock = bytes(&rows[0], col);
+        let keelsign = bytes(&rows[1], col);
+        let delta: i64 = rows[2][col]
+            .trim_end_matches(" B")
+            .replace([',', '+'], "")
+            .parse()
+            .unwrap_or_else(|_| panic!("Δ `{}`", rows[2][col]));
+        assert_eq!(
+            delta,
+            keelsign as i64 - stock as i64,
+            "Δ column {col} is the difference"
+        );
+        assert!(rows[2][col].starts_with(['+', '-']), "Δ cells carry a sign");
+    }
+    assert!(
+        bytes(&rows[1], 1) > bytes(&rows[0], 1),
+        "keelsign adds flash"
+    );
+    for row in &rows[..2] {
+        assert_eq!(row[3], "16384", "MAIN_STACK_SIZE of both builds");
+        assert_eq!(
+            row[4], "GCC: (Zephyr SDK 1.0.1) 14.3.0",
+            "compiler of both builds"
+        );
+    }
+    // The boot partition: the keelsign MCUboot fits the sample's 64 KB.
+    assert!(bytes(&rows[1], 1) <= 64 * 1024);
+    for needle in [
+        repo_checks::ZEPHYR_PIN,
+        repo_checks::MCUBOOT_PIN,
+        "Zephyr SDK 1.0.1",
+        "arm-zephyr-eabi-gcc",
+        "14.3.0",
+        "`thumbv7em-none-eabi`",
+        "`CONFIG_MAIN_STACK_SIZE=16384`",
+        "`CONFIG_MAIN_STACK_SIZE=10240`",
+        "64 KB",
+        "scripts/zephyr_sample_ci.sh setup-key build stock-build sizes",
+        "scripts/mcuboot_sizes.py",
+        "zephyr_sample_sizes_match_recorded_table",
+    ] {
+        assert!(
+            mcuboot.contains(needle),
+            "## MCUboot with keelsign (SHA-62) must record `{needle}`"
+        );
+    }
 }

@@ -1,0 +1,48 @@
+# keelsign sysbuild options (SHA-62, docs/mcuboot.md#kconfig-reference); set them in
+# the application's sysbuild.conf as SB_CONFIG_KEELSIGN*.
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+menuconfig KEELSIGN
+	bool "keelsign post-quantum image check in MCUboot"
+	depends on BOOTLOADER_MCUBOOT
+	help
+	  Turns on keelsign in the mcuboot image (CONFIG_KEELSIGN,
+	  CONFIG_BOOT_IMAGE_ACCESS_HOOKS=y, CONFIG_MCUBOOT_USE_TLV_ALLOW_LIST=n, the
+	  public key exported from KEELSIGN_SIGNATURE_KEY_FILE) and keelsign signing in
+	  the application image (CONFIG_KEELSIGN_SIGN_IMAGE). MCUboot's own signature
+	  (BOOT_SIGNATURE_TYPE_*) stays as configured.
+
+if KEELSIGN
+
+config KEELSIGN_SIGNATURE_KEY_FILE
+	string "keelsign LMS/HSS private key file"
+	default "keelsign-dev.pem"
+	help
+	  Made with `keelsign keygen --alg lms-sha256-m32-h10 --out <file>`, its .state and
+	  .journal next to it. Relative paths are relative to the application directory.
+	  Its public key (`keelsign pubkey`) is what the bootloader trusts.
+
+choice KEELSIGN_POLICY
+	prompt "keelsign verification policy"
+	default KEELSIGN_POLICY_PQ_ONLY
+
+config KEELSIGN_POLICY_PQ_ONLY
+	bool "Post-quantum only (LMS/HSS)"
+
+config KEELSIGN_POLICY_HYBRID
+	bool "Hybrid (MCUboot's Ed25519 and keelsign's LMS/HSS)"
+	depends on BOOT_SIGNATURE_TYPE_ED25519
+	help
+	  keelsign also checks MCUboot's Ed25519 pair, against the public key of
+	  BOOT_SIGNATURE_KEY_FILE.
+
+endchoice
+
+config KEELSIGN_LIBRARY
+	string "Prebuilt libkeelsign.a for the mcuboot image (empty: cargo build)"
+
+config KEELSIGN_CLI
+	string "keelsign CLI (empty: cargo build)"
+
+endif # KEELSIGN

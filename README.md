@@ -5,8 +5,9 @@ with LMS/HSS or ML-DSA (optionally hybrid with Ed25519) and verify it on the dev
 keeping MCUboot's image format so your existing update pipeline keeps working.
 
 **Status: pre-release.** Nothing is on crates.io yet; build from this repository. The
-host CLI, the `no_std` verifier, the embassy-boot adapter and the C library are tested,
-but their APIs are unstable and the MCUboot glue around the C library is not written yet.
+host CLI, the `no_std` verifier, the embassy-boot adapter, the C library and the MCUboot
+hook are tested (the hook on the host and in CI builds, not yet on a board), but their
+APIs are unstable.
 
 ## Quickstart
 
@@ -51,15 +52,15 @@ keelsign inspect app.keelsign.bin                                 # shows the le
 | `keelsign` | Host CLI: `keygen`, `pubkey`, `sign`, `inspect`, `verify` |
 | `keelsign-verify` | `no_std` verifier: parses the image, hashes it in chunks, checks the signatures the policy requires |
 | `keelsign-embassy` | embassy-boot adapter: verifies the DFU slot before marking it for swap ([docs/embassy.md](docs/embassy.md)) |
-| `keelsign-ffi` | `libkeelsign.a` and a C header for MCUboot's custom-crypto hook ([docs/ffi.md](docs/ffi.md)) |
+| `keelsign-ffi` | `libkeelsign.a` and a C header, behind MCUboot's image-check hook and Zephyr module ([docs/mcuboot.md](docs/mcuboot.md)) |
 
 ## Documentation
 
 - [docs/keys.md](docs/keys.md), [docs/lms.md](docs/lms.md), [docs/signing.md](docs/signing.md),
   [docs/verify.md](docs/verify.md): the CLI, key files, LMS/HSS state and exit codes.
 - [docs/image-format.md](docs/image-format.md), [docs/policy.md](docs/policy.md),
-  [docs/embassy.md](docs/embassy.md), [docs/ffi.md](docs/ffi.md): the image format, the
-  policies, and the verifier from embassy-boot and from C.
+  [docs/embassy.md](docs/embassy.md), [docs/ffi.md](docs/ffi.md), [docs/mcuboot.md](docs/mcuboot.md):
+  the image format, the policies, and the verifier from embassy-boot, C and MCUboot.
 - [docs/setup.md](docs/setup.md), [docs/hardware.md](docs/hardware.md),
   [docs/benchmarks.md](docs/benchmarks.md), [docs/release.md](docs/release.md),
   [docs/on-target-tests.md](docs/on-target-tests.md): toolchain, boards, measurements,

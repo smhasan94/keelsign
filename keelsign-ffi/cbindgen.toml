@@ -34,6 +34,7 @@ include = [
     "keelsign_policy_t",
     "keelsign_key_t",
     "keelsign_result_t",
+    "keelsign_reader_t",
 ]
 
 [parse]

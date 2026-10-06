@@ -243,6 +243,11 @@ fn header_status_codes_match_the_rust_enum() {
         "const struct keelsign_key_t *keys,",
         "struct keelsign_result_t *out);",
         "keelsign_status_t keelsign_digest(const uint8_t *image, size_t len, uint8_t *out_digest);",
+        // SHA-62: the callback reader.
+        "typedef struct keelsign_reader_t {\n  // Passed unchanged to every `read` call.\n  void *ctx;",
+        "  uint32_t len;",
+        "  int32_t (*read)(void *ctx, uint32_t offset, uint8_t *buf, size_t len);\n} keelsign_reader_t;",
+        "keelsign_status_t keelsign_verify_cb(const struct keelsign_reader_t *reader,",
     ] {
         assert!(header.contains(decl), "keelsign.h must declare `{decl}`");
     }
@@ -274,6 +279,11 @@ fn header_documents_the_pointer_contract_and_build_command() {
         "`len > UINT32_MAX` (`KEELSIGN_ERR_IMAGE_TOO_LARGE`)",
         "`len == 0` gives\n// `KEELSIGN_ERR_PARSE_TRUNCATED`",
         "pointer identity",
+        // SHA-62: keelsign_verify_cb's reader contract.
+        "`reader` is non-NULL and points to one readable `keelsign_reader_t` (any\n//   alignment)",
+        "`reader->read` is called only for ranges inside `[0, reader->len)`",
+        "A non-zero\n// return fails the call with `KEELSIGN_ERR_READ_OTHER`.",
+        "`reader->len == 0` gives `KEELSIGN_ERR_PARSE_TRUNCATED` without calling `read`.",
     ] {
         assert!(
             header.contains(needle),
@@ -282,7 +292,7 @@ fn header_documents_the_pointer_contract_and_build_command() {
     }
     assert_eq!(
         header.matches("// # Safety").count(),
-        2,
+        3,
         "one Safety section per function"
     );
 }
@@ -996,7 +1006,9 @@ fn c_harness_tampered_wrong_key_and_null_inputs_return_documented_codes() {
             );
         }
         // NULL image, NULL keys, NULL digest output, zero length, policy 7, algorithm 9,
-        // nine keys, a duplicate key and a short key: 1,1,1,31,3,4,5,6,7.
+        // nine keys, a duplicate key and a short key: 1,1,1,31,3,4,5,6,7; then (SHA-62)
+        // keelsign_verify_cb with a NULL reader, a NULL read function, a failing read
+        // function and a zero-length reader: 1,1,42,31.
         let line = run_harness(
             build,
             &[
@@ -1005,8 +1017,58 @@ fn c_harness_tampered_wrong_key_and_null_inputs_return_documented_codes() {
                 lms_key.split_once(':').expect("ALG:FILE").1.to_owned(),
             ],
         );
-        assert_eq!(line, "status=1,1,1,31,3,4,5,6,7", "{} build", build.name());
+        assert_eq!(
+            line,
+            "status=1,1,1,31,3,4,5,6,7,1,1,42,31",
+            "{} build",
+            build.name()
+        );
     }
+}
+
+/// SHA-62 callback reader: `harness verify-cb` (the image read from the open file by a
+/// `keelsign_reader_t` callback) prints exactly the line `harness verify` prints for
+/// every cell of the policy matrix (57 images × 3 policies × 2 builds), the version,
+/// image length and digest included.
+#[test]
+fn c_harness_verify_cb_matches_verify_on_every_fixture() {
+    let ed = key_arg("ed25519", "cb-ed25519-test-key.raw", &ED25519_TEST_KEY);
+    let mut cells = 0;
+    for (i, case) in cases().iter().enumerate() {
+        let mut keys = Vec::new();
+        if case.algorithm.is_some() {
+            keys.push(key_arg(
+                alg_name(case),
+                &format!("cb-case-{i}.raw"),
+                case.public_key,
+            ));
+        }
+        keys.push(ed.clone());
+        for build in Build::ALL {
+            for &policy in Policy::ALL {
+                let args = |cmd: &str| {
+                    let mut args = vec![
+                        cmd.to_owned(),
+                        policy_arg(policy).to_owned(),
+                        image_path(case.name),
+                    ];
+                    args.extend(keys.iter().cloned());
+                    args
+                };
+                let direct = run_harness(build, &args("verify"));
+                let via_cb = run_harness(build, &args("verify-cb"));
+                assert_eq!(
+                    via_cb,
+                    direct,
+                    "{} under {policy:?} ({} build)",
+                    case.name,
+                    build.name()
+                );
+                cells += 1;
+            }
+        }
+    }
+    assert_eq!(cells, 57 * 3 * 2);
 }
 
 // ---- nm check (TP3) and cross builds (TP2) ----------------------------------------------
@@ -1091,10 +1153,10 @@ const PANIC_STRINGS: [&str; 5] = [
 ];
 
 /// TP3 (host half; the thumb half is `staticlib_sizes.py --check` in the `verify-cross`
-/// job): the host `libkeelsign.a` of both builds exports exactly `keelsign_verify` and
-/// `keelsign_digest`, has no formatting symbol, no panic symbol but the allowlisted
-/// libcore trap funnels, and no panic message text. The literal "no `panic_fmt`" is not
-/// reachable on stable (docs/ffi.md#nm-check).
+/// job): the host `libkeelsign.a` of both builds exports exactly `keelsign_verify`,
+/// `keelsign_verify_cb` (SHA-62) and `keelsign_digest`, has no formatting symbol, no
+/// panic symbol but the allowlisted libcore trap funnels, and no panic message text. The
+/// literal "no `panic_fmt`" is not reachable on stable (docs/ffi.md#nm-check).
 #[test]
 fn staticlib_has_no_formatting_symbols_or_panic_strings() {
     for build in Build::ALL {
@@ -1158,7 +1220,7 @@ fn staticlib_has_no_formatting_symbols_or_panic_strings() {
         exports.sort();
         assert_eq!(
             exports,
-            ["keelsign_digest", "keelsign_verify"],
+            ["keelsign_digest", "keelsign_verify", "keelsign_verify_cb"],
             "{} build: exported functions",
             build.name()
         );

@@ -81,6 +81,22 @@ rustup component add --toolchain nightly-2026-09-29 miri rust-src
   itself when it is unset). AddressSanitizer hangs on macOS, so the repo-check uses UBSan
   alone there and ASan + UBSan on Linux; `KEELSIGN_FFI_SANITIZE` overrides it.
 
+### Zephyr and MCUboot (SHA-62)
+
+Only needed for the MCUboot integration ([mcuboot.md](mcuboot.md)): a west workspace
+around the repository with Zephyr v4.4.2, MCUboot v2.4.0, west 1.5.0, imgtool 2.4.0 and
+the Zephyr SDK 1.0.1, all made inside the workspace directory by
+`scripts/zephyr-setup.sh` ([mcuboot.md](mcuboot.md#setup)), plus the soft-float Rust
+target the MCUboot image links:
+
+```sh
+rustup target add thumbv7em-none-eabi
+```
+
+The host hook harness (`cargo test -p repo-checks --locked --test mcuboot -- --ignored
+hook_`) needs only a C compiler and either the network (it clones MCUboot at the pin
+into `target/`) or `KEELSIGN_MCUBOOT_DIR`; the `zephyr_*` repo-checks need the workspace.
+
 ### Dependency audit (cargo-deny, SHA-47)
 
 CI checks the root workspace, with all features of every member enabled (so
@@ -281,7 +297,9 @@ three-identical-runs procedure are in [on-target-tests.md](on-target-tests.md) (
   `cargo doc --no-deps -p keelsign-verify` with `RUSTDOCFLAGS=-D warnings` in all four
   feature states (none, `ml-dsa`, `ed25519`, `ed25519,ml-dsa`). Since SHA-303 also
   `cargo doc --workspace --no-deps --exclude keelsign-ffi` plus `cargo doc -p keelsign-ffi`,
-  both with `RUSTDOCFLAGS=-D warnings`.
+  both with `RUSTDOCFLAGS=-D warnings`. Since SHA-62 also the MCUboot hook harness
+  and its v2.5.0-rc1 compile check (`--test mcuboot -- --ignored hook_`, network: it
+  clones MCUboot v2.4.0 and v2.5.0-rc1).
 - `verify-cross`: `keelsign-verify`, (SHA-55) `keelsign-embassy` with its board module,
   and (SHA-60) `keelsign-ffi`'s `libkeelsign.a` with the `staticlib_sizes.py --check`
   symbol rules, for both targets with every feature state.
@@ -295,6 +313,14 @@ three-identical-runs procedure are in [on-target-tests.md](on-target-tests.md) (
   `cargo fmt --check`, `cargo clippy --locked --target <triple> --all-targets -- -D warnings`,
   `cargo test --no-run --release --locked --target <triple>` (builds the on-target test
   binary without running it) and `cargo build --release --locked --target <triple> --bins`.
+
+- `zephyr-sample` (SHA-62): on a fresh runner, `scripts/zephyr-setup.sh` (SDK and west
+  projects cached on the pins) then `scripts/zephyr_sample_ci.sh all`: builds MCUboot with
+  keelsign and the keelsign-signed `samples/keelsign_hello` for `nrf52840dk/nrf52840`,
+  checks the TLVs, configuration and both signatures, makes the on-board variants, builds
+  MCUboot with Ed25519 and the PQ-only policy (it must link into the 64 KB boot
+  partition), compiles the hybrid policy, checks that a build with MCUboot's TLV allow
+  list is refused, and prints the MCUboot size table ([mcuboot.md](mcuboot.md)).
 
 `.github/workflows/miri.yml` (SHA-327) runs `keelsign-ffi`'s pointer-contract tests under
 Miri on nightly-2026-09-29, in parallel with `ci`: jobs `miri keelsign-ffi (features "")`
