@@ -27,7 +27,7 @@
 # turned into a west workspace by accident. The SDK's setup.sh is not run: nothing is
 # registered in ~/.cmake; builds find the SDK through ZEPHYR_SDK_INSTALL_DIR.
 #
-# Needs: bash, git, curl, tar with xz, python3 >= 3.10, cmake >= 3.20, ninja; Rust with
+# Needs: bash, git, curl, tar with xz, python3 >= 3.12, cmake >= 3.20, ninja; Rust with
 # the thumbv7em-none-eabi target for the sample build (`rustup target add
 # thumbv7em-none-eabi`). Hosts: macOS arm64, Linux x86_64.
 #
@@ -93,7 +93,7 @@ done
 for tool in git curl tar python3 cmake ninja; do
   command -v "$tool" >/dev/null 2>&1 || die "$tool is not on PATH"
 done
-python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' || die "python3 >= 3.10 is needed"
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 12))' || die "python3 >= 3.12 is needed (Zephyr v4.4.2)"
 
 # ---- west (venv) ---------------------------------------------------------------------
 venv="$topdir/.venv"

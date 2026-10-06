@@ -95,7 +95,7 @@ git clone https://github.com/smhasan94/keelsign
 keelsign/scripts/zephyr-setup.sh
 ```
 
-It needs git, curl, tar with xz, python3 3.10 or newer, cmake 3.20 or newer and ninja
+It needs git, curl, tar with xz, python3 3.12 or newer, cmake 3.20 or newer and ninja
 (macOS arm64 or Linux x86_64 hosts), takes a few minutes and about 2 GB, and can be
 re-run (each step is skipped when done). Rust needs the soft-float Cortex-M4 target:
 
