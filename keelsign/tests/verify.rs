@@ -7,10 +7,10 @@ mod common;
 use common::*;
 use keelsign::keys::{KeyIdentity, PublicKey};
 use keelsign::verify::{ExitClass, exit_class};
-use keelsign_verify::image::Image;
+use keelsign_verify::image::{IMAGE_TLV_KEYHASH, Image};
 use keelsign_verify::{
-    Algorithm, DEFAULT_CHUNK_LEN, DefaultBackend, Ed25519Key, Error, ImageError, Policy,
-    TrustedKey, TrustedKeys, VerifiedImage,
+    Algorithm, DEFAULT_CHUNK_LEN, DefaultBackend, Ed25519Error, Ed25519Key, Error, ImageError,
+    Policy, TrustedKey, TrustedKeys, VerifiedImage,
 };
 use predicates::prelude::*;
 use std::path::{Path, PathBuf};
@@ -850,4 +850,71 @@ fn verify_output_lines_are_stable_and_name_the_keys() {
         .code(0)
         .stdout(expected)
         .stderr(predicate::str::is_empty());
+}
+
+/// SHA-302 AC1 / TP1: an Ed25519 `--pub` key that is not a curve point is a key-file
+/// error (exit 5, naming the file), not "not verified" (exit 9), even on an image whose
+/// KEYHASH is that key's, where the device itself answers `Ed25519(InvalidPublicKey)`.
+#[test]
+fn invalid_ed25519_pub_whose_keyhash_the_image_carries_exits_5_not_9() {
+    let dir = scratch("verify", "invalid_ed25519_pub");
+    // y = 2 is not on edwards25519.
+    let mut not_a_point = [0u8; 32];
+    not_a_point[0] = 2;
+    let pem = write_pub(&dir, "not-a-point", "Ed25519", &not_a_point, true);
+    let der = write_pub(&dir, "not-a-point", "Ed25519", &not_a_point, false);
+
+    // The imgtool image with its (unprotected, so outside the digest) KEYHASH replaced by
+    // the invalid key's: the key "matches" the image.
+    let original = fixture("mcuboot-ed25519.bin");
+    let mut patched = original.clone();
+    {
+        let image = Image::parse(&original).expect("parse");
+        let keyhash = unprotected_value(&image, IMAGE_TLV_KEYHASH);
+        let at = value_offset(&original, keyhash);
+        patched[at..at + 32].copy_from_slice(&keelsign_verify::keyhash_of(&not_a_point));
+    }
+    let matches = write(&dir, "keyhash-matches.bin", &patched);
+
+    // This is the ticket's scenario: the device refuses the key itself.
+    assert_eq!(
+        verify(&patched, None, Some(not_a_point), Policy::ClassicalOnly).err(),
+        Some(Error::Ed25519(Ed25519Error::InvalidPublicKey))
+    );
+
+    // The CLI refuses the key when reading it: exit 5, naming the file.
+    let refused = |key: &Path| {
+        format!(
+            "error: {}: corrupt or invalid key file: Ed25519 public key is not a point on \
+             the curve",
+            key.display()
+        )
+    };
+    for key in [&pem, &der] {
+        for image in [&matches, &fixture_path("mcuboot-ed25519.bin")] {
+            verify_cmd(&[&"--pub", key, &"--policy", &"classical", image])
+                .code(5)
+                .stdout(predicate::str::is_empty())
+                .stderr(predicate::str::starts_with(refused(key)))
+                .stderr(predicate::str::contains("not a point"));
+        }
+    }
+
+    // Every --pub is read and checked, even one the policy would not use.
+    let (m44_alg, m44_key) = fixture_pq_key(&manifest_entry("keelsign-mldsa44.bin"));
+    let m44 = write_pub(&dir, "m44", &m44_alg, &m44_key, true);
+    let pq_image = fixture_path("keelsign-mldsa44.bin");
+    verify_cmd(&[&"--pub", &m44, &"--policy", &"pq", &pq_image]).code(0);
+    verify_cmd(&[
+        &"--pub",
+        &m44,
+        &"--pub",
+        &pem,
+        &"--policy",
+        &"pq",
+        &pq_image,
+    ])
+    .code(5)
+    .stdout(predicate::str::is_empty())
+    .stderr(predicate::str::starts_with(refused(&pem)));
 }
