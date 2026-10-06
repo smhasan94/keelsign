@@ -11,8 +11,8 @@
 #   build               west build of MCUboot + the keelsign-signed application (build/);
 #                       checks the outputs, their TLVs (keelsign 0x4BA0/0x4BA3 and
 #                       imgtool's ECDSA 0x22), MCUboot's .config, and both signatures
-#   variants            tampered and wrong-key images for the on-board checks
-#                       (build/variants/, scripts/mcuboot_variants.py)
+#   variants            tampered, wrong-key and bad-ECDSA images for the on-board
+#                       checks (build/variants/, scripts/mcuboot_variants.py)
 #   hybrid-build        MCUboot with Ed25519 + KEELSIGN_POLICY_HYBRID: configure, then
 #                       compile the hook and libkeelsign.a (ed25519) (build-hybrid/;
 #                       compile-only: it does not fit the 64 KB boot partition)
@@ -108,7 +108,12 @@ step_variants() {
     fail "the wrong-key image verified"
   fi
   case "$out" in *"key ID is not in the trusted key set"*) ;; *) fail "wrong-key image: unexpected error: $out" ;; esac
-  pass "variants: tampered and wrong-key images rejected by keelsign verify"
+  target/release/keelsign verify --pub build/keelsign.pub.pem build/variants/bad-ecdsa.bin >/dev/null ||
+    fail "keelsign rejected the bad-ECDSA image (its signature does not cover the ECDSA TLV)"
+  if imgtool verify --key ../bootloader/mcuboot/root-ec-p256.pem build/variants/bad-ecdsa.bin >/dev/null 2>&1; then
+    fail "imgtool verified the bad-ECDSA image"
+  fi
+  pass "variants: tampered and wrong-key images rejected by keelsign verify; bad-ECDSA image passes keelsign, fails imgtool"
 }
 
 step_hybrid_build() {

@@ -934,3 +934,153 @@ fn zephyr_setup_script_is_pinned_and_guarded() {
         "nothing outside the workspace"
     );
 }
+
+// ---- docs/mcuboot.md ----------------------------------------------------------------------
+
+/// The lines of every ```sh block of `markdown` (indented blocks too), each line trimmed.
+fn doc_sh_blocks(markdown: &str) -> Vec<Vec<String>> {
+    let mut blocks = Vec::new();
+    let mut current: Option<Vec<String>> = None;
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        match (&mut current, trimmed) {
+            (None, "```sh") => current = Some(Vec::new()),
+            (Some(_), "```") => blocks.extend(current.take()),
+            (Some(block), _) => block.push(trimmed.to_owned()),
+            (None, _) => {}
+        }
+    }
+    blocks
+}
+
+/// The `# doc: NAME` ... `# end doc` blocks of a script: (NAME, trimmed lines).
+fn script_doc_blocks(script: &str) -> Vec<(String, Vec<String>)> {
+    let mut blocks = Vec::new();
+    let mut current: Option<(String, Vec<String>)> = None;
+    for line in script.lines().map(str::trim) {
+        if let Some(name) = line.strip_prefix("# doc: ") {
+            assert!(current.is_none(), "nested `# doc:` block {name}");
+            current = Some((name.to_owned(), Vec::new()));
+        } else if line == "# end doc" {
+            blocks.push(current.take().expect("`# end doc` without `# doc:`"));
+        } else if let Some((_, lines)) = &mut current {
+            lines.push(line.to_owned());
+        }
+    }
+    assert!(current.is_none(), "unterminated `# doc:` block");
+    blocks
+}
+
+/// TP3: a reader following docs/mcuboot.md runs exactly what CI and the repo-checks run:
+/// the setup commands are the ones `scripts/zephyr-setup.sh` documents, every command
+/// block of `scripts/zephyr_sample_ci.sh` is a `sh` block of the doc, every step is named
+/// there, and the on-board procedures P1-P4 are marked NEEDS-HARDWARE.
+#[test]
+fn doc_commands_match_scripts() {
+    let doc = read("docs/mcuboot.md");
+    let blocks = doc_sh_blocks(&doc);
+
+    let setup = [
+        "mkdir keelsign-ws && cd keelsign-ws",
+        "git clone https://github.com/smhasan94/keelsign",
+        "keelsign/scripts/zephyr-setup.sh",
+    ];
+    assert!(
+        blocks.iter().any(|b| b == &setup),
+        "docs/mcuboot.md must have the setup block {setup:?}"
+    );
+    for file in ["scripts/zephyr-setup.sh", "west.yml"] {
+        let text = read(file);
+        let header: Vec<&str> = text
+            .lines()
+            .filter_map(|l| l.strip_prefix('#'))
+            .map(str::trim)
+            .collect();
+        assert!(
+            header.windows(3).any(|w| w == setup),
+            "{file} must document the setup commands {setup:?}"
+        );
+    }
+    assert!(
+        blocks
+            .iter()
+            .any(|b| b == &["rustup target add thumbv7em-none-eabi"])
+    );
+
+    let script = read("scripts/zephyr_sample_ci.sh");
+    let script_blocks = script_doc_blocks(&script);
+    let names: Vec<&str> = script_blocks.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "setup-key",
+            "build",
+            "verify",
+            "variants",
+            "hybrid-build",
+            "allow-list-refused",
+            "stock-build",
+            "sizes"
+        ]
+    );
+    for (name, lines) in &script_blocks {
+        assert!(!lines.is_empty(), "empty `# doc: {name}` block");
+        assert!(
+            blocks.iter().any(|b| b == lines),
+            "docs/mcuboot.md has no `sh` block equal to the `{name}` commands of \
+             scripts/zephyr_sample_ci.sh:\n{}",
+            lines.join("\n")
+        );
+    }
+    let all = script
+        .lines()
+        .find(|l| l.trim_start().starts_with("all) set -- "))
+        .expect("the `all` step list");
+    for step in all
+        .trim()
+        .trim_start_matches("all) set -- ")
+        .trim_end_matches(" ;;")
+        .split(' ')
+    {
+        assert!(
+            doc.contains(&format!("`{step}`")),
+            "docs/mcuboot.md must name the step `{step}`"
+        );
+    }
+
+    for heading in [
+        "### P1: good image boots (NEEDS-HARDWARE)",
+        "### P2: tampered image rejected (NEEDS-HARDWARE)",
+        "### P3: wrong key rejected (NEEDS-HARDWARE)",
+        "### P4: classical fallback (NEEDS-HARDWARE)",
+    ] {
+        assert!(
+            doc.lines().any(|l| l == heading),
+            "docs/mcuboot.md lacks `{heading}`"
+        );
+    }
+    let flat = doc.split_whitespace().collect::<Vec<_>>().join(" ");
+    for needle in [
+        "keelsign: image 0 slot 0 verified (pq key 0, ed25519 key 4294967295)",
+        "E: keelsign: image 0 slot 0 rejected: status 70",
+        "rejected: status 15",
+        "rejected: status 13",
+        "hello from keelsign_hello",
+        "build/variants/tampered.hex",
+        "build/variants/wrong-key.hex",
+        "build/variants/bad-ecdsa.hex",
+        "probe-rs download --chip nRF52840_xxAA --binary-format hex build/mcuboot/zephyr/zephyr.hex",
+        "probe-rs download --chip nRF52840_xxAA --binary-format hex build/keelsign_hello/zephyr/zephyr.signed.keelsign.hex",
+        "MCUBOOT_USE_CUSTOM_CRYPTO",
+        "boot_image_check_hook",
+        repo_checks::ZEPHYR_PIN,
+        repo_checks::MCUBOOT_PIN,
+        repo_checks::MCUBOOT_RC1_PIN,
+        "SHA-328",
+    ] {
+        assert!(
+            flat.contains(needle),
+            "docs/mcuboot.md must mention `{needle}`"
+        );
+    }
+}
